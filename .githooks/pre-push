@@ -1,0 +1,53 @@
+#!/usr/bin/env sh
+set -eu
+
+# Reject pushing version tags that don't match pyproject.toml
+#
+# Expected tag format: vX.Y.Z (or X.Y.Z)
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$repo_root" ]; then
+  exit 0
+fi
+
+pyproject="$repo_root/pyproject.toml"
+if [ ! -f "$pyproject" ]; then
+  exit 0
+fi
+
+pkg_version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' "$pyproject" | head -n 1)"
+if [ -z "${pkg_version:-}" ]; then
+  echo "ERROR: Unable to read package version from $pyproject (expected: version = \"X.Y.Z\")." >&2
+  exit 1
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_ref" in
+    refs/tags/*)
+      tag="${local_ref#refs/tags/}"
+      case "$tag" in
+        v*) tag_version="${tag#v}" ;;
+        *) tag_version="$tag" ;;
+      esac
+
+      case "$tag_version" in
+        ""|*[!0-9.]*)
+          # Ignore non-version-ish tags (e.g. "docs", "nightly", etc.)
+          continue
+          ;;
+      esac
+
+      if [ "$tag_version" != "$pkg_version" ]; then
+        echo "ERROR: Refusing to push tag '$tag' (version $tag_version) because pyproject.toml version is '$pkg_version'." >&2
+        echo "Fix one of these and retry:" >&2
+        echo "  - update $pyproject version" >&2
+        echo "  - recreate the tag to match the version (e.g. v$pkg_version)" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+exit 0
+
+
