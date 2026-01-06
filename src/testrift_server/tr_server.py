@@ -227,6 +227,29 @@ def _get_running_server_info(port: int) -> dict | None:
         # Connection refused / no listener / timeout -> treat as not running.
         return None
 
+
+def _request_running_server_shutdown(port: int, running_hash: str) -> bool:
+    """Ask a running TestRift server on localhost:port to shut down.
+
+    Returns True if the request returned HTTP 200, False otherwise.
+    """
+    url = f"http://127.0.0.1:{port}/api/admin/shutdown"
+    req = urllib.request.Request(
+        url,
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-TestRift-Config-Hash": running_hash,
+        },
+        data=json.dumps({"config_hash": running_hash}).encode("utf-8"),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
 # --- Global state ---
 ui_clients = set()  # UI WebSocket clients for live updates
 
@@ -3182,6 +3205,33 @@ async def api_server_info_handler(request):
     })
 
 
+async def api_admin_shutdown_handler(request):
+    """Shutdown endpoint used for local auto-restart flows.
+
+    This is intentionally restricted to localhost callers and requires the running config_hash.
+    """
+    remote = request.remote or ""
+    if remote not in ("127.0.0.1", "::1", "localhost"):
+        return web.json_response({"success": False, "error": "forbidden"}, status=403)
+
+    expected = _testrift_config_hash(CONFIG)
+    provided = request.headers.get("X-TestRift-Config-Hash")
+    if not provided:
+        try:
+            body = await request.json()
+            provided = body.get("config_hash")
+        except Exception:
+            provided = None
+
+    if provided != expected:
+        return web.json_response({"success": False, "error": "config_hash mismatch"}, status=403)
+
+    # Respond first, then hard-exit quickly to ensure the port is released even if the loop is busy.
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.2, lambda: os._exit(0))
+    return web.json_response({"success": True})
+
+
 # --- Main app setup ---
 
 app = web.Application()
@@ -3219,6 +3269,7 @@ routes = [
     web.get("/api/run-hover-history/{group_hash}", api_run_hover_history_handler),
     web.post("/api/migrate-data", api_migrate_data_handler),
     web.get("/api/server-info", api_server_info_handler),
+    web.post("/api/admin/shutdown", api_admin_shutdown_handler),
 ]
 
 # Add attachment routes only if enabled
@@ -3259,6 +3310,15 @@ app.on_startup.append(on_startup)
 app.on_cleanup.append(on_cleanup)
 
 def main(argv=None):
+    parser = argparse.ArgumentParser(prog="testrift-server")
+    parser.add_argument(
+        "--restart-on-config",
+        action="store_true",
+        help="If a server is already running on the configured port with a different config, "
+             "ask it to shut down and then start with the new config.",
+    )
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
     # Determine host based on configuration
     host = "127.0.0.1" if LOCALHOST_ONLY else "0.0.0.0"
 
@@ -3281,7 +3341,25 @@ def main(argv=None):
         print(f"  running config_hash: {running_hash}")
         print(f"  new     config_path: {str(CONFIG_PATH_USED) if CONFIG_PATH_USED else None}")
         print(f"  new     config_hash: {new_hash}")
-        return 2
+        if args.restart_on_config and running_hash:
+            print("Attempting to restart running server with new config...")
+            if not _request_running_server_shutdown(PORT, running_hash):
+                print("ERROR: Failed to request shutdown of running server.")
+                return 2
+
+            # Wait for the running server to exit and release the port.
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                if _get_running_server_info(PORT) is None:
+                    break
+                time.sleep(0.2)
+            else:
+                print("ERROR: Timed out waiting for running server to shut down.")
+                return 2
+
+            print("Old server stopped. Starting new server...")
+        else:
+            return 2
 
     print(f"Starting server on {host}:{PORT}")
     print(f"Default retention days: {DEFAULT_RETENTION_DAYS}")
