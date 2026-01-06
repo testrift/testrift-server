@@ -269,6 +269,10 @@ data:
         await expect(page.locator("text=AT+TEST=1")).to_be_visible()
         await expect(page.locator("text=OK")).to_be_visible()
 
+        # Verify component/channel badges are displayed (scope to table; use .first to avoid strict-mode ambiguity)
+        await expect(page.locator("#msg_table").get_by_text("TestDevice").first).to_be_visible()
+        await expect(page.locator("#msg_table").get_by_text("COM1").first).to_be_visible()
+
         # Verify spacing between badge and message (should have a space)
         # Check that the HTML contains the space between badge and message
         table_html = await page.locator("#msg_table").inner_html()
@@ -344,14 +348,14 @@ data:
         # Wait for stack trace section (note: ID is stackTraceList, not stack_trace_list)
         await page.wait_for_selector("#stackTraceList", timeout=5000)
 
-        # Check that exception message is visible
-        await expect(page.locator("text=Test assertion failed")).to_be_visible()
+        # Check that exception message is visible (scope to stack trace panel to avoid strict-mode ambiguity)
+        await expect(page.locator("#stackTraceList").get_by_text("Test assertion failed")).to_be_visible()
 
-        # Check that exception type is visible
-        await expect(page.locator("text=AssertionException")).to_be_visible()
+        # Check that exception type is visible (scope to stack trace panel)
+        await expect(page.locator("#stackTraceList").get_by_text("NUnit.Framework.AssertionException")).to_be_visible()
 
         # Check that stack trace lines are visible
-        await expect(page.locator("text=at E2ETest.ExceptionDisplay")).to_be_visible()
+        await expect(page.locator("#stackTraceList").get_by_text("at E2ETest.ExceptionDisplay")).to_be_visible()
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
@@ -417,21 +421,13 @@ data:
 
         # The exception card title should show the exception_type when is_error=true
         # Since exception_type is "System.Exception", it should show that (not "Failure")
-        error_title = page.locator(".stack-trace-title:has-text('System.Exception')")
+        # Scope to stack trace panel to avoid matching the log table too.
+        error_title = page.locator("#stackTraceList").locator(".stack-trace-title", has_text="System.Exception")
         await expect(error_title).to_be_visible()
 
         # Should NOT show "Failure" title (since is_error=true)
-        failure_title = page.locator(".stack-trace-title:has-text('Failure')")
+        failure_title = page.locator("#stackTraceList").locator(".stack-trace-title", has_text="Failure")
         await expect(failure_title).not_to_be_visible()
 
         # Verify the exception message is visible
-        await expect(page.locator("text=Unexpected runtime error")).to_be_visible()
-
-    # NOTE: The old monorepo contained an NUnit E2E test here that built and executed the NUnit plugin.
-    # After splitting repos, that test belongs in the NUnit repo (testrift-nunit), not in testrift-server.
-
-        # Verify the messages are displayed
-        await expect(page.locator("text=AT+TEST=1").first).to_be_visible(timeout=10000)
-        await expect(page.locator("text=OK").first).to_be_visible(timeout=10000)
-        await expect(page.locator("text=Status check").first).to_be_visible(timeout=10000)
-
+        await expect(page.locator("#stackTraceList").get_by_text("Unexpected runtime error")).to_be_visible()
