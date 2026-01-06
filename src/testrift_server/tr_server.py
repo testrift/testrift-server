@@ -965,6 +965,7 @@ async def zip_export_handler(request):
 
             # Add each test case log page (static mode via unified template)
             for tc_id, tc in run.test_cases.items():
+                sanitized_tc_id = sanitize_filename(tc_id)
                 log_path = get_case_log_path(run_id, tc_id)
                 if log_path.exists():
                     raw_logs = read_jsonl(log_path)
@@ -998,7 +999,6 @@ async def zip_export_handler(request):
                         live_run=False,
                         server_mode=False
                     )
-                    sanitized_tc_id = sanitize_filename(tc_id)
                     zf.writestr(f"log/{sanitized_tc_id}.html", log_html)
 
                 # Add attachments for this test case
