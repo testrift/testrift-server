@@ -22,6 +22,31 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Verify tag matches VERSION file
+        if: github.ref_type == 'tag'
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          # Remove 'v' prefix if present
+          TAG_VERSION="${TAG_VERSION#v}"
+
+          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
+
+          if [ "$TAG_VERSION" != "$VERSION_FILE" ]; then
+            echo "ERROR: Tag version '$TAG_VERSION' does not match VERSION file '$VERSION_FILE'" >&2
+            exit 1
+          fi
+          echo "✓ Tag version matches VERSION file: $TAG_VERSION"
+
+      - name: Extract version from VERSION file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION file is empty" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Install build tooling
         run: python -m pip install -U pip build
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "testrift-server"
-version = "0.2.1"
+dynamic = ["version"]
 description = "TestRift real-time test run server: live logs, results storage, and web UI for browsing and analysis."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,9 @@ Issues = "https://github.com/testrift/testrift-server/issues"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,0 +1,56 @@
+name: Publish TestRift.Server to NuGet
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches VERSION file
+        if: github.ref_type == 'tag'
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          # Remove 'v' prefix if present
+          TAG_VERSION="${TAG_VERSION#v}"
+          
+          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
+          
+          if [ "$TAG_VERSION" != "$VERSION_FILE" ]; then
+            echo "ERROR: Tag version '$TAG_VERSION' does not match VERSION file '$VERSION_FILE'" >&2
+            exit 1
+          fi
+          echo "✓ Tag version matches VERSION file: $TAG_VERSION"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Pack
+        run: dotnet pack nuget/TestRift.Server/TestRift.Server.csproj -c Release -o artifacts
+
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          # nuget.org profile name (NOT email). Store it as a secret to avoid leaking identity in logs.
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish to nuget.org
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --skip-duplicate
+

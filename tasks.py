@@ -59,6 +59,14 @@ def clean(c):
 def build(c):
     """Build the pip distribution (sdist + wheel). Requires: `pip install build`."""
     server_dir = Path(__file__).parent
+    version_file = server_dir / "VERSION"
+    if not version_file.exists():
+        raise FileNotFoundError("VERSION file not found")
+
+    version = version_file.read_text(encoding="utf-8").strip()
+    if not version:
+        raise ValueError("VERSION file is empty")
+
     with c.cd(str(server_dir)):
         c.run(f"{sys.executable} -m build")
 
@@ -74,3 +82,32 @@ def publish(c, repository="pypi"):
     with c.cd(str(server_dir)):
         c.run(f"{sys.executable} -m twine upload --repository {repository} dist/*")
 
+
+@task
+def build_nuget(c):
+    """Build the NuGet package for testrift-server. Requires: .NET SDK."""
+    server_dir = Path(__file__).parent
+    nuget_dir = server_dir / "nuget" / "TestRift.Server"
+    with c.cd(str(nuget_dir)):
+        c.run("dotnet pack -c Release")
+
+
+@task(pre=[build_nuget])
+def publish_nuget(c, source="https://api.nuget.org/v3/index.json", api_key=None):
+    """Publish the NuGet package. Requires: `dotnet nuget push` and API key.
+
+    Args:
+        source: NuGet source URL (default: nuget.org).
+        api_key: API key for authentication. If not provided, uses default credentials.
+    """
+    server_dir = Path(__file__).parent
+    nuget_dir = server_dir / "nuget" / "TestRift.Server"
+    nupkg_files = list(nuget_dir.glob("bin/Release/*.nupkg"))
+    if not nupkg_files:
+        raise RuntimeError("No .nupkg files found. Run 'inv build-nuget' first.")
+
+    for nupkg in nupkg_files:
+        cmd = f"dotnet nuget push {nupkg} --source {source}"
+        if api_key:
+            cmd += f" --api-key {api_key}"
+        c.run(cmd)

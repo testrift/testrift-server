@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# Reject pushing version tags that don't match pyproject.toml
+# Reject pushing version tags that don't match VERSION file
 #
 # Expected tag format: vX.Y.Z (or X.Y.Z)
 
@@ -10,29 +10,16 @@ if [ -z "$repo_root" ]; then
   exit 0
 fi
 
-pyproject="$repo_root/pyproject.toml"
-if [ ! -f "$pyproject" ]; then
+version_file="$repo_root/VERSION"
+if [ ! -f "$version_file" ]; then
   exit 0
 fi
 
-pkg_version=""
-
-read_pyproject_version() {
-  # Extract version from the [project] section, tolerating indentation/whitespace.
-  # This avoids false matches from other sections.
-  awk '
-    BEGIN { in_project = 0 }
-    /^[[:space:]]*\[project\][[:space:]]*$/ { in_project = 1; next }
-    /^[[:space:]]*\[[^]]+\][[:space:]]*$/ { if (in_project) exit; next }
-    in_project && /^[[:space:]]*version[[:space:]]*=/ {
-      line = $0
-      sub(/^[[:space:]]*version[[:space:]]*=[[:space:]]*"/, "", line)
-      sub(/".*$/, "", line)
-      print line
-      exit
-    }
-  ' "$pyproject"
-}
+pkg_version="$(cat "$version_file" | tr -d '[:space:]')"
+if [ -z "$pkg_version" ]; then
+  echo "ERROR: VERSION file is empty." >&2
+  exit 1
+fi
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$local_ref" in
@@ -50,18 +37,10 @@ while read -r local_ref local_sha remote_ref remote_sha; do
           ;;
       esac
 
-      if [ -z "$pkg_version" ]; then
-        pkg_version="$(read_pyproject_version || true)"
-        if [ -z "${pkg_version:-}" ]; then
-          echo "ERROR: Unable to read package version from $pyproject (expected: [project] version = \"X.Y.Z\")." >&2
-          exit 1
-        fi
-      fi
-
       if [ "$tag_version" != "$pkg_version" ]; then
-        echo "ERROR: Refusing to push tag '$tag' (version $tag_version) because pyproject.toml version is '$pkg_version'." >&2
+        echo "ERROR: Refusing to push tag '$tag' (version $tag_version) because VERSION file contains '$pkg_version'." >&2
         echo "Fix one of these and retry:" >&2
-        echo "  - update $pyproject version" >&2
+        echo "  - update VERSION file" >&2
         echo "  - recreate the tag to match the version (e.g. v$pkg_version)" >&2
         exit 1
       fi

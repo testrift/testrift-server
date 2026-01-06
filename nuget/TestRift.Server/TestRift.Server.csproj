@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Read version from VERSION file using MSBuild inline task -->
+  <PropertyGroup>
+    <_VersionFile>$(MSBuildThisFileDirectory)..\..\VERSION</_VersionFile>
+  </PropertyGroup>
+  
+  <!-- Read version from file inline - fail if missing or empty -->
+  <PropertyGroup Condition="Exists('$(_VersionFile)')">
+    <_VersionContent>$([System.IO.File]::ReadAllText('$(_VersionFile)').Trim())</_VersionContent>
+    <Version Condition="'$(_VersionContent)' != ''">$(_VersionContent)</Version>
+  </PropertyGroup>
+  
+  <!-- Error if VERSION file doesn't exist or is empty -->
+  <Target Name="ValidateVersion" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(_VersionFile)')" Text="ERROR: VERSION file not found at $(_VersionFile)" />
+    <Error Condition="'$(_VersionContent)' == ''" Text="ERROR: VERSION file is empty" />
+    <Error Condition="'$(Version)' == ''" Text="ERROR: Version could not be determined from VERSION file" />
+  </Target>
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>TestRift.Server</PackageId>
+    <Authors>Andreas Anderberg</Authors>
+    <Description>TestRift Server - Python server packaged for .NET/NuGet. Includes wrapper scripts to run the server without requiring pip installation.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/testrift/testrift-server</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/testrift/testrift-server</PackageProjectUrl>
+    <PackageTags>testrift;server;testing;logging;ci</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Include Python server source files -->
+    <Content Include="..\..\src\testrift_server\**\*" PackagePath="content\server\testrift_server\%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- Include wrapper scripts -->
+    <Content Include="testrift-server.bat" PackagePath="content\testrift-server.bat" />
+    <Content Include="testrift-server.sh" PackagePath="content\testrift-server.sh" />
+    <Content Include="testrift-server.ps1" PackagePath="content\testrift-server.ps1" />
+    <!-- Include LICENSE -->
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="LICENSE" />
+    <!-- Include README -->
+    <None Include="..\..\README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+</Project>
+
