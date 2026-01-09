@@ -5,10 +5,8 @@
 # Get the directory where this script is located (NuGet package content directory)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVER_DIR="$SCRIPT_DIR/server/testrift_server"
-VENV_DIR="$SCRIPT_DIR/.venv"
 REQUIREMENTS_FILE="$SCRIPT_DIR/server/requirements.txt"
-VENV_PY="$VENV_DIR/bin/python"
-REQUIREMENTS_MARKER="$VENV_DIR/.requirements_installed"
+VENV_DIR="$SCRIPT_DIR/.venv"
 
 # Check if Python is available
 if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
@@ -21,6 +19,34 @@ PYTHON_CMD="python3"
 if ! command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python"
 fi
+
+determine_venv_dir() {
+    if [ -n "${TESTRIFT_VENV_DIR:-}" ]; then
+        VENV_DIR="$TESTRIFT_VENV_DIR"
+        return
+    fi
+
+    case "$SCRIPT_DIR" in
+        */.nuget/packages/*)
+            cache_root="${TESTRIFT_VENV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/testrift-server}"
+            mkdir -p "$cache_root"
+            hash="$(TESRIFT_SCRIPT_DIR="$SCRIPT_DIR" "$PYTHON_CMD" - <<'PY'
+import hashlib
+import os
+print(hashlib.sha1(os.environ["TESRIFT_SCRIPT_DIR"].encode()).hexdigest()[:16])
+PY
+)"
+            if [ -z "$hash" ]; then
+                hash="default"
+            fi
+            VENV_DIR="$cache_root/$hash"
+            ;;
+    esac
+}
+
+determine_venv_dir
+VENV_PY="$VENV_DIR/bin/python"
+REQUIREMENTS_MARKER="$VENV_DIR/.requirements_installed"
 
 # Check if server files exist
 if [ ! -f "$SERVER_DIR/__main__.py" ]; then
