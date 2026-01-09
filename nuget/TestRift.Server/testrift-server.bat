@@ -16,6 +16,10 @@ set SCRIPT_DIR=%~dp0
 set SERVER_DIR=%SCRIPT_DIR%server\testrift_server
 set VENV_DIR=%SCRIPT_DIR%.venv
 set REQUIREMENTS_FILE=%SCRIPT_DIR%server\requirements.txt
+set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
+set "PYTHON_BOOTSTRAP=%VENV_DIR%\Scripts\pythonw.exe"
+set "REQUIREMENTS_MARKER=%VENV_DIR%\.requirements_installed"
+call :set_bootstrap
 
 REM Check if server files exist
 if not exist "%SERVER_DIR%\__main__.py" (
@@ -23,41 +27,81 @@ if not exist "%SERVER_DIR%\__main__.py" (
     exit /b 1
 )
 
-REM Create venv if it doesn't exist
-if not exist "%VENV_DIR%\Scripts\python.exe" (
-    echo Creating Python virtual environment...
-    python -m venv "%VENV_DIR%"
-    if %ERRORLEVEL% NEQ 0 (
-        echo ERROR: Failed to create virtual environment
-        exit /b 1
-    )
-)
+call :ensure_venv
+if %ERRORLEVEL% NEQ 0 goto :EOF
 
-REM Check if requirements need updating (compare timestamps)
-set NEEDS_UPDATE=0
-if not exist "%VENV_DIR%\.requirements_installed" set NEEDS_UPDATE=1
-if exist "%REQUIREMENTS_FILE%" (
-    if exist "%VENV_DIR%\.requirements_installed" (
-        for /f %%i in ('powershell -command "if ((Get-Item '%REQUIREMENTS_FILE%').LastWriteTime -gt (Get-Item '%VENV_DIR%\.requirements_installed').LastWriteTime) { Write-Output '1' } else { Write-Output '0' }"') do set NEEDS_UPDATE=%%i
-    )
-)
+call :validate_venv
+if %ERRORLEVEL% NEQ 0 goto :EOF
 
-REM Install/update requirements if needed
-if %NEEDS_UPDATE%==1 (
-    if exist "%REQUIREMENTS_FILE%" (
-        echo Installing/updating Python dependencies...
-        "%VENV_DIR%\Scripts\python.exe" -m pip install --upgrade pip >nul 2>&1
-        "%VENV_DIR%\Scripts\python.exe" -m pip install -r "%REQUIREMENTS_FILE%"
-        if %ERRORLEVEL% NEQ 0 (
-            echo ERROR: Failed to install dependencies
-            exit /b 1
-        )
-        REM Create marker file
-        type nul > "%VENV_DIR%\.requirements_installed"
-    )
+call :install_requirements
+if %ERRORLEVEL% NEQ 0 goto :EOF
+
+if "%TESTRIFT_BOOTSTRAP_TEST%"=="1" (
+    echo Bootstrap test mode complete.
+    exit /b 0
 )
 
 REM Add server directory to PYTHONPATH and run with venv Python
 set PYTHONPATH=%SCRIPT_DIR%server;%PYTHONPATH%
-"%VENV_DIR%\Scripts\python.exe" -m testrift_server %*
+"%PYTHON_EXE%" -m testrift_server %*
+
+goto :EOF
+
+:ensure_venv
+if exist "%PYTHON_EXE%" exit /b 0
+echo Creating Python virtual environment...
+call :create_venv
+exit /b %ERRORLEVEL%
+
+:validate_venv
+call :set_bootstrap
+"%PYTHON_BOOTSTRAP%" -m pip --version <nul > "%TEMP%\pip-version.log" 2>&1
+if %ERRORLEVEL% EQU 0 exit /b 0
+echo Virtual environment is broken, recreating...
+if exist "%VENV_DIR%" rmdir /s /q "%VENV_DIR%"
+call :create_venv
+if %ERRORLEVEL% NEQ 0 exit /b 1
+if exist "%REQUIREMENTS_MARKER%" del "%REQUIREMENTS_MARKER%"
+exit /b 0
+
+:install_requirements
+if exist "%REQUIREMENTS_MARKER%" exit /b 0
+if not exist "%REQUIREMENTS_FILE%" exit /b 0
+echo Installing/updating Python dependencies...
+call :set_bootstrap
+set "VENV_CMD_ARGS=-m pip install --upgrade pip"
+call :run_venv_command pip-upgrade.log "Failed to upgrade pip"
+if %ERRORLEVEL% NEQ 0 exit /b 1
+set "VENV_CMD_ARGS=-m pip install -r ""%REQUIREMENTS_FILE%"""
+call :run_venv_command pip-install.log "Failed to install dependencies"
+if %ERRORLEVEL% NEQ 0 exit /b 1
+type nul > "%REQUIREMENTS_MARKER%"
+exit /b 0
+
+:create_venv
+python -m venv "%VENV_DIR%"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Failed to create virtual environment
+    exit /b 1
+)
+call :set_bootstrap
+set "VENV_CMD_ARGS=-m ensurepip --default-pip"
+call :run_venv_command ensurepip.log "Failed to install pip in virtual environment"
+exit /b %ERRORLEVEL%
+
+:set_bootstrap
+if exist "%VENV_DIR%\Scripts\pythonw.exe" (
+    set "PYTHON_BOOTSTRAP=%VENV_DIR%\Scripts\pythonw.exe"
+) else (
+    set "PYTHON_BOOTSTRAP=%PYTHON_EXE%"
+)
+exit /b 0
+
+:run_venv_command
+set "LOG_PATH=%TEMP%\%~1"
+"%PYTHON_BOOTSTRAP%" %VENV_CMD_ARGS% <nul > "%LOG_PATH%" 2>&1
+if %ERRORLEVEL% EQU 0 exit /b 0
+echo ERROR: %~2
+type "%LOG_PATH%"
+exit /b 1
 
