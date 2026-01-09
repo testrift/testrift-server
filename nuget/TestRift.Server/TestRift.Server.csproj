@@ -38,10 +38,13 @@
 
   <ItemGroup>
     <!-- Include Python server source files and wrapper scripts in tools/ folder -->
-    <!-- tools/ folder is always extracted to NuGet cache and accessible at runtime -->
-    <!-- This prevents files from being copied to project root while remaining accessible -->
+    <!-- tools/ folder is extracted to NuGet cache and accessible at runtime -->
+    <!-- This prevents files from being copied to project root -->
     <Content Include="..\..\src\testrift_server\**\*">
       <PackagePath>tools/server/testrift_server/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+    </Content>
+    <Content Include="..\..\requirements.txt">
+      <PackagePath>tools/server/requirements.txt</PackagePath>
     </Content>
     <Content Include="testrift-server.bat">
       <PackagePath>tools/testrift-server.bat</PackagePath>
@@ -49,17 +52,9 @@
     <Content Include="testrift-server.sh">
       <PackagePath>tools/testrift-server.sh</PackagePath>
     </Content>
-    <Content Include="testrift-server.ps1">
-      <PackagePath>tools/testrift-server.ps1</PackagePath>
-    </Content>
-    <!-- Also include in contentFiles for PackageReference projects (metadata only, files not copied) -->
+    <!-- contentFiles provides metadata for PackageReference projects (files not copied to project) -->
     <Content Include="..\..\src\testrift_server\**\*">
       <PackagePath>contentFiles/any/any/server/testrift_server/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-      <BuildAction>None</BuildAction>
-    </Content>
-    <Content Include="testrift-server.bat">
-      <PackagePath>contentFiles/any/any/testrift-server.bat</PackagePath>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <BuildAction>None</BuildAction>
     </Content>
@@ -68,20 +63,15 @@
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <BuildAction>None</BuildAction>
     </Content>
-    <Content Include="testrift-server.ps1">
-      <PackagePath>contentFiles/any/any/testrift-server.ps1</PackagePath>
+    <Content Include="testrift-server.bat">
+      <PackagePath>contentFiles/any/any/testrift-server.bat</PackagePath>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <BuildAction>None</BuildAction>
     </Content>
-    <!-- Also include in content/ for packages.config compatibility (old projects) -->
-    <Content Include="..\..\src\testrift_server\**\*" PackagePath="content\server\testrift_server\%(RecursiveDir)%(Filename)%(Extension)" />
-    <Content Include="testrift-server.bat" PackagePath="content\testrift-server.bat" />
-    <Content Include="testrift-server.sh" PackagePath="content\testrift-server.sh" />
-    <Content Include="testrift-server.ps1" PackagePath="content\testrift-server.ps1" />
     <!-- Include LICENSE -->
     <None Include="..\..\LICENSE" Pack="true" PackagePath="LICENSE" />
-    <!-- Include README -->
-    <None Include="..\..\README.md" Pack="true" PackagePath="README.md" />
+    <!-- Include NuGet-specific README -->
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 
 </Project>
