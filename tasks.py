@@ -56,7 +56,8 @@ def test_bootstrap(c):
 
         env = os.environ.copy()
         env["TESTRIFT_BOOTSTRAP_TEST"] = "1"
-        venv_dir = tools_dir / ".venv"
+        venv_dir = tmp_dir / ".testvenv"
+        env["TESTRIFT_VENV_DIR"] = str(venv_dir)
         marker = venv_dir / ".requirements_installed"
         expected_python = venv_dir / interpreter_rel
 

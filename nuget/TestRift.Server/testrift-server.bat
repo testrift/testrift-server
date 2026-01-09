@@ -15,9 +15,10 @@ REM Get the directory where this script is located (NuGet package content direct
 set SCRIPT_DIR=%~dp0
 set SERVER_DIR=%SCRIPT_DIR%server\testrift_server
 set VENV_DIR=%SCRIPT_DIR%.venv
+call :configure_venv_dir
 set REQUIREMENTS_FILE=%SCRIPT_DIR%server\requirements.txt
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
-set "PYTHON_BOOTSTRAP=%VENV_DIR%\Scripts\pythonw.exe"
+set "PYTHON_BOOTSTRAP=%PYTHON_EXE%"
 set "REQUIREMENTS_MARKER=%VENV_DIR%\.requirements_installed"
 call :set_bootstrap
 
@@ -28,13 +29,13 @@ if not exist "%SERVER_DIR%\__main__.py" (
 )
 
 call :ensure_venv
-if %ERRORLEVEL% NEQ 0 goto :EOF
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 call :validate_venv
-if %ERRORLEVEL% NEQ 0 goto :EOF
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 call :install_requirements
-if %ERRORLEVEL% NEQ 0 goto :EOF
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 if "%TESTRIFT_BOOTSTRAP_TEST%"=="1" (
     echo Bootstrap test mode complete.
@@ -47,6 +48,29 @@ set PYTHONPATH=%SCRIPT_DIR%server;%PYTHONPATH%
 
 goto :EOF
 
+:configure_venv_dir
+if defined TESTRIFT_VENV_DIR (
+    set "VENV_DIR=%TESTRIFT_VENV_DIR%"
+    exit /b 0
+)
+
+echo %SCRIPT_DIR% | findstr /I \\.nuget\\packages\\ >nul
+if errorlevel 1 exit /b 0
+
+if defined LOCALAPPDATA (
+    set "CACHE_ROOT=%LOCALAPPDATA%\testrift-server"
+) else if defined USERPROFILE (
+    set "CACHE_ROOT=%USERPROFILE%\.testrift-server"
+) else (
+    set "CACHE_ROOT=%TEMP%\testrift-server"
+)
+if not exist "%CACHE_ROOT%" mkdir "%CACHE_ROOT%" >nul 2>&1
+
+for /f %%i in ('powershell -NoProfile -Command "$hash=[System.BitConverter]::ToString((New-Object System.Security.Cryptography.SHA1Managed).ComputeHash([System.Text.Encoding]::UTF8.GetBytes($env:SCRIPT_DIR))).Replace('-', '').Substring(0, 16); Write-Output $hash"') do set "SCRIPT_HASH=%%i"
+if not defined SCRIPT_HASH set "SCRIPT_HASH=default"
+set "VENV_DIR=%CACHE_ROOT%\%SCRIPT_HASH%"
+exit /b 0
+
 :ensure_venv
 if exist "%PYTHON_EXE%" exit /b 0
 echo Creating Python virtual environment...
@@ -55,7 +79,7 @@ exit /b %ERRORLEVEL%
 
 :validate_venv
 call :set_bootstrap
-"%PYTHON_BOOTSTRAP%" -m pip --version <nul > "%TEMP%\pip-version.log" 2>&1
+"%PYTHON_BOOTSTRAP%" -m pip --version > "%TEMP%\pip-version.log" 2>&1
 if %ERRORLEVEL% EQU 0 exit /b 0
 echo Virtual environment is broken, recreating...
 if exist "%VENV_DIR%" rmdir /s /q "%VENV_DIR%"
@@ -90,16 +114,12 @@ call :run_venv_command ensurepip.log "Failed to install pip in virtual environme
 exit /b %ERRORLEVEL%
 
 :set_bootstrap
-if exist "%VENV_DIR%\Scripts\pythonw.exe" (
-    set "PYTHON_BOOTSTRAP=%VENV_DIR%\Scripts\pythonw.exe"
-) else (
-    set "PYTHON_BOOTSTRAP=%PYTHON_EXE%"
-)
+set "PYTHON_BOOTSTRAP=%PYTHON_EXE%"
 exit /b 0
 
 :run_venv_command
 set "LOG_PATH=%TEMP%\%~1"
-"%PYTHON_BOOTSTRAP%" %VENV_CMD_ARGS% <nul > "%LOG_PATH%" 2>&1
+"%PYTHON_BOOTSTRAP%" %VENV_CMD_ARGS% > "%LOG_PATH%" 2>&1
 if %ERRORLEVEL% EQU 0 exit /b 0
 echo ERROR: %~2
 type "%LOG_PATH%"
