@@ -14,10 +14,29 @@ import yaml
 import sys
 import urllib.request
 import urllib.error
+import logging
 from aiohttp import web, WSMsgType, MultipartReader
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
+
+# Configure logging with timestamps - must be done before any other logging
+# Clear any existing handlers and configure from scratch
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Create our formatter and handler
+formatter = logging.Formatter(
+    '%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+root_logger.addHandler(handler)
+root_logger.setLevel(logging.INFO)
+
+logger = logging.getLogger(__name__)
 from . import database
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -151,10 +170,10 @@ def load_config(config_path=None):
     except FileNotFoundError:
         # If the user explicitly requested a config (via env var or arg) we must fail hard.
         if env_override_used or explicit_path_used:
-            print(f"ERROR: Configuration file '{config_path}' not found.")
+            logger.error(f" Configuration file '{config_path}' not found.")
             sys.exit(1)
 
-        print(f"Warning: Configuration file '{config_path}' not found. Using defaults.")
+        logger.warning(f" Configuration file '{config_path}' not found. Using defaults.")
         CONFIG_PATH_USED = None
         return {
             'port': 8080,
@@ -165,10 +184,10 @@ def load_config(config_path=None):
             'attachment_max_size': parse_size_string('10MB')
         }
     except yaml.YAMLError as e:
-        print(f"Error parsing configuration file: {e}")
+        logger.error(f"Error parsing configuration file: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"Error loading configuration: {e}")
+        logger.error(f"Error loading configuration: {e}")
         sys.exit(1)
 
 # Load configuration
@@ -264,7 +283,7 @@ def render_template(template_name, **context):
 # --- Logging helper ---
 def log_event(event: str, **fields):
     record = {"event": event, **fields, "ts": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"}
-    print(json.dumps(record))
+    logger.info(json.dumps(record))
 
 # --- Utility functions ---
 
@@ -802,7 +821,7 @@ async def test_case_log_handler(request):
         # Also consider it live if this specific test case is running
         if test_case.status == "running":
             live_run = True
-        print(f"Live run detection - Run in memory: {run_id}, Run status: {run.status}, Test case status: {test_case.status}, Live: {live_run}")
+        logger.info(f"Live run detection - Run in memory: {run_id}, Run status: {run.status}, Test case status: {test_case.status}, Live: {live_run}")
     else:
         run = TestRunData.load_from_disk(run_id)
         if run is None:
@@ -831,11 +850,11 @@ async def test_case_log_handler(request):
 
             if recent_logs:
                 live_run = True
-                print(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Recent logs: {recent_logs}, Live: {live_run}")
+                logger.info(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Recent logs: {recent_logs}, Live: {live_run}")
             else:
-                print(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, No recent logs, Live: {live_run}")
+                logger.info(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, No recent logs, Live: {live_run}")
         else:
-            print(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Live: {live_run}")
+            logger.info(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Live: {live_run}")
 
     # Get group_hash for history feature
     group_hash = None
@@ -1232,7 +1251,7 @@ async def list_attachments_handler(request):
 
 async def cleanup_abandoned_running_runs():
     """Clean up runs that were left in running state due to server restart."""
-    print("Checking for abandoned running runs on server startup...")
+    logger.info("Checking for abandoned running runs on server startup...")
 
     try:
         # Get all runs that might have running test cases (both 'running' and 'aborted' runs)
@@ -1244,7 +1263,7 @@ async def cleanup_abandoned_running_runs():
         for run in running_or_aborted_runs:
             run_id = run['run_id']
             run_status = run.get('status')
-            print(f"Found abandoned {run_status} run: {run_id}")
+            logger.info(f"Found abandoned {run_status} run: {run_id}")
 
             # Get test cases for this run from database
             test_cases = await database.db.get_test_cases_for_run(run_id)
@@ -1271,7 +1290,7 @@ async def cleanup_abandoned_running_runs():
                         if start_time and (not last_tc_event_time or start_time > last_tc_event_time):
                             last_tc_event_time = start_time
                     except Exception as e:
-                        print(f"Error aborting test case {tc['test_case_id']}: {e}")
+                        logger.error(f"Error aborting test case {tc['test_case_id']}: {e}")
 
             # Only update run status if it's still running
             if run_status == 'running' and aborted_count > 0:
@@ -1281,15 +1300,15 @@ async def cleanup_abandoned_running_runs():
                 # Update run status to aborted in database
                 try:
                     await database.log_test_run_finished(run_id, run_end_time, 'aborted')
-                    print(f"Aborted run {run_id}: {aborted_count} test cases marked as aborted")
+                    logger.info(f"Aborted run {run_id}: {aborted_count} test cases marked as aborted")
                     log_event("run_aborted_on_startup", run_id=run_id, aborted_test_cases=aborted_count)
                 except Exception as e:
-                    print(f"Error aborting run {run_id}: {e}")
+                    logger.error(f"Error aborting run {run_id}: {e}")
             elif aborted_count > 0:
-                print(f"Updated {aborted_count} test cases to aborted status for already-aborted run {run_id}")
+                logger.info(f"Updated {aborted_count} test cases to aborted status for already-aborted run {run_id}")
 
     except Exception as e:
-        print(f"Error during cleanup_abandoned_running_runs: {e}")
+        logger.error(f"Error during cleanup_abandoned_running_runs: {e}")
 
 async def cleanup_runs_sweep():
     now = datetime.now(UTC)
@@ -1318,7 +1337,7 @@ async def cleanup_runs_sweep():
                         should_delete = True
                         reason = "expired_retention_days"
                 except Exception as e:
-                    print(f"Error calculating age for run {run_id}: {e}")
+                    logger.error(f"Error calculating age for run {run_id}: {e}")
 
             if should_delete:
                 log_event("run_files_deleted", run_id=run_id, reason=reason)
@@ -1328,12 +1347,12 @@ async def cleanup_runs_sweep():
                 if run_path.exists():
                     try:
                         shutil.rmtree(run_path)
-                        print(f"Deleted filesystem data for run {run_id} (keeping database metadata)")
+                        logger.info(f"Deleted filesystem data for run {run_id} (keeping database metadata)")
                     except Exception as e:
-                        print(f"Error deleting filesystem data for run {run_id}: {e}")
+                        logger.error(f"Error deleting filesystem data for run {run_id}: {e}")
 
     except Exception as e:
-        print(f"Error during cleanup_runs_sweep: {e}")
+        logger.error(f"Error during cleanup_runs_sweep: {e}")
 
 async def cleanup_old_runs():
     while True:
@@ -1433,7 +1452,7 @@ class TestCaseData:  # pytest: disable=collection
                 if file_traces:
                     self.stack_traces = file_traces
             except Exception as e:
-                print(f"Failed to load stack traces for {self.id}: {e}")
+                logger.error(f"Failed to load stack traces for {self.id}: {e}")
 
     @classmethod
     def _sanitize_log_entry(cls, entry: dict) -> dict | None:
@@ -1535,15 +1554,15 @@ class TestCaseData:  # pytest: disable=collection
             # Append to disk file
             with open(stack_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
-            print(f"Persisted stack trace to {stack_path}")
+            logger.info(f"Persisted stack trace to {stack_path}")
         except Exception as persist_error:
-            print(f"Failed to persist stack trace for {self.id}: {persist_error}")
+            logger.error(f"Failed to persist stack trace for {self.id}: {persist_error}")
 
         try:
             # Keep authoritative list synced by re-reading from disk
             self.stack_traces = read_jsonl(stack_path)
         except Exception as reload_error:
-            print(f"Failed to reload stack traces for {self.id}: {reload_error}")
+            logger.error(f"Failed to reload stack traces for {self.id}: {reload_error}")
             self.stack_traces.append(entry)
 
         # Push live updates to subscribers listening on /ws/logs
@@ -1593,7 +1612,7 @@ class WebSocketServer:
             db_names = await database.db.get_run_names_starting_with(base_name, group_hash)
             existing_names.update(db_names)
         except Exception as e:
-            print(f"Error checking existing run names: {e}")
+            logger.error(f"Error checking existing run names: {e}")
 
         # If base_name doesn't exist, use it
         if base_name not in existing_names:
@@ -1636,7 +1655,7 @@ class WebSocketServer:
         async def mark_run_aborted(reason):
             nonlocal run
             if run and run.status == "running":
-                print(f"Marking run {run.id} as aborted: {reason}")
+                logger.info(f"Marking run {run.id} as aborted: {reason}")
                 run.status = "aborted"
                 run.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                 run.update_last()
@@ -1645,7 +1664,7 @@ class WebSocketServer:
                 aborted_test_cases = []
                 for tc_id, test_case in run.test_cases.items():
                     if test_case.status == "running":
-                        print(f"Marking test case {tc_id} as aborted")
+                        logger.info(f"Marking test case {tc_id} as aborted")
                         test_case.status = "aborted"
                         test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                         aborted_test_cases.append(tc_id)
@@ -1691,7 +1710,7 @@ class WebSocketServer:
                     try:
                         await database.log_test_case_finished(run.id, tc_id, 'aborted')
                     except Exception as db_error:
-                        print(f"Database logging error for aborted test case {tc_id}: {db_error}")
+                        logger.error(f"Database logging error for aborted test case {tc_id}: {db_error}")
 
                     # Broadcast UI update
                     await self.broadcast_ui({
@@ -1711,7 +1730,7 @@ class WebSocketServer:
                 try:
                     await database.log_test_run_finished(run.id, "aborted")
                 except Exception as db_error:
-                    print(f"Database logging error for run_aborted: {db_error}")
+                    logger.error(f"Database logging error for run_aborted: {db_error}")
 
                 # Broadcast run finished event
                 await self.broadcast_ui({"type": "run_finished", "run": run_data})
@@ -1719,7 +1738,7 @@ class WebSocketServer:
                 # Remove aborted run from memory to ensure consistent static banner behavior
                 if run.id in self.test_runs:
                     del self.test_runs[run.id]
-                    print(f"Removed aborted run {run.id} from memory")
+                    logger.info(f"Removed aborted run {run.id} from memory")
 
         # Start a background task to monitor connection timeout
         async def monitor_connection():
@@ -1736,39 +1755,42 @@ class WebSocketServer:
                     # Try to send a ping frame to test the connection
                     try:
                         await ws.ping()
+                        # Successful ping/pong proves the connection is alive, so refresh activity timestamp
+                        last_activity = datetime.now(UTC)
                     except Exception as e:
-                        print(f"WebSocket ping failed: {e}")
+                        logger.info(f"WebSocket ping failed: {e}")
                         await mark_run_aborted("WebSocket ping failed")
                         break
 
                     if run and run.status == "running":
                         time_since_activity = (datetime.now(UTC) - last_activity).total_seconds()
                         if time_since_activity > 30:  # 30 second timeout (reduced for testing)
+                            logger.warning(f"WebSocket watchdog triggered: no activity for {time_since_activity:.1f}s (run_id={run.id if run else 'unknown'})")
                             await mark_run_aborted("Connection timeout")
                             break
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    print(f"Monitor connection error: {e}")
+                    logger.info(f"Monitor connection error: {e}")
                     break
 
         monitor_task = asyncio.create_task(monitor_connection())
 
         try:
-            print(f"Starting NUnit WebSocket connection monitoring")
+            logger.info(f"Starting NUnit WebSocket connection monitoring")
             async for msg in ws:
                 last_activity = datetime.now(UTC)  # Update activity timestamp
-                print(f"Received message from NUnit client: {msg.type}")
+                logger.info(f"Received message from NUnit client: {msg.type}")
 
                 # Check for close/error messages
                 if msg.type == web.WSMsgType.CLOSE:
-                    print(f"NUnit WebSocket connection closed normally for run {run.id if run else 'unknown'}")
+                    logger.info(f"NUnit WebSocket connection closed normally for run {run.id if run else 'unknown'}")
                     # If run didn't finish properly (no run_finished message was received), mark as aborted
                     if run and run.status == "running":
                         await mark_run_aborted("WebSocket closed before run_finished was sent")
                     break
                 elif msg.type == web.WSMsgType.ERROR:
-                    print(f"NUnit WebSocket connection error: {ws.exception()}")
+                    logger.info(f"NUnit WebSocket connection error: {ws.exception()}")
                     # If run didn't finish properly, mark as aborted
                     if run and run.status == "running":
                         await mark_run_aborted("WebSocket error before run_finished was sent")
@@ -1778,7 +1800,7 @@ class WebSocketServer:
                         data = json.loads(msg.data)
                         msg_type = data.get("type")
                     except Exception as e:
-                        print(f"Error parsing JSON message: {e}")
+                        logger.error(f"Error parsing JSON message: {e}")
                         continue
 
                     if msg_type == "run_started":
@@ -1803,7 +1825,7 @@ class WebSocketServer:
                                             if existing_run:
                                                 validation_error = f"Run ID '{client_run_id}' is already in use"
                                         except Exception as db_check_error:
-                                            print(f"Error checking database for run_id: {db_check_error}")
+                                            logger.error(f"Error checking database for run_id: {db_check_error}")
                                             validation_error = "Error validating run ID"
 
                                 if validation_error:
@@ -1878,7 +1900,7 @@ class WebSocketServer:
                                     group_metadata=(group_payload or {}).get("metadata")
                                 )
                             except Exception as db_error:
-                                print(f"Database logging error for run_started: {db_error}")
+                                logger.error(f"Database logging error for run_started: {db_error}")
 
                             # Broadcast to UI clients
                             await self.broadcast_ui({"type": "run_started", "run": meta_dict})
@@ -1895,7 +1917,7 @@ class WebSocketServer:
                                 response["group_url"] = f"/groups/{group_hash}"
                             await ws.send_json(response)
                         except Exception as e:
-                            print(f"Error in run_started: {e}")
+                            logger.error(f"Error in run_started: {e}")
                             import traceback
                             traceback.print_exc()
 
@@ -1905,14 +1927,14 @@ class WebSocketServer:
                             tc_id = data.get("test_case_id")
 
                             if not run_id:
-                                print("Error: run_id missing from test_case_started message")
+                                logger.info("Error: run_id missing from test_case_started message")
                                 continue
 
                             # Find the run by run_id
                             run = self.test_runs.get(run_id)
 
                             if not run:
-                                print(f"Error: Run '{run_id}' not found for test_case_started message")
+                                logger.info(f"Error: Run '{run_id}' not found for test_case_started message")
                                 continue
 
                             # Replace HTML entities with actual quotes
@@ -1932,7 +1954,7 @@ class WebSocketServer:
                             try:
                                 await database.log_test_case_started(run.id, tc_id, tc_meta.get("start_time"))
                             except Exception as db_error:
-                                print(f"Database logging error for test_case_started: {db_error}")
+                                logger.error(f"Database logging error for test_case_started: {db_error}")
 
                             # Update meta.json on disk
                             run_path = get_run_path(run.id)
@@ -1979,7 +2001,7 @@ class WebSocketServer:
                                 }
                             })
                         except Exception as e:
-                            print(f"Error in test_case_started: {e}")
+                            logger.error(f"Error in test_case_started: {e}")
                             import traceback
                             traceback.print_exc()
 
@@ -1989,14 +2011,14 @@ class WebSocketServer:
                             tc_id = data.get("test_case_id")
 
                             if not run_id:
-                                print("Error: run_id missing from log_batch message")
+                                logger.info("Error: run_id missing from log_batch message")
                                 continue
 
                             # Find the run by run_id
                             run = self.test_runs.get(run_id)
 
                             if not run:
-                                print(f"Error: Run '{run_id}' not found for log_batch message")
+                                logger.info(f"Error: Run '{run_id}' not found for log_batch message")
                                 continue
 
                             # Replace HTML entities with actual quotes
@@ -2009,7 +2031,7 @@ class WebSocketServer:
                             await test_case.add_log_entries(entries)
                             log_event("log_batch", run_id=run.id, test_case_id=tc_id, count=len(entries))
                         except Exception as e:
-                            print(f"Error in log_batch: {e}")
+                            logger.error(f"Error in log_batch: {e}")
                             import traceback
                             traceback.print_exc()
 
@@ -2019,18 +2041,18 @@ class WebSocketServer:
                             tc_id = data.get("test_case_id")
 
                             if not run_id or not tc_id:
-                                print("Error: run_id or test_case_id missing from exception message")
+                                logger.info("Error: run_id or test_case_id missing from exception message")
                                 continue
 
                             run = self.test_runs.get(run_id)
                             if not run:
-                                print(f"Error: Run '{run_id}' not found for exception message")
+                                logger.info(f"Error: Run '{run_id}' not found for exception message")
                                 continue
 
                             tc_id = tc_id.replace("&quot;", '"')
                             test_case = run.test_cases.get(tc_id)
                             if not test_case:
-                                print(f"Error: Test case '{tc_id}' not found for exception message")
+                                logger.info(f"Error: Test case '{tc_id}' not found for exception message")
                                 continue
 
                             # Extract fields directly from data (NUnit sends them at top level)
@@ -2067,7 +2089,7 @@ class WebSocketServer:
                             log_event("exception", run_id=run.id, test_case_id=tc_id)
 
                         except Exception as e:
-                            print(f"Error in exception handling: {e}")
+                            logger.error(f"Error in exception handling: {e}")
                             import traceback
                             traceback.print_exc()
 
@@ -2077,14 +2099,14 @@ class WebSocketServer:
                             tc_id = data.get("test_case_id")
 
                             if not run_id:
-                                print("Error: run_id missing from test_case_finished message")
+                                logger.info("Error: run_id missing from test_case_finished message")
                                 continue
 
                             # Find the run by run_id
                             run = self.test_runs.get(run_id)
 
                             if not run:
-                                print(f"Error: Run '{run_id}' not found for test_case_finished message")
+                                logger.info(f"Error: Run '{run_id}' not found for test_case_finished message")
                                 continue
 
                             # Replace HTML entities with actual quotes
@@ -2100,7 +2122,7 @@ class WebSocketServer:
                                 test_case.status = status
                                 test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                             else:
-                                print(f"Error: Invalid test status '{data.get('status')}' for test case {tc_id}, ignoring test case")
+                                logger.info(f"Error: Invalid test status '{data.get('status')}' for test case {tc_id}, ignoring test case")
                                 continue
                             tc_meta = test_case.to_dict()
 
@@ -2155,7 +2177,7 @@ class WebSocketServer:
                             try:
                                 await database.log_test_case_finished(run.id, tc_id, test_case.status)
                             except Exception as db_error:
-                                print(f"Database logging error for test_case_finished: {db_error}")
+                                logger.error(f"Database logging error for test_case_finished: {db_error}")
 
                             # Calculate counts for targeted update
                             passed_count = 0
@@ -2189,7 +2211,7 @@ class WebSocketServer:
                                 }
                             })
                         except Exception as e:
-                            print(f"Error in test_case_finished: {e}")
+                            logger.error(f"Error in test_case_finished: {e}")
                             import traceback
                             traceback.print_exc()
 
@@ -2198,14 +2220,14 @@ class WebSocketServer:
                             run_id = data.get("run_id")
 
                             if not run_id:
-                                print("Error: run_id missing from run_finished message")
+                                logger.info("Error: run_id missing from run_finished message")
                                 continue
 
                             # Find the run by run_id
                             run = self.test_runs.get(run_id)
 
                             if not run:
-                                print(f"Error: Run '{run_id}' not found for run_finished message")
+                                logger.info(f"Error: Run '{run_id}' not found for run_finished message")
                                 continue
 
                             # CRITICAL: Before marking run as finished, check for any test cases still in "running" state
@@ -2213,7 +2235,7 @@ class WebSocketServer:
                             aborted_test_cases = []
                             for tc_id, test_case in run.test_cases.items():
                                 if test_case.status == "running":
-                                    print(f"Test case {tc_id} was still running when run_finished received, marking as aborted")
+                                    logger.info(f"Test case {tc_id} was still running when run_finished received, marking as aborted")
                                     test_case.status = "aborted"
                                     test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                                     aborted_test_cases.append(tc_id)
@@ -2222,7 +2244,7 @@ class WebSocketServer:
                                     try:
                                         await database.log_test_case_finished(run.id, tc_id, 'aborted')
                                     except Exception as db_error:
-                                        print(f"Database logging error for aborted test case {tc_id}: {db_error}")
+                                        logger.error(f"Database logging error for aborted test case {tc_id}: {db_error}")
 
                             # Broadcast updates for aborted test cases
                             if aborted_test_cases:
@@ -2282,7 +2304,7 @@ class WebSocketServer:
                             try:
                                 await database.log_test_run_finished(run.id, run.status)
                             except Exception as db_error:
-                                print(f"Database logging error for run_finished: {db_error}")
+                                logger.error(f"Database logging error for run_finished: {db_error}")
 
                             # Broadcast to UI
                             await self.broadcast_ui({"type": "run_finished", "run": run_data})
@@ -2290,23 +2312,21 @@ class WebSocketServer:
                             # Remove finished run from memory to ensure consistent static banner behavior
                             if run_id in self.test_runs:
                                 del self.test_runs[run_id]
-                                print(f"Removed finished run {run_id} from memory")
-                        except Exception as e:
-                            print(f"Error in run_finished: {e}")
-                            import traceback
-                            traceback.print_exc()
+                                logger.info(f"Removed finished run {run_id} from memory")
+                        except Exception:
+                            logger.exception("Error in run_finished")
 
         except Exception as e:
-            print(f'NUnit WebSocket connection error: {e}')
+            logger.error(f"NUnit WebSocket connection error: {e}")
             if run and run.status == "running":
                 await mark_run_aborted("WebSocket connection exception")
         finally:
-            print(f"Cleaning up NUnit WebSocket connection for run {run.id if run else 'unknown'}")
+            logger.info(f"Cleaning up NUnit WebSocket connection for run {run.id if run else 'unknown'}")
 
             # CRITICAL: When WebSocket closes, check if run finished properly
             # If run is still running, mark it and all running test cases as aborted
             if run and run.status == "running":
-                print(f"Run {run.id} was still running when WebSocket closed, marking as aborted")
+                logger.info(f"Run {run.id} was still running when WebSocket closed, marking as aborted")
                 await mark_run_aborted("WebSocket closed while run was still running")
 
             monitor_task.cancel()
@@ -2323,16 +2343,16 @@ class WebSocketServer:
                     # UI clients currently send no commands
                     pass
                 elif msg.type == web.WSMsgType.ERROR:
-                    print('UI ws connection closed with exception %s' % ws.exception())
+                    logger.error("UI ws connection closed with exception %s", ws.exception())
         finally:
             self.ui_clients.remove(ws)
 
     async def handle_log_stream(self, ws, run_id, test_case_id):
-        print(f"WebSocket log stream request: run_id={run_id}, test_case_id={test_case_id}")
+        logger.info(f"WebSocket log stream request: run_id={run_id}, test_case_id={test_case_id}")
 
         # Validate run_id and test_case_id to prevent path traversal
         if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
-            print(f"Invalid run_id or test_case_id: {run_id}, {test_case_id}")
+            logger.info(f"Invalid run_id or test_case_id: {run_id}, {test_case_id}")
             await ws.send_json({ "type": "error", "message": "Invalid run ID or test case ID" })
             await ws.close()
             return
@@ -2340,19 +2360,19 @@ class WebSocketServer:
         # Register this client to receive live logs
         test_run = self.test_runs.get(run_id)  # Use WebSocketServer's test_runs dict
         if not test_run:
-            print(f"Test run not found in memory: {run_id}")
+            logger.info(f"Test run not found in memory: {run_id}")
             await ws.send_json({ "type": "error", "message": "Test run not found" })
             await ws.close()
             return
 
         test_case = test_run.test_cases.get(test_case_id)
         if not test_case:
-            print(f"Couldn't find test case {test_case_id} in test run {run_id}")
+            logger.info(f"Couldn't find test case {test_case_id} in test run {run_id}")
             await ws.send_json({ "type": "error", "message": "Test case not found" })
             await ws.close()
             return
 
-        print(f"WebSocket log stream established for {run_id}/{test_case_id}")
+        logger.info(f"WebSocket log stream established for {run_id}/{test_case_id}")
 
         # For live runs, send all existing logs + exceptions first, then subscribe to new ones.
         # This ensures no events are missed when connecting (or reconnecting after refresh) to a running test case.
@@ -2376,7 +2396,7 @@ class WebSocketServer:
             for _, item in initial_items:
                 await ws.send_json(item)
         except Exception as e:
-            print(f"Error sending existing logs: {e}")
+            logger.error(f"Error sending existing logs: {e}")
             await ws.send_json({ "type": "error", "message": "Error sending existing logs" })
             await ws.close()
             return
@@ -2453,7 +2473,7 @@ async def api_test_runs_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_test_runs_handler: {e}")
+        logger.error(f"Error in api_test_runs_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -2495,7 +2515,7 @@ async def api_test_run_details_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_test_run_details_handler: {e}")
+        logger.error(f"Error in api_test_run_details_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -2530,7 +2550,7 @@ async def api_test_results_for_runs_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_test_results_for_runs_handler: {e}")
+        logger.error(f"Error in api_test_results_for_runs_handler: {e}")
         return web.json_response({
             "success": False,
             "error": f"Internal server error: {str(e)}"
@@ -2564,9 +2584,9 @@ async def api_test_results_over_time_handler(request):
         )
 
         # Log the results
-        print(f"API test-runs-over-time: {len(results)} test runs")
+        logger.info(f"API test-runs-over-time: {len(results)} test runs")
         for result in results[:3]:  # Show first 3 runs
-            print(f"  Run: {result.get('run_id')[:8]}..., Passed: {result.get('passed_tests')}, Failed: {result.get('failed_tests')}, Skipped: {result.get('skipped_tests')}")
+            logger.info(f"  Run: {result.get('run_id')[:8]}..., Passed: {result.get('passed_tests')}, Failed: {result.get('failed_tests')}, Skipped: {result.get('skipped_tests')}")
 
         return web.json_response({
             "success": True,
@@ -2574,7 +2594,7 @@ async def api_test_results_over_time_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_test_results_over_time_handler: {e}")
+        logger.error(f"Error in api_test_results_over_time_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -2621,7 +2641,7 @@ async def api_test_case_history_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_test_case_history_handler: {e}")
+        logger.error(f"Error in api_test_case_history_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -2677,7 +2697,7 @@ async def api_test_case_history_with_links_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_test_case_history_with_links_handler: {e}")
+        logger.error(f"Error in api_test_case_history_with_links_handler: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({
@@ -2696,7 +2716,7 @@ async def api_metadata_keys_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_metadata_keys_handler: {e}")
+        logger.error(f"Error in api_metadata_keys_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -2720,7 +2740,7 @@ async def api_metadata_values_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_metadata_values_handler: {e}")
+        logger.error(f"Error in api_metadata_values_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -2806,7 +2826,7 @@ async def api_failures_toplist_handler(request):
                                 # Store full trace for sample
                                 stack_trace_sample = '\n'.join(stack_lines[:10])  # First 10 lines
                     except Exception as e:
-                        print(f"Error reading stack trace: {e}")
+                        logger.error(f"Error reading stack trace: {e}")
 
                 if not symptom:
                     symptom = "No stack trace available"
@@ -2903,7 +2923,7 @@ async def api_failures_toplist_handler(request):
             })
 
     except Exception as e:
-        print(f"Error in api_failures_toplist_handler: {e}")
+        logger.error(f"Error in api_failures_toplist_handler: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({
@@ -2927,7 +2947,7 @@ async def failures_handler(request):
         return web.Response(text=html, content_type="text/html", headers=headers)
 
     except Exception as e:
-        print(f"Error in failures_handler: {e}")
+        logger.error(f"Error in failures_handler: {e}")
         return web.Response(status=500, text=f"Error loading failures page: {str(e)}")
 
 
@@ -2946,7 +2966,7 @@ async def analyzer_handler(request):
         return web.Response(text=html, content_type="text/html", headers=headers)
 
     except Exception as e:
-        print(f"Error in analyzer_handler: {e}")
+        logger.error(f"Error in analyzer_handler: {e}")
         return web.Response(status=500, text=f"Error loading analyzer page: {str(e)}")
 
 
@@ -2965,7 +2985,7 @@ async def matrix_handler(request):
         return web.Response(text=html, content_type="text/html", headers=headers)
 
     except Exception as e:
-        print(f"Error in matrix_handler: {e}")
+        logger.error(f"Error in matrix_handler: {e}")
         return web.Response(status=500, text=f"Error loading matrix page: {str(e)}")
 
 
@@ -3016,7 +3036,7 @@ async def api_classifications_for_run_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_classifications_for_run_handler: {e}")
+        logger.error(f"Error in api_classifications_for_run_handler: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({
@@ -3099,7 +3119,7 @@ async def api_tc_hover_history_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_tc_hover_history_handler: {e}")
+        logger.error(f"Error in api_tc_hover_history_handler: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({
@@ -3163,7 +3183,7 @@ async def api_run_hover_history_handler(request):
         })
 
     except Exception as e:
-        print(f"Error in api_run_hover_history_handler: {e}")
+        logger.error(f"Error in api_run_hover_history_handler: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({
@@ -3181,7 +3201,7 @@ async def api_migrate_data_handler(request):
         }, status=501)
 
     except Exception as e:
-        print(f"Error in api_migrate_data_handler: {e}")
+        logger.error(f"Error in api_migrate_data_handler: {e}")
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -3310,6 +3330,21 @@ app.on_startup.append(on_startup)
 app.on_cleanup.append(on_cleanup)
 
 def main(argv=None):
+    # Reconfigure logging at the start of main() to ensure our format is used
+    # This is necessary because web.run_app() may reconfigure logging
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    formatter = logging.Formatter(
+        '%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+
     parser = argparse.ArgumentParser(prog="testrift-server")
     parser.add_argument(
         "--restart-on-config",
@@ -3327,24 +3362,24 @@ def main(argv=None):
     try:
         running = _get_running_server_info(PORT)
     except RuntimeError as e:
-        print(f"ERROR: {e}")
+        logger.error(f" {e}")
         return 2
 
     if running is not None:
         running_hash = running.get("config_hash")
         if running_hash == new_hash:
-            print(f"TestRift server already running on 127.0.0.1:{PORT} with identical config. Exiting.")
+            logger.info(f"TestRift server already running on 127.0.0.1:{PORT} with identical config. Exiting.")
             return 0
 
-        print(f"ERROR: TestRift server already running on 127.0.0.1:{PORT} but config differs.")
-        print(f"  running config_path: {running.get('config_path')}")
-        print(f"  running config_hash: {running_hash}")
-        print(f"  new     config_path: {str(CONFIG_PATH_USED) if CONFIG_PATH_USED else None}")
-        print(f"  new     config_hash: {new_hash}")
+        logger.error(f" TestRift server already running on 127.0.0.1:{PORT} but config differs.")
+        logger.info(f"  running config_path: {running.get('config_path')}")
+        logger.info(f"  running config_hash: {running_hash}")
+        logger.info(f"  new     config_path: {str(CONFIG_PATH_USED) if CONFIG_PATH_USED else None}")
+        logger.info(f"  new     config_hash: {new_hash}")
         if args.restart_on_config and running_hash:
-            print("Attempting to restart running server with new config...")
+            logger.info("Attempting to restart running server with new config...")
             if not _request_running_server_shutdown(PORT, running_hash):
-                print("ERROR: Failed to request shutdown of running server.")
+                logger.info("ERROR: Failed to request shutdown of running server.")
                 return 2
 
             # Wait for the running server to exit and release the port.
@@ -3354,23 +3389,28 @@ def main(argv=None):
                     break
                 time.sleep(0.2)
             else:
-                print("ERROR: Timed out waiting for running server to shut down.")
+                logger.info("ERROR: Timed out waiting for running server to shut down.")
                 return 2
 
-            print("Old server stopped. Starting new server...")
+            logger.info("Old server stopped. Starting new server...")
         else:
             return 2
 
-    print(f"Starting server on {host}:{PORT}")
-    print(f"Default retention days: {DEFAULT_RETENTION_DAYS}")
-    print(f"Data directory: {DATA_DIR}")
-    print(f"Localhost only: {LOCALHOST_ONLY}")
-    print(f"Attachments enabled: {ATTACHMENTS_ENABLED}")
+    logger.info(f"Starting server on {host}:{PORT}")
+    logger.info(f"Default retention days: {DEFAULT_RETENTION_DAYS}")
+    logger.info(f"Data directory: {DATA_DIR}")
+    logger.info(f"Localhost only: {LOCALHOST_ONLY}")
+    logger.info(f"Attachments enabled: {ATTACHMENTS_ENABLED}")
     if ATTACHMENTS_ENABLED:
         max_size_mb = ATTACHMENT_MAX_SIZE // (1024 * 1024)
-        print(f"Max attachment size: {max_size_mb}MB")
+        logger.info(f"Max attachment size: {max_size_mb}MB")
 
-    web.run_app(app, host=host, port=PORT)
+    def _runner_print(*args):
+        """Route aiohttp runner banner through the logger for timestamps."""
+        message = " ".join(str(arg) for arg in args)
+        logger.info(message)
+
+    web.run_app(app, host=host, port=PORT, print=_runner_print)
     return 0
 
 

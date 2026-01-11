@@ -84,9 +84,20 @@ def start(c):
     cmd_parts = [sys.executable, "-u", "-m", "testrift_server"]
 
     print(f"Starting server from {server_dir}...")
+
+    # Ensure we execute against the local src/ tree so logging changes take effect.
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    src_dir = server_dir / "src"
+    pythonpath_parts = [str(src_dir)]
+    existing_pythonpath = env.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+
     # Use c.cd to change directory instead of passing cwd (not supported in invoke 2.x)
     with c.cd(str(server_dir)):
-        c.run(" ".join(cmd_parts), env={"PYTHONUNBUFFERED": "1"})
+        c.run(" ".join(cmd_parts), env=env)
 
 
 @task
