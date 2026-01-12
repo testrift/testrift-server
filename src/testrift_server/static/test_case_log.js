@@ -8,7 +8,7 @@ const GOLDEN_ANGLE = 137.508;
 
 // Device and message processing constants
 const DevMode = { Normal: 0, Setup: 1, Teardown: 2 };
-const MSG_JOIN_TMO_MS = 1000;
+const MSG_JOIN_TMO_MS = 10;
 
 // Counter for generating unique IDs
 let lblId = 0;
@@ -177,6 +177,89 @@ function generateAtLine(atLookupTable, isRx, atLine) {
 }
 
 // ============================================================================
+// ANSI COLOR PARSING
+// ============================================================================
+
+/**
+ * Parse ANSI escape codes and convert to HTML with inline styles.
+ * When ANSI codes are detected, wraps the entire message in a near-black background box.
+ */
+function parseAnsiColors(text) {
+    // Check if text contains ANSI codes
+    if (!text.includes('\x1b[') && !text.includes('\u001b[')) {
+        return text;
+    }
+
+    const ansiRegex = /\x1b\[(\d+(?:;\d+)*)m/g;
+    let result = '';
+    let lastIndex = 0;
+    let currentStyles = [];
+
+    // ANSI color mappings
+    const colorMap = {
+        30: '#000000', 31: '#cd3131', 32: '#0dbc79', 33: '#e5e510',
+        34: '#2472c8', 35: '#bc3fbc', 36: '#11a8cd', 37: '#e5e5e5',
+        90: '#666666', 91: '#f14c4c', 92: '#23d18b', 93: '#f5f543',
+        94: '#3b8eea', 95: '#d670d6', 96: '#29b8db', 97: '#e5e5e5'
+    };
+
+    const bgColorMap = {
+        40: '#000000', 41: '#cd3131', 42: '#0dbc79', 43: '#e5e510',
+        44: '#2472c8', 45: '#bc3fbc', 46: '#11a8cd', 47: '#e5e5e5',
+        100: '#666666', 101: '#f14c4c', 102: '#23d18b', 103: '#f5f543',
+        104: '#3b8eea', 105: '#d670d6', 106: '#29b8db', 107: '#e5e5e5'
+    };
+
+    text.replace(ansiRegex, (match, codes, offset) => {
+        // Add text before this escape code
+        if (offset > lastIndex) {
+            const textBefore = text.substring(lastIndex, offset);
+            if (currentStyles.length > 0) {
+                result += `<span style="${currentStyles.join('; ')}">${textBefore}</span>`;
+            } else {
+                result += textBefore;
+            }
+        }
+
+        // Process the escape codes
+        const codeList = codes.split(';').map(c => parseInt(c));
+        for (const code of codeList) {
+            if (code === 0) {
+                // Reset all styles
+                currentStyles = [];
+            } else if (code === 1) {
+                // Bold
+                currentStyles.push('font-weight: bold');
+            } else if (code >= 30 && code <= 37 || code >= 90 && code <= 97) {
+                // Foreground color
+                currentStyles = currentStyles.filter(s => !s.startsWith('color:'));
+                currentStyles.push(`color: ${colorMap[code]}`);
+            } else if (code >= 40 && code <= 47 || code >= 100 && code <= 107) {
+                // Background color
+                currentStyles = currentStyles.filter(s => !s.startsWith('background-color:'));
+                currentStyles.push(`background-color: ${bgColorMap[code]}`);
+            }
+        }
+
+        lastIndex = offset + match.length;
+        return '';
+    });
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+        const textAfter = text.substring(lastIndex);
+        if (currentStyles.length > 0) {
+            result += `<span style="${currentStyles.join('; ')}">${textAfter}</span>`;
+        } else {
+            result += textAfter;
+        }
+    }
+
+    // Wrap entire result in near-black background box since ANSI was detected
+    return `<span style="background-color: #1a1a1a; padding: 2px 4px; border-radius: 3px; display: inline-block;">${result}</span>`;
+}
+
+// ============================================================================
 // LOG MESSAGE PROCESSING
 // ============================================================================
 
@@ -227,6 +310,9 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
         // Skip empty lines
         return
     }
+
+    // Parse ANSI color codes before filter check
+    messageText = parseAnsiColors(messageText);
 
     // Apply current filter to the clean message text before any HTML processing
     if (currentFilter) {
@@ -299,10 +385,6 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
         badges += addChannelLabel(row, component, "Assert");
     }
 
-    if (messageText.includes("ERROR") || messageText.includes("Error") || messageText.includes("error")) {
-        badges += addChannelLabel(row, component, "Error");
-    }
-
     if (badges.includes(">Assert<")) {
         let msgEl = $("<pre>").addClass("bg-danger text-white").append("<code>").html(messageText);
         msgEl.find('a').each(function () {
@@ -319,22 +401,6 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
         $("#test_info_list").append(li);
     }
 
-    if (badges.includes(">Error<")) {
-        msgEl = $("<pre>").addClass("bg-warning").append("<code>").html(messageText)
-        msgEl.find('a').each(function () {
-            $(this).addClass("link-dark")
-        });
-        messageText = msgEl.prop('outerHTML')
-        let li = $(`<li class="list-group-item">`)
-        .html(`<strong>Error:</strong> ${messageText}`)
-        .css('cursor', 'pointer')
-        .on("mousedown", function () {
-            const w = $(window);
-            $('html,body').animate({ scrollTop: row.offset().top - (w.height() / 2) }, 200);
-        });
-        $("#test_info_list").append(li);
-    }
-
     $(`<td class="fit">`)
     .html(badges)
     .appendTo(row);
@@ -343,15 +409,21 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
         let html = generateAtLine(atLookupTable, isReceived, messageText);
         $("<td>").html(html).appendTo(row);
     } else {
-        // Join messages if they come from same source and less than MSG_JOIN_TMO_MS
-        let msgTime = Date.parse(`0000-01-01 ${time}`);
-        let diffMs = msgTime - lastMsgTime;
-        lastMsgTime = msgTime;
-        if (kind !== "exception" && (diffMs != NaN) && (diffMs <= MSG_JOIN_TMO_MS) && (badges == lastBadges)) {
-            lastTd.append(`<br>${messageText}`)
-            return
+        // Join messages if they come from same source and less than MSG_JOIN_TMO_MS from the first message in the group
+        const currentMsgTime = new Date(originalTime);
+
+        // Check if we should join with the previous message
+        if (kind !== "exception" && lastMsgGroupStartTime && badges == lastBadges) {
+            const diffMs = currentMsgTime - lastMsgGroupStartTime;
+            if (!isNaN(diffMs) && diffMs <= MSG_JOIN_TMO_MS) {
+                // Join with previous message
+                lastTd.append(`<br>${messageText}`);
+                return;
+            }
         }
 
+        // Start a new message group
+        lastMsgGroupStartTime = currentMsgTime;
         lastTd = $(`<td>`).html(messageText).appendTo(row);
     }
     lastBadges = badges
@@ -771,7 +843,7 @@ function formatTcExecutionTime(milliseconds) {
 let runId, testCaseId, testCaseStatus, compMap, chanList, atLookupTable;
 let showDeltaTime, lastVisibleMessageTime, tcStartTime, tcExecutionTimer;
 let currentFilter, sidebarCollapsed;
-let atMap, lastTd, lastMsgTime, lastBadges, colorIndex;
+let atMap, lastTd, lastMsgTime, lastBadges, colorIndex, lastMsgGroupStartTime;
 
 // DOM element references
 let sidebarToggle, devicesSidebar, mainContent;
@@ -798,6 +870,7 @@ function initializeTestCaseLog() {
     lastTd = null;
     lastMsgTime = NaN;
     lastBadges = "";
+    lastMsgGroupStartTime = null;
 
 
 

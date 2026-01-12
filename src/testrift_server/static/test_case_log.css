@@ -535,7 +535,7 @@ body.dark-theme .main-container .main-content .static-banner[style] * {
     border-color: #6c757d;
     color: white;
     padding: 8px 16px;
-    font-size: 1rem;
+    font-size: 1.17rem;
     border-radius: 4px;
     border: 1px solid transparent;
     cursor: pointer;
@@ -563,7 +563,7 @@ body.dark-theme .main-container .main-content .static-banner[style] * {
 
 table {
     font-family: monospace;
-    font-size: 0.85em; /* slightly smaller log text */
+    font-size: 14px; /* 14px monospace for message log */
 }
 
 th {
@@ -584,6 +584,11 @@ td {
 #msg_table td {
     padding-top: 4px !important;
     padding-bottom: 4px !important;
+}
+
+/* Apply white-space: pre-wrap only to message column (3rd column) */
+#msg_table td:nth-child(3) {
+    white-space: pre-wrap;
 }
 
 tr:hover td {
@@ -607,7 +612,7 @@ tr:hover td {
 
 .badge-custom {
     padding: 3px 6px;
-    font-size: 0.7em; /* slightly smaller Host/DUT/source badges */
+    font-size: 0.82em; /* increased from 0.7em proportionally with table font */
     color: white;
     margin-right: 4px;
     border-radius: 4px;
