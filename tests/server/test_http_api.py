@@ -63,10 +63,10 @@ class TestHTTPAPI:
 
         # Add some test cases
         test_cases = [
-            TestCaseData(0, "test-run-123", "Test.Passed", "passed",
+            TestCaseData(0, "test-run-123", "Test.Passed", "tc_passed_001", "passed",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
-            TestCaseData(0, "test-run-123", "Test.Failed", "failed",
+            TestCaseData(0, "test-run-123", "Test.Failed", "tc_failed_001", "failed",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
         ]
@@ -378,10 +378,10 @@ class TestDatabaseAPI:
 
         # Add some test cases
         test_cases = [
-            TestCaseData(0, "test-run-123", "Test.Passed", "passed",
+            TestCaseData(0, "test-run-123", "Test.Passed", "tc_passed_002", "passed",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
-            TestCaseData(0, "test-run-123", "Test.Failed", "failed",
+            TestCaseData(0, "test-run-123", "Test.Failed", "tc_failed_002", "failed",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
         ]
@@ -637,14 +637,20 @@ class TestAttachmentAPI:
     @pytest.mark.asyncio
     async def test_list_attachments_handler_basic(self, initialized_db):
         """Test list attachments handler basic functionality."""
-        from testrift_server.tr_server import list_attachments_handler
+        from testrift_server.tr_server import list_attachments_handler, generate_storage_id
+        from types import SimpleNamespace
 
-        # Create a mock request
+        # Generate tc_id
+        tc_id = generate_storage_id()
+
+        # Create a mock request with real app structure
         request = MagicMock()
         request.match_info = {
             'run_id': 'test-run-123',
-            'test_case_id': 'Test.TestMethod'
+            'test_case_id': tc_id
         }
+        ws_server = SimpleNamespace(test_runs={})
+        request.app = {"ws_server": ws_server}
 
         # Call the handler
         response = await list_attachments_handler(request)
@@ -657,15 +663,21 @@ class TestAttachmentAPI:
     @pytest.mark.asyncio
     async def test_download_attachment_handler_basic(self, initialized_db):
         """Test download attachment handler basic functionality."""
-        from testrift_server.tr_server import download_attachment_handler
+        from testrift_server.tr_server import download_attachment_handler, generate_storage_id
+        from types import SimpleNamespace
 
-        # Create a mock request
+        # Generate tc_id
+        tc_id = generate_storage_id()
+
+        # Create a mock request with real app structure
         request = MagicMock()
         request.match_info = {
             'run_id': 'test-run-123',
-            'test_case_id': 'Test.TestMethod',
+            'test_case_id': tc_id,
             'filename': 'test.txt'
         }
+        ws_server = SimpleNamespace(test_runs={})
+        request.app = {"ws_server": ws_server}
 
         # Call the handler
         response = await download_attachment_handler(request)

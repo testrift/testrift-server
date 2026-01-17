@@ -38,7 +38,8 @@ class TestCaseData:  # pytest: disable=collection
     """Represents a test case in the database."""
     id: int
     run_id: str
-    test_case_id: str
+    tc_full_name: str
+    tc_id: Optional[str]
     status: str
     start_time: str
     end_time: Optional[str]
@@ -107,14 +108,15 @@ class TestResultsDatabase:
                 CREATE TABLE IF NOT EXISTS test_cases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
-                    test_case_id TEXT NOT NULL,
+                    tc_full_name TEXT NOT NULL,
+                    tc_id TEXT,
                     status TEXT NOT NULL,
                     start_time TEXT NOT NULL,
                     end_time TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE,
-                    UNIQUE (run_id, test_case_id)
+                    UNIQUE (run_id, tc_full_name)
                 )
             """)
 
@@ -155,63 +157,6 @@ class TestResultsDatabase:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_user_metadata_key ON user_metadata (key)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_group_metadata_run_id ON group_metadata (run_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_group_metadata_key ON group_metadata (key)")
-
-            # Handle schema migration: remove result column if it exists
-            try:
-                # Check if result column exists
-                cursor = await db.execute("PRAGMA table_info(test_cases)")
-                columns = await cursor.fetchall()
-                has_result_column = any(col[1] == 'result' for col in columns)
-
-                if has_result_column:
-                    print("Migrating database schema: removing result column from test_cases table")
-                    # Drop the old index on result column if it exists
-                    await db.execute("DROP INDEX IF EXISTS idx_test_cases_result")
-
-                    # Create new table without result column
-                    await db.execute("""
-                        CREATE TABLE test_cases_new (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            run_id TEXT NOT NULL,
-                            test_case_id TEXT NOT NULL,
-                            status TEXT NOT NULL,
-                            start_time TEXT NOT NULL,
-                            end_time TEXT,
-                            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE,
-                            UNIQUE (run_id, test_case_id)
-                        )
-                    """)
-
-                    # Copy data from old table to new table
-                    await db.execute("""
-                        INSERT INTO test_cases_new (id, run_id, test_case_id, status, start_time, end_time, created_at, updated_at)
-                        SELECT id, run_id, test_case_id,
-                               CASE
-                                   WHEN result = 'passed' THEN 'passed'
-                                   WHEN result = 'failed' THEN 'failed'
-                                   WHEN result = 'skipped' THEN 'skipped'
-                                   WHEN result = 'inconclusive' THEN 'failed'
-                                   ELSE 'failed'
-                               END as status,
-                               start_time, end_time, created_at, updated_at
-                        FROM test_cases
-                    """)
-
-                    # Drop old table and rename new table
-                    await db.execute("DROP TABLE test_cases")
-                    await db.execute("ALTER TABLE test_cases_new RENAME TO test_cases")
-
-                    # Recreate indexes
-                    await db.execute("CREATE INDEX IF NOT EXISTS idx_test_cases_run_id ON test_cases (run_id)")
-                    await db.execute("CREATE INDEX IF NOT EXISTS idx_test_cases_status ON test_cases (status)")
-
-                    print("Database schema migration completed successfully")
-
-            except Exception as e:
-                print(f"Error during schema migration: {e}")
-                # If migration fails, we'll continue with the existing schema
 
             await db.commit()
 
@@ -320,11 +265,12 @@ class TestResultsDatabase:
             try:
                 await db.execute("""
                     INSERT OR REPLACE INTO test_cases
-                    (run_id, test_case_id, status, start_time, end_time, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    (run_id, tc_full_name, tc_id, status, start_time, end_time, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     test_case.run_id,
-                    test_case.test_case_id,
+                    test_case.tc_full_name,
+                    test_case.tc_id,
                     test_case.status,
                     test_case.start_time,
                     test_case.end_time,
@@ -603,7 +549,7 @@ class TestResultsDatabase:
 
     async def get_test_case_history(
         self,
-        test_case_id: str,
+        tc_full_name: str,
         limit: int = 50,
         metadata_filters: Optional[Dict[str, str]] = None,
         group_hash: Optional[str] = None
@@ -611,14 +557,14 @@ class TestResultsDatabase:
         """Get execution history for a specific test case."""
         async with self.get_connection() as db:
             query = """
-                SELECT tc.id, tc.run_id, tc.test_case_id, tc.status, tc.start_time, tc.end_time,
+                SELECT tc.id, tc.run_id, tc.tc_full_name, tc.tc_id, tc.status, tc.start_time, tc.end_time,
                        tr.start_time as run_start_time, tr.status as run_status, tr.run_name
                 FROM test_cases tc
                 JOIN test_runs tr ON tc.run_id = tr.run_id
             """
 
-            conditions = ["tc.test_case_id = ?"]
-            params = [test_case_id]
+            conditions = ["tc.tc_full_name = ?"]
+            params = [tc_full_name]
 
             if metadata_filters:
                 for key, value in metadata_filters.items():
@@ -673,7 +619,7 @@ class TestResultsDatabase:
         """Get failed test cases within a time range for failure analysis."""
         async with self.get_connection() as db:
             query = """
-                SELECT tc.run_id, tc.test_case_id, tc.status, tc.start_time, tc.end_time,
+                SELECT tc.run_id, tc.tc_full_name, tc.tc_id, tc.status, tc.start_time, tc.end_time,
                        tr.start_time as run_start_time, tr.group_hash, tr.group_name
                 FROM test_cases tc
                 JOIN test_runs tr ON tc.run_id = tr.run_id
@@ -737,29 +683,29 @@ class TestResultsDatabase:
 
             where_clause = " AND ".join(base_conditions)
 
-            # Use a subquery to get the run_id of the last failure for each test case
+            # Use a subquery to get the run_id and tc_id of the last failure for each test case
             query = f"""
                 WITH failure_stats AS (
-                    SELECT tc.test_case_id,
+                    SELECT tc.tc_full_name,
                            COUNT(*) as failure_count,
                            MAX(tc.start_time) as last_failure
                     FROM test_cases tc
                     JOIN test_runs tr ON tc.run_id = tr.run_id
                     WHERE {where_clause}
-                    GROUP BY tc.test_case_id
+                    GROUP BY tc.tc_full_name
                     ORDER BY failure_count DESC
                     LIMIT ?
                 ),
                 last_failures AS (
-                    SELECT tc.test_case_id, tc.run_id as last_failure_run_id, tc.start_time,
-                           ROW_NUMBER() OVER (PARTITION BY tc.test_case_id ORDER BY tc.start_time DESC) as rn
+                    SELECT tc.tc_full_name, tc.run_id as last_failure_run_id, tc.tc_id as last_failure_tc_id, tc.start_time,
+                           ROW_NUMBER() OVER (PARTITION BY tc.tc_full_name ORDER BY tc.start_time DESC) as rn
                     FROM test_cases tc
                     JOIN test_runs tr ON tc.run_id = tr.run_id
                     WHERE tc.status = 'failed' AND {where_clause}
                 )
-                SELECT fs.test_case_id, fs.failure_count, fs.last_failure, lf.last_failure_run_id
+                SELECT fs.tc_full_name, fs.failure_count, fs.last_failure, lf.last_failure_run_id, lf.last_failure_tc_id
                 FROM failure_stats fs
-                LEFT JOIN last_failures lf ON fs.test_case_id = lf.test_case_id AND lf.rn = 1
+                LEFT JOIN last_failures lf ON fs.tc_full_name = lf.tc_full_name AND lf.rn = 1
                 ORDER BY fs.failure_count DESC
             """
 
@@ -775,7 +721,7 @@ class TestResultsDatabase:
 
     async def get_test_case_classification_data(
         self,
-        test_case_id: str,
+        tc_full_name: str,
         group_hash: Optional[str] = None,
         limit: int = 10,
         current_run_id: Optional[str] = None,
@@ -789,12 +735,12 @@ class TestResultsDatabase:
         """
         async with self.get_connection() as db:
             query = """
-                SELECT tc.status, tr.start_time as run_start_time, tr.run_id, tr.run_name
+                SELECT tc.status, tc.tc_id, tr.start_time as run_start_time, tr.run_id, tr.run_name
                 FROM test_cases tc
                 JOIN test_runs tr ON tc.run_id = tr.run_id
-                WHERE tc.test_case_id = ?
+                WHERE tc.tc_full_name = ?
             """
-            params = [test_case_id]
+            params = [tc_full_name]
 
             if group_hash:
                 query += " AND tr.group_hash = ?"
@@ -894,7 +840,7 @@ class TestResultsDatabase:
 
             # Get test case IDs from the previous run
             cursor = await db.execute(
-                "SELECT test_case_id FROM test_cases WHERE run_id = ?",
+                "SELECT tc_full_name FROM test_cases WHERE run_id = ?",
                 (previous_run_id,)
             )
             rows = await cursor.fetchall()
@@ -907,7 +853,7 @@ class TestResultsDatabase:
     ) -> Dict[str, Dict[str, Any]]:
         """Get classification data for all test cases in a run.
 
-        Returns a dict mapping test_case_id to classification info:
+        Returns a dict mapping tc_full_name to classification info:
         - classification: 'flaky', 'fixed', 'regression', or None
         - is_new: True if TC wasn't in previous run
         - history: list of last 10 statuses (for hover tooltip)
@@ -923,7 +869,7 @@ class TestResultsDatabase:
 
             # Get all test cases in the run
             cursor = await db.execute(
-                "SELECT test_case_id, status FROM test_cases WHERE run_id = ?",
+                "SELECT tc_full_name, status FROM test_cases WHERE run_id = ?",
                 (run_id,)
             )
             test_cases = await cursor.fetchall()
@@ -1074,7 +1020,7 @@ async def log_test_run_finished(run_id: str, status: str):
     return await db.update_test_run(run_id, status=status, end_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z")
 
 
-async def log_test_case_started(run_id: str, test_case_id: str, start_time: str = None):
+async def log_test_case_started(run_id: str, tc_full_name: str, tc_id: str, start_time: str = None):
     """Log a test case start to the database."""
     if start_time is None:
         start_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
@@ -1082,7 +1028,8 @@ async def log_test_case_started(run_id: str, test_case_id: str, start_time: str 
     test_case = TestCaseData(
         id=0,  # Will be auto-generated
         run_id=run_id,
-        test_case_id=test_case_id,
+        tc_full_name=tc_full_name,
+        tc_id=tc_id,
         status="running",
         start_time=start_time,
         end_time=None
@@ -1090,19 +1037,19 @@ async def log_test_case_started(run_id: str, test_case_id: str, start_time: str 
     return await db.insert_test_case(test_case)
 
 
-async def log_test_case_finished(run_id: str, test_case_id: str, status: str):
+async def log_test_case_finished(run_id: str, tc_full_name: str, status: str):
     """Log a test case completion to the database."""
     async with db.get_connection() as connection:
         await connection.execute("""
             UPDATE test_cases
             SET status = ?, end_time = ?, updated_at = ?
-            WHERE run_id = ? AND test_case_id = ?
+            WHERE run_id = ? AND tc_full_name = ?
         """, (
             status,
             datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             run_id,
-            test_case_id
+            tc_full_name
         ))
         await connection.commit()
         return True

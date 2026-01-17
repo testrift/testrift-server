@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer
+from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer, generate_storage_id, TC_ID_FIELD
 
 
 class TestWebSocketProtocol:
@@ -47,7 +47,8 @@ class TestWebSocketProtocol:
         ws_server.test_runs["test-run-123"] = sample_run
 
         # Create a test case
-        test_case = TestCaseData(sample_run, "Test.TestMethod")
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
         sample_run.test_cases["Test.TestMethod"] = test_case
 
         # Mock the WebSocket message
@@ -99,7 +100,8 @@ class TestWebSocketProtocol:
         ws_server.test_runs["test-run-123"] = sample_run
 
         # Create a test case
-        test_case = TestCaseData(sample_run, "Test.TestMethod")
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
         sample_run.test_cases["Test.TestMethod"] = test_case
 
         # Test with invalid status
@@ -142,7 +144,8 @@ class TestWebSocketProtocol:
         ]
 
         for tc_id, status in test_cases:
-            test_case = TestCaseData(sample_run, tc_id)
+            tc_id_hash = generate_storage_id()
+            test_case = TestCaseData(sample_run, tc_id, {TC_ID_FIELD: tc_id_hash})
             test_case.status = status
             if status != "running":
                 test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
@@ -179,7 +182,8 @@ class TestWebSocketProtocol:
         ws_server.test_runs["test-run-123"] = sample_run
 
         # Create a test case with logs
-        test_case = TestCaseData(sample_run, "Test.TestMethod")
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
         test_case.logs = [
             {
                 "timestamp": "2025-10-01T18:49:17.803300Z",

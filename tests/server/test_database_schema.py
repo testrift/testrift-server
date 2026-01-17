@@ -77,7 +77,8 @@ class TestDatabaseSchema:
         test_case = TestCaseData(
             id=0,
             run_id="test-run-123",
-            test_case_id="Test.TestMethod",
+            tc_full_name="Test.TestMethod",
+            tc_id="tc_test_001",
             status="running",
             start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             end_time=None
@@ -89,7 +90,7 @@ class TestDatabaseSchema:
         # Retrieve the test case
         test_cases = await initialized_db.get_test_cases_for_run("test-run-123")
         assert len(test_cases) == 1
-        assert test_cases[0]["test_case_id"] == "Test.TestMethod"
+        assert test_cases[0]["tc_full_name"] == "Test.TestMethod"
         assert test_cases[0]["status"] == "running"
         # Should not have result field
         assert "result" not in test_cases[0]
@@ -113,7 +114,8 @@ class TestDatabaseSchema:
         test_case = TestCaseData(
             id=0,
             run_id="test-run-123",
-            test_case_id="Test.TestMethod",
+            tc_full_name="Test.TestMethod",
+            tc_id="tc_test_002",
             status="running",
             start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             end_time=None
@@ -145,10 +147,10 @@ class TestDatabaseSchema:
 
         # Create test cases with different statuses
         test_cases = [
-            TestCaseData(0, "test-run-123", "Test.Passed", "passed", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
-            TestCaseData(0, "test-run-123", "Test.Failed", "failed", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
-            TestCaseData(0, "test-run-123", "Test.Skipped", "skipped", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
-            TestCaseData(0, "test-run-123", "Test.Aborted", "aborted", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
+            TestCaseData(0, "test-run-123", "Test.Passed", "tc_passed_001", "passed", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
+            TestCaseData(0, "test-run-123", "Test.Failed", "tc_failed_001", "failed", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
+            TestCaseData(0, "test-run-123", "Test.Skipped", "tc_skipped_001", "skipped", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
+            TestCaseData(0, "test-run-123", "Test.Aborted", "tc_aborted_001", "aborted", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", None),
         ]
 
         for tc in test_cases:

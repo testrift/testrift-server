@@ -6,7 +6,23 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Test Case Log {{ test_case.id if test_case else test_case_id }}</title>
+    {% set resolved_tc_id = (
+        test_case.tc_id if test_case and test_case.tc_id
+        else (
+            tc_meta.tc_id
+            if (tc_meta is defined and tc_meta and tc_meta.tc_id)
+            else test_case_id
+        )
+    ) %}
+    {% set resolved_full_name = (
+        test_case.full_name if test_case and test_case.full_name
+        else (
+            tc_meta.tc_full_name
+            if (tc_meta is defined and tc_meta and tc_meta.tc_full_name)
+            else test_case_id
+        )
+    ) %}
+    <title>Test Case Log {{ resolved_full_name }}</title>
     <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.0/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.0/js/bootstrap.min.js"></script>
@@ -76,7 +92,7 @@
   {% include 'static_banner.html' %}
 {% endif %}
                     <div class="header-section">
-                        <h1>{{ test_case.id if test_case else test_case_id }}<span id="new-tc-indicator"></span></h1>
+                        <h1>{{ resolved_full_name }}<span id="new-tc-indicator"></span></h1>
                         <div class="subtitle">Test Case Log</div>
                         <p><a href="{% if server_mode %}/testRun/{{ run.id if run else run_id }}/index.html{% else %}../index.html{% endif %}" class="back-link">&larr; Back to {{ run_name }}</a></p>
                     </div>
@@ -184,16 +200,17 @@
   <!-- Template configuration - all template expressions consolidated here -->
 <script>
     const templateConfig = {
-      runId: {{ (run.id if run else run_id) | tojson }},
-      testCaseId: {{ (test_case.id if test_case else test_case_id) | tojson }},
-      testCaseStatus: {{ (test_case.status if test_case else (test_case_meta.status if test_case_meta else '')) | tojson }},
-      testCaseStartTime: {{ (test_case.start_time if test_case else (test_case_meta.start_time if test_case_meta else '')) | tojson }},
-      testCaseEndTime: {{ (test_case.end_time if test_case else (test_case_meta.end_time if test_case_meta else '')) | tojson }},
+    runId: {{ (run.id if run else run_id) | tojson }},
+    testCaseId: {{ resolved_tc_id | tojson }},
+    testCaseFullName: {{ resolved_full_name | tojson }},
+      testCaseStatus: {{ (test_case.status if test_case else (tc_meta.status if tc_meta else '')) | tojson }},
+      testCaseStartTime: {{ (test_case.start_time if test_case else (tc_meta.start_time if tc_meta else '')) | tojson }},
+      testCaseEndTime: {{ (test_case.end_time if test_case else (tc_meta.end_time if tc_meta else '')) | tojson }},
       initialLogs: {{ logs | tojson }},
       liveRun: {{ live_run | tojson }},
       serverMode: {{ server_mode | tojson }},
       attachments: {{ attachments | tojson if attachments else '[]' }},
-      stackTraces: {{ (stack_traces if stack_traces is defined else (test_case.stack_traces if test_case else (test_case_meta.stack_traces if test_case_meta else []))) | tojson }},
+      stackTraces: {{ (stack_traces if stack_traces is defined else (test_case.stack_traces if test_case else (tc_meta.stack_traces if tc_meta else []))) | tojson }},
       groupHash: {{ group_hash | tojson if group_hash else 'null' }}
     };
 </script>
@@ -239,7 +256,8 @@ async function loadTestCaseClassification() {
                 statusBadge,
                 templateConfig.testCaseId,
                 templateConfig.groupHash || null,
-                templateConfig.runId
+                templateConfig.runId,
+                templateConfig.testCaseFullName
             );
         }
     } catch (error) {

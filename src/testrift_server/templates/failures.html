@@ -467,6 +467,26 @@
         let metadataKeys = [];
         const groupHash = new URLSearchParams(window.location.search).get('group');
 
+        function resolveTestCaseStorageId(entry) {
+            if (!entry) {
+                return '';
+            }
+            if (typeof entry === 'string') {
+                return entry;
+            }
+            return entry.tc_id || '';
+        }
+
+        function resolveTestCaseDisplayName(entry) {
+            if (!entry) {
+                return '';
+            }
+            if (typeof entry === 'string') {
+                return entry;
+            }
+            return entry.tc_full_name || '';
+        }
+
         // Initialize page
         document.addEventListener('DOMContentLoaded', async function() {
             await loadMetadataKeys();
@@ -627,9 +647,12 @@
                     // Build last failure link
                     let lastFailureLink = '';
                     if (item.last_failure_run_id && item.last_failure_test_case) {
-                        lastFailureLink = `<a href="/testRun/${item.last_failure_run_id}/log/${encodeURIComponent(item.last_failure_test_case)}.html" class="btn btn-sm btn-outline-danger" title="View last failed test">
-                            <i class="fas fa-external-link-alt"></i>
-                        </a>`;
+                        const lastFailureId = resolveTestCaseStorageId(item.last_failure_test_case);
+                        if (lastFailureId) {
+                            lastFailureLink = `<a href="/testRun/${item.last_failure_run_id}/log/${encodeURIComponent(lastFailureId)}.html" class="btn btn-sm btn-outline-danger" title="View last failed test">
+                                <i class="fas fa-external-link-alt"></i>
+                            </a>`;
+                        }
                     }
 
                     row.innerHTML = `
@@ -644,15 +667,15 @@
                             </div>
                             <div class="affected-tests-tree" id="affected-${index}" style="display: none; margin-top: 8px; margin-left: 20px;">
                                 ${affectedTCs.map((tc, tcIndex) => {
-                                    const tcId = tc.test_case_id || tc;
-                                    const runId = tc.last_failure_run_id;
+                                    const tcStorageId = resolveTestCaseStorageId(tc);
+                                    const tcDisplayName = resolveTestCaseDisplayName(tc);
                                     const tcCount = tc.failure_count || 1;
                                     const countBadge = `<span class="tc-failure-count">${tcCount}</span>`;
                                     const tcNameId = `tc-name-${index}-${tcIndex}`;
                                     return `
                                         <div class="affected-test-item" style="padding: 4px 0; font-size: 0.85em;">
                                             <i class="fas fa-times-circle text-danger me-1"></i>
-                                            <span id="${tcNameId}" class="test-case-name" style="cursor: pointer;">${escapeHtml(tcId)}</span>
+                                            <span id="${tcNameId}" class="test-case-name" data-storage-id="${tcStorageId}" style="cursor: pointer;">${escapeHtml(tcDisplayName)}</span>
                                             ${countBadge}
                                         </div>
                                     `;
@@ -666,18 +689,22 @@
                     // Setup hover history for affected test cases
                     setTimeout(() => {
                         affectedTCs.forEach((tc, tcIndex) => {
-                            const tcId = tc.test_case_id || tc;
+                            const storageId = resolveTestCaseStorageId(tc);
+                            const displayName = resolveTestCaseDisplayName(tc);
+                            const canonicalId = storageId || displayName;
                             const tcNameEl = document.getElementById(`tc-name-${index}-${tcIndex}`);
-                            if (tcNameEl && typeof Classifications !== 'undefined') {
-                                Classifications.setupBadgeHistoryHoverAsync(tcNameEl, tcId, groupHash || null, null);
+                            if (tcNameEl && typeof Classifications !== 'undefined' && canonicalId) {
+                                Classifications.setupBadgeHistoryHoverAsync(tcNameEl, canonicalId, groupHash || null, null, displayName);
                             }
                         });
                     }, 100);
                 } else {
+                    const tcStorageId = resolveTestCaseStorageId(item);
+                    const tcDisplayName = resolveTestCaseDisplayName(item);
                     const tcNameId = `tc-name-${index}`;
                     row.innerHTML = `
                         <td><span class="rank-badge ${isTop3 ? 'top-3' : ''}">${rank}</span></td>
-                        <td><span id="${tcNameId}" class="test-case-name" style="cursor: pointer;">${escapeHtml(item.test_case_id)}</span></td>
+                        <td><span id="${tcNameId}" class="test-case-name" data-storage-id="${tcStorageId}" style="cursor: pointer;">${escapeHtml(tcDisplayName)}</span></td>
                         <td><span class="failure-count">${item.failure_count}</span></td>
                         <td><small>${formatDate(item.last_failure)}</small></td>
                     `;
@@ -685,8 +712,9 @@
                     // Setup hover history for test case name
                     setTimeout(() => {
                         const tcNameEl = document.getElementById(tcNameId);
-                        if (tcNameEl && typeof Classifications !== 'undefined') {
-                            Classifications.setupBadgeHistoryHoverAsync(tcNameEl, item.test_case_id, groupHash || null, null);
+                        const canonicalId = tcStorageId || tcDisplayName;
+                        if (tcNameEl && typeof Classifications !== 'undefined' && canonicalId) {
+                            Classifications.setupBadgeHistoryHoverAsync(tcNameEl, canonicalId, groupHash || null, null, tcDisplayName);
                         }
                     }, 100);
                 }
@@ -819,12 +847,17 @@
             if (mode === 'by_symptom') {
                 csv = 'Rank,Symptom,Failure Count,Affected Test Cases,Last Failure\n';
                 currentData.forEach((item, index) => {
-                    csv += `${index + 1},"${(item.symptom || '').replace(/"/g, '""')}",${item.failure_count},"${(item.affected_test_cases || []).join('; ')}","${item.last_failure}"\n`;
+                    const affectedNames = (item.affected_test_cases || [])
+                        .map(tc => tc.tc_full_name || '')
+                        .filter(Boolean)
+                        .join('; ');
+                    csv += `${index + 1},"${(item.symptom || '').replace(/"/g, '""')}",${item.failure_count},"${affectedNames.replace(/"/g, '""')}","${item.last_failure}"\n`;
                 });
             } else {
                 csv = 'Rank,Test Case,Failure Count,Last Failure\n';
                 currentData.forEach((item, index) => {
-                    csv += `${index + 1},"${item.test_case_id.replace(/"/g, '""')}",${item.failure_count},"${item.last_failure}"\n`;
+                    const fullName = item.tc_full_name || '';
+                    csv += `${index + 1},"${fullName.replace(/"/g, '""')}",${item.failure_count},"${item.last_failure}"\n`;
                 });
             }
 

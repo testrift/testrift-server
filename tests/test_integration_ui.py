@@ -208,18 +208,20 @@ data:
                 else:
                     pytest.fail(f"Unexpected response: {response}")
 
-                # Send test_case_started
+                # Send test_case_started with tc_id
+                tc_id = "00000001"  # Client-generated 8-char hex ID
                 await ws.send_json({
                     "type": "test_case_started",
                     "run_id": run_id,
-                    "test_case_id": test_case_id
+                    "tc_full_name": test_case_id,
+                    "tc_id": tc_id
                 })
 
-                # Send log_batch with dir field
+                # Send log_batch with tc_id (not tc_full_name)
                 await ws.send_json({
                     "type": "log_batch",
                     "run_id": run_id,
-                    "test_case_id": test_case_id,
+                    "tc_id": tc_id,
                     "entries": [
                         {
                             "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
@@ -238,19 +240,19 @@ data:
                     ]
                 })
 
-                # Send test_case_finished
+                # Send test_case_finished with tc_id (not tc_full_name)
                 await ws.send_json({
                     "type": "test_case_finished",
                     "run_id": run_id,
-                    "test_case_id": test_case_id,
+                    "tc_id": tc_id,
                     "status": "passed"
                 })
 
                 # Wait a bit for server to process (reduced from 0.5s)
                 await asyncio.sleep(0.2)
 
-        # Step 2: Open the test case log page in browser
-        url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{test_case_id}.html"
+        # Step 2: Open the test case log page in browser using tc_id
+        url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{tc_id}.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=5000)
 
         # Step 3: Verify UI displays direction badges
@@ -308,18 +310,20 @@ data:
                 else:
                     pytest.fail(f"Unexpected response: {response}")
 
-                # Send test_case_started
+                # Send test_case_started with tc_id
+                tc_id = "00000001"  # Client-generated 8-char hex ID
                 await ws.send_json({
                     "type": "test_case_started",
                     "run_id": run_id,
-                    "test_case_id": test_case_id
+                    "tc_full_name": test_case_id,
+                    "tc_id": tc_id
                 })
 
-                # Send exception message
+                # Send exception message with tc_id
                 await ws.send_json({
                     "type": "exception",
                     "run_id": run_id,
-                    "test_case_id": test_case_id,
+                    "tc_id": tc_id,
                     "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
                     "message": "Test assertion failed",
                     "exception_type": "NUnit.Framework.AssertionException",
@@ -330,18 +334,18 @@ data:
                     "is_error": False
                 })
 
-                # Send test_case_finished
+                # Send test_case_finished with tc_id
                 await ws.send_json({
                     "type": "test_case_finished",
                     "run_id": run_id,
-                    "test_case_id": test_case_id,
+                    "tc_id": tc_id,
                     "status": "failed"
                 })
 
                 await asyncio.sleep(0.5)
 
-        # Step 2: Open the test case log page
-        url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{test_case_id}.html"
+        # Open test case log page using tc_id
+        url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{tc_id}.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
         # Step 3: Verify exception is displayed
@@ -365,7 +369,7 @@ data:
         page = browser_page
 
         run_id = f"e2e-is-error-{int(time.time())}"
-        test_case_id = "E2ETest.IsErrorFlag"
+        tc_full_name = "E2ETest.IsErrorFlag"
 
         # Step 1: Send exception with is_error=true
         async with ClientSession() as session:
@@ -385,17 +389,24 @@ data:
                 else:
                     pytest.fail(f"Unexpected response: {response}")
 
+                # Send test_case_started with tc_id
+                tc_id = "00000001"  # Client-generated 8-char hex ID
                 await ws.send_json({
                     "type": "test_case_started",
                     "run_id": run_id,
-                    "test_case_id": test_case_id
+                    "tc_full_name": tc_full_name,
+                    "tc_id": tc_id
                 })
 
-                # Send exception with is_error=true (runtime error)
+                # Note: NUnit clients don't receive broadcast echoes, only UI clients do
+                # We need to generate tc_id ourselves or fetch it from the API
+                # For now, send messages and then fetch tc_id from the server
+
+                # Send exception with is_error=true (runtime error) using tc_id
                 await ws.send_json({
                     "type": "exception",
                     "run_id": run_id,
-                    "test_case_id": test_case_id,
+                    "tc_id": tc_id,
                     "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
                     "message": "Unexpected runtime error",
                     "exception_type": "System.Exception",
@@ -406,14 +417,14 @@ data:
                 await ws.send_json({
                     "type": "test_case_finished",
                     "run_id": run_id,
-                    "test_case_id": test_case_id,
+                    "tc_id": tc_id,
                     "status": "failed"
                 })
 
                 await asyncio.sleep(0.5)
 
-        # Step 2: Open the page
-        url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{test_case_id}.html"
+        # Step 2: Open the page using tc_id
+        url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{tc_id}.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
         # Step 3: Verify that is_error=true shows exception type (not "Failure")

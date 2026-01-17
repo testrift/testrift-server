@@ -561,6 +561,20 @@
         let cachedFilterKey = null;
         let hasAutoExpanded = false;
 
+        function getTestCaseStorageId(testCase) {
+            if (!testCase) {
+                return '';
+            }
+            return testCase.tc_id || '';
+        }
+
+        function getTestCaseDisplayName(testCase) {
+            if (!testCase) {
+                return '';
+            }
+            return testCase.tc_full_name || '';
+        }
+
          // Initialize the page
          document.addEventListener('DOMContentLoaded', async function() {
              const urlParams = new URLSearchParams(window.location.search);
@@ -969,7 +983,12 @@
             const allTestCases = new Set();
             for (const run of runs) {
                 const runTestCases = runData.get(run.run_id).testCases;
-                runTestCases.forEach(tc => allTestCases.add(tc.test_case_id));
+                runTestCases.forEach(tc => {
+                    const displayName = getTestCaseDisplayName(tc);
+                    if (displayName) {
+                        allTestCases.add(displayName);
+                    }
+                });
             }
 
 
@@ -1156,8 +1175,8 @@
              // Get all test case results for this run
              const runTestCases = runData.get(runId).testCases;
 
-             childTestCases.forEach(testCaseId => {
-                 const testCase = runTestCases.find(tc => tc.test_case_id === testCaseId);
+            childTestCases.forEach(testCaseId => {
+                const testCase = runTestCases.find(tc => getTestCaseDisplayName(tc) === testCaseId);
                  if (testCase && testCase.status) {
                      const status = testCase.status.toLowerCase();
                      // Ignore "not-executed" or null statuses
@@ -1222,7 +1241,7 @@
                      // Get all test results for this test case across all runs
                      const testResults = sortedRuns.map(run => {
                          const runTestCases = runData.get(run.run_id).testCases;
-                         const tc = runTestCases.find(tc => tc.test_case_id === node.testCaseId);
+                         const tc = runTestCases.find(tc => getTestCaseDisplayName(tc) === node.testCaseId);
                          return { run: run, testCase: tc };
                      });
 
@@ -1246,8 +1265,12 @@
                      }
 
                      // Helper function to build test case log URL
-                     function buildTestCaseUrl(runId, testCaseId) {
-                         return `/testRun/${runId}/log/${encodeURIComponent(testCaseId)}.html`;
+                     function buildTestCaseUrl(runId, testCase) {
+                         if (!testCase) {
+                             return '#';
+                         }
+                         const identifier = getTestCaseStorageId(testCase) || node.testCaseId;
+                         return `/testRun/${runId}/log/${encodeURIComponent(identifier)}.html`;
                      }
 
                      // Render groups - implement merged bars for consecutive results
@@ -1272,7 +1295,7 @@
                                      // Empty cell for not-executed result
                                      html += `<td style="text-align: center !important; padding: 2px 2px !important; vertical-align: middle !important;"></td>`;
                                  } else {
-                                     const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, node.testCaseId);
+                                     const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, testCase);
                                      const statusText = group.result.charAt(0).toUpperCase() + group.result.slice(1);
                                      const statusPlural = group.result === 'passed' ? 'passes' :
                                                           group.result === 'failed' ? 'failures' :
@@ -1303,7 +1326,7 @@
                                  html += `<td style="text-align: center !important; padding: 2px 2px !important; vertical-align: middle !important;"></td>`;
                              } else {
                                  const colors = getStatusColor(group.result);
-                                 const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, node.testCaseId);
+                                 const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, testCase);
                                  const status = testCase.status || group.result;
                                  const statusText = status.charAt(0).toUpperCase() + status.slice(1);
                                  const title = `${statusText} - ${testResult.run.run_name}`;
@@ -1377,9 +1400,13 @@
                          return { bg: '#6c757d', border: '#495057' };
                      }
 
-                     // Helper function to build test case log URL (not used for parent nodes, but needed for consistency)
-                     function buildTestCaseUrl(runId, testCaseId) {
-                         return `/testRun/${runId}/log/${encodeURIComponent(testCaseId)}.html`;
+                     // Helper function to build test case log URL (not used for parent nodes, but kept for consistency)
+                     function buildTestCaseUrl(runId, testCase) {
+                         if (!testCase) {
+                             return '#';
+                         }
+                         const identifier = getTestCaseStorageId(testCase);
+                         return `/testRun/${runId}/log/${encodeURIComponent(identifier)}.html`;
                      }
 
                      // Render summary status groups
@@ -1472,7 +1499,7 @@
                  // Get all test results for this test case across all runs
                  const testResults = sortedRuns.map(run => {
                      const runTestCases = runData.get(run.run_id).testCases;
-                     const tc = runTestCases.find(tc => tc.test_case_id === testCaseId);
+                     const tc = runTestCases.find(tc => getTestCaseDisplayName(tc) === testCaseId);
                      return { run: run, testCase: tc };
                  });
 
@@ -1492,8 +1519,12 @@
                      }
 
                  // Helper function to build test case log URL
-                 function buildTestCaseUrl(runId, testCaseId) {
-                     return `/testRun/${runId}/log/${encodeURIComponent(testCaseId)}.html`;
+                 function buildTestCaseUrl(runId, testCase) {
+                     if (!testCase) {
+                         return '#';
+                     }
+                     const identifier = getTestCaseStorageId(testCase) || testCaseId;
+                     return `/testRun/${runId}/log/${encodeURIComponent(identifier)}.html`;
                  }
 
                  // Render groups with bar segments for consecutive results
@@ -1518,7 +1549,7 @@
                                  // Empty cell for not-executed result
                                  html += `<td style="text-align: center !important; padding: 2px 2px !important; vertical-align: middle !important;"></td>`;
                              } else {
-                                 const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, testCaseId);
+                                 const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, testCase);
                                  const statusText = group.result.charAt(0).toUpperCase() + group.result.slice(1);
                                  const statusPlural = group.result === 'passed' ? 'passes' :
                                                       group.result === 'failed' ? 'failures' :
@@ -1546,7 +1577,7 @@
                              html += `<td style="text-align: center !important; padding: 2px 2px !important; vertical-align: middle !important;"></td>`;
                          } else {
                              const colors = getStatusColor(group.result);
-                             const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, testCaseId);
+                                 const testCaseUrl = buildTestCaseUrl(testResult.run.run_id, testCase);
                              const title = `${testCase.status || group.result}`;
 
                              html += `<td style="text-align: center !important; padding: 2px 2px !important; vertical-align: middle !important;"><a href="${testCaseUrl}" style="display: inline-block; text-decoration: none;"><div style="width: 20px !important; height: 20px !important; background-color: ${colors.bg} !important; border-radius: 50% !important; border: 2px solid ${colors.border} !important; display: inline-block !important; margin: 0 auto !important; cursor: pointer !important;" title="${title}"></div></a></td>`;

@@ -64,13 +64,13 @@ class TestDatabaseFunctions:
     async def sample_test_cases(self, initialized_db, sample_test_run):
         """Create sample test cases in the database."""
         test_cases = [
-            TestCaseData(0, "test-run-123", "Test.Passed", "passed",
+            TestCaseData(0, "test-run-123", "Test.Passed", "tc_passed_001", "passed",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
-            TestCaseData(0, "test-run-123", "Test.Failed", "failed",
+            TestCaseData(0, "test-run-123", "Test.Failed", "tc_failed_002", "failed",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
-            TestCaseData(0, "test-run-123", "Test.Skipped", "skipped",
+            TestCaseData(0, "test-run-123", "Test.Skipped", "tc_skipped_003", "skipped",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                         datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"),
         ]
@@ -103,10 +103,10 @@ class TestDatabaseFunctions:
         assert len(test_cases) == 3
 
         # Verify test case data
-        test_case_ids = [tc["test_case_id"] for tc in test_cases]
-        assert "Test.Passed" in test_case_ids
-        assert "Test.Failed" in test_case_ids
-        assert "Test.Skipped" in test_case_ids
+        test_case_names = [tc["tc_full_name"] for tc in test_cases]
+        assert "Test.Passed" in test_case_names
+        assert "Test.Failed" in test_case_names
+        assert "Test.Skipped" in test_case_names
 
         # Test getting test cases for non-existent run
         test_cases = await initialized_db.get_test_cases_for_run("non-existent-run")
@@ -169,12 +169,14 @@ class TestDatabaseFunctions:
     async def test_log_test_case_started(self, initialized_db, sample_test_run):
         """Test log_test_case_started convenience function."""
         # Test logging test case start
-        success = await database.log_test_case_started("test-run-123", "Test.NewMethod")
+        from testrift_server.tr_server import generate_storage_id
+        tc_id = generate_storage_id()
+        success = await database.log_test_case_started("test-run-123", "Test.NewMethod", tc_id)
         assert success is True
 
         # Verify the test case was created
         test_cases = await initialized_db.get_test_cases_for_run("test-run-123")
-        test_case = next((tc for tc in test_cases if tc["test_case_id"] == "Test.NewMethod"), None)
+        test_case = next((tc for tc in test_cases if tc["tc_full_name"] == "Test.NewMethod"), None)
         assert test_case is not None
         assert test_case["status"] == "running"
         assert test_case["start_time"] is not None
@@ -183,8 +185,10 @@ class TestDatabaseFunctions:
     @pytest.mark.asyncio
     async def test_log_test_case_finished(self, initialized_db, sample_test_run):
         """Test log_test_case_finished convenience function."""
+        from testrift_server.tr_server import generate_storage_id
+        tc_id = generate_storage_id()
         # First create a test case
-        await database.log_test_case_started("test-run-123", "Test.NewMethod")
+        await database.log_test_case_started("test-run-123", "Test.NewMethod", tc_id)
 
         # Test logging test case finish
         success = await database.log_test_case_finished("test-run-123", "Test.NewMethod", "passed")
@@ -192,7 +196,7 @@ class TestDatabaseFunctions:
 
         # Verify the test case was updated
         test_cases = await initialized_db.get_test_cases_for_run("test-run-123")
-        test_case = next((tc for tc in test_cases if tc["test_case_id"] == "Test.NewMethod"), None)
+        test_case = next((tc for tc in test_cases if tc["tc_full_name"] == "Test.NewMethod"), None)
         assert test_case is not None
         assert test_case["status"] == "passed"
         assert test_case["end_time"] is not None
@@ -215,7 +219,8 @@ class TestDatabaseFunctions:
         test_case = TestCaseData(
             id=0,
             run_id="non-existent-run",
-            test_case_id="Test.Invalid",
+            tc_full_name="Test.Invalid",
+            tc_id="tc_invalid_001",
             status="running",
             start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             end_time=None
@@ -249,11 +254,12 @@ class TestDatabaseFunctions:
     @pytest.mark.asyncio
     async def test_unique_constraints(self, initialized_db, sample_test_run):
         """Test unique constraints work correctly."""
-        # Try to insert a test case with the same run_id and test_case_id
+        # Try to insert a test case with the same run_id and tc_full_name
         test_case = TestCaseData(
             id=0,
             run_id="test-run-123",
-            test_case_id="Test.Passed",  # This already exists
+            tc_full_name="Test.Passed",  # This already exists
+            tc_id="tc_passed_001",
             status="running",
             start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             end_time=None
@@ -265,7 +271,7 @@ class TestDatabaseFunctions:
 
         # Verify only one test case with this ID exists
         test_cases = await initialized_db.get_test_cases_for_run("test-run-123")
-        passed_cases = [tc for tc in test_cases if tc["test_case_id"] == "Test.Passed"]
+        passed_cases = [tc for tc in test_cases if tc["tc_full_name"] == "Test.Passed"]
         assert len(passed_cases) == 1
 
     @pytest.mark.asyncio

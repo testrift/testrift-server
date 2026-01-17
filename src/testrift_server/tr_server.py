@@ -200,6 +200,11 @@ DEFAULT_RETENTION_DAYS = CONFIG['default_retention_days']
 LOCALHOST_ONLY = CONFIG['localhost_only']
 ATTACHMENTS_ENABLED = CONFIG['attachments_enabled']
 ATTACHMENT_MAX_SIZE = CONFIG['attachment_max_size']
+CASE_STORAGE_DIR_NAME = "cases"
+CASE_LOG_FILE_SUFFIX = "_log.jsonl"
+CASE_STACK_FILE_SUFFIX = "_stack.jsonl"
+TC_ID_FIELD = "tc_id"
+TC_FULL_NAME_FIELD = "tc_full_name"
 
 # --- Server identity / config fingerprint (used to detect already-running server) ---
 
@@ -302,6 +307,87 @@ def get_run_path(run_id):
 
 def get_run_meta_path(run_id):
     return get_run_path(run_id) / "meta.json"
+
+
+def generate_storage_id():
+    """Return a short, filesystem-friendly identifier for per-test storage."""
+    return uuid.uuid4().hex[:16]
+
+
+def get_case_storage_dir(run_id, storage_id):
+    if not storage_id or not isinstance(storage_id, str):
+        raise ValueError("storage_id must be a non-empty string")
+    return get_run_path(run_id) / CASE_STORAGE_DIR_NAME / storage_id
+
+
+def _ensure_tc_id(run_id, tc_full_name=None, tc_id=None, run=None):
+    if tc_id:
+        return tc_id
+    raise ValueError("tc_id is required - it must be provided directly")
+
+
+def ensure_test_case_entry(run, tc_full_name, meta_hint=None):
+    """Ensure a TestCaseData entry exists for a run, creating one if missing."""
+    existing = run.test_cases.get(tc_full_name)
+    if existing:
+        return existing, False
+
+    meta = dict(meta_hint or {})
+    if TC_ID_FIELD not in meta:
+        raise ValueError(f"tc_id missing for test case {tc_full_name} - cannot create entry")
+
+    meta.setdefault(TC_FULL_NAME_FIELD, tc_full_name)
+
+    logger.warning(
+        "Creating placeholder test case entry for %s in run %s because it was missing",
+        tc_full_name,
+        run.id,
+    )
+    placeholder = TestCaseData(run, tc_full_name, meta)
+    run.test_cases[tc_full_name] = placeholder
+    run.test_cases_by_tc_id[placeholder.tc_id] = placeholder
+    return placeholder, True
+
+
+def find_test_case_by_tc_id(run, tc_id):
+    """Return the TestCaseData matching the tc_id (hash), if any."""
+    if not tc_id:
+        return None
+    return run.test_cases_by_tc_id.get(tc_id)
+
+
+def get_run_and_test_case_by_tc_id(app, run_id, tc_id):
+    """Return (run, test_case) for the provided tc_id (hash), loading from disk if needed."""
+    ws_server = app["ws_server"]
+    run = ws_server.test_runs.get(run_id)
+    test_case = None
+    if run:
+        test_case = find_test_case_by_tc_id(run, tc_id)
+        if test_case:
+            return run, test_case
+
+    run = TestRunData.load_from_disk(run_id)
+    if not run:
+        return None, None
+
+    return run, find_test_case_by_tc_id(run, tc_id)
+
+
+def get_run_and_test_case_by_full_name(app, run_id, tc_full_name):
+    """Return (run, test_case) for the provided tc_full_name, loading from disk if needed."""
+    ws_server = app["ws_server"]
+    run = ws_server.test_runs.get(run_id)
+    test_case = None
+    if run:
+        test_case = run.test_cases.get(tc_full_name)
+        if test_case:
+            return run, test_case
+
+    run = TestRunData.load_from_disk(run_id)
+    if not run:
+        return None, None
+
+    return run, run.test_cases.get(tc_full_name)
 
 
 def sanitize_filename(filename):
@@ -494,23 +580,30 @@ def compute_group_hash(group_data):
     ).hexdigest()
     return digest[:GROUP_HASH_LENGTH]
 
-def get_case_log_path(run_id, test_case_id):
-    sanitized_id = sanitize_filename(test_case_id)
-    return get_run_path(run_id) / f"{sanitized_id}.jsonl"
+def get_case_log_path(run_id, tc_full_name=None, *, tc_id=None, run=None):
+    resolved_id = _ensure_tc_id(run_id, tc_full_name, tc_id, run)
+    cases_dir = get_run_path(run_id) / CASE_STORAGE_DIR_NAME
+    cases_dir.mkdir(parents=True, exist_ok=True)
+    return cases_dir / f"{resolved_id}{CASE_LOG_FILE_SUFFIX}"
 
-def get_case_stack_path(run_id, test_case_id):
-    log_path = get_case_log_path(run_id, test_case_id)
-    return log_path.with_suffix(".stack.jsonl")
 
-def get_attachments_dir(run_id, test_case_id):
+def get_case_stack_path(run_id, tc_full_name=None, *, tc_id=None, run=None):
+    resolved_id = _ensure_tc_id(run_id, tc_full_name, tc_id, run)
+    cases_dir = get_run_path(run_id) / CASE_STORAGE_DIR_NAME
+    cases_dir.mkdir(parents=True, exist_ok=True)
+    return cases_dir / f"{resolved_id}{CASE_STACK_FILE_SUFFIX}"
+
+
+def get_attachments_dir(run_id, tc_full_name=None, *, tc_id=None, run=None):
     """Get the attachments directory for a specific test case"""
-    sanitized_id = sanitize_filename(test_case_id)
-    return get_run_path(run_id) / "attachments" / sanitized_id
+    resolved_id = _ensure_tc_id(run_id, tc_full_name, tc_id, run)
+    return get_case_storage_dir(run_id, resolved_id) / "attachments"
 
-def get_attachment_path(run_id, test_case_id, filename):
+
+def get_attachment_path(run_id, filename, tc_full_name=None, *, tc_id=None, run=None):
     """Get the full path for a specific attachment"""
     sanitized_filename = sanitize_filename(filename)
-    return get_attachments_dir(run_id, test_case_id) / sanitized_filename
+    return get_attachments_dir(run_id, tc_full_name, tc_id=tc_id, run=run) / sanitized_filename
 
 
 def read_jsonl(file_path):
@@ -645,6 +738,9 @@ async def test_run_index_handler(request):
     if not validate_run_id(run_id):
         return web.Response(status=400, text="Invalid run ID")
 
+    run_path = get_run_path(run_id)
+    files_exist = run_path.exists()
+
     # First try to get the run from WebSocket server's in-memory data
     ws_server = request.app["ws_server"]
     run = ws_server.test_runs.get(run_id)
@@ -727,10 +823,18 @@ async def test_run_index_handler(request):
             }
 
         # Convert test cases list to dict format expected by template
+        storage_lookup = {}
+        if files_exist:
+            disk_run = TestRunData.load_from_disk(run_id)
+            if disk_run:
+                storage_lookup = {tc.full_name: tc.tc_id for tc in disk_run.test_cases.values()}
+
         test_cases_dict = {}
         for tc in test_cases_list:
-            test_cases_dict[tc['test_case_id']] = {
-                'id': tc['test_case_id'],
+            full_name = tc['tc_full_name']
+            test_cases_dict[full_name] = {
+                TC_ID_FIELD: storage_lookup.get(full_name),
+                TC_FULL_NAME_FIELD: full_name,
                 'status': tc['status'],
                 'start_time': tc.get('start_time'),
                 'end_time': tc.get('end_time')
@@ -765,10 +869,6 @@ async def test_run_index_handler(request):
         end_time = run_data.get("end_time")
         retention_days = run_data.get("retention_days")
 
-    # Check if files exist on disk (to determine if run has been cleaned up)
-    run_path = get_run_path(run_id)
-    files_exist = run_path.exists()
-
     html = render_template(
         'test_run.html',
         run_id=run_id,
@@ -802,31 +902,39 @@ async def test_run_index_handler(request):
 
 async def test_case_log_handler(request):
     run_id = request.match_info["run_id"]
-    test_case_id = request.match_info["test_case_id"]
+    tc_id = request.match_info["test_case_id"]
 
-    # Validate run_id and test_case_id to prevent path traversal
-    if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
+    # Validate run_id and tc_id to prevent path traversal
+    if not validate_run_id(run_id) or not validate_test_case_id(tc_id):
         return web.Response(status=400, text="Invalid run ID or test case ID")
 
     ws_server = request.app["ws_server"]
     run = ws_server.test_runs.get(run_id)
     live_run = False
+    test_case = None
 
     if run:
         # Consider it live if the run is running OR if the specific test case is running
         live_run = (run.status == "running")
-        test_case = run.test_cases.get(test_case_id)
+        test_case = find_test_case_by_tc_id(run, tc_id)
         if test_case is None:
             return web.Response(status=404, text="Test case not found")
         # Also consider it live if this specific test case is running
         if test_case.status == "running":
             live_run = True
-        logger.info(f"Live run detection - Run in memory: {run_id}, Run status: {run.status}, Test case status: {test_case.status}, Live: {live_run}")
+        logger.info(
+            "Live run detection - Run in memory: %s, Run status: %s, Test case %s status: %s, Live: %s",
+            run_id,
+            run.status,
+            test_case.id,
+            test_case.status,
+            live_run,
+        )
     else:
         run = TestRunData.load_from_disk(run_id)
         if run is None:
             return web.Response(status=404, text="Run not found")
-        test_case = run.test_cases.get(test_case_id)
+        test_case = find_test_case_by_tc_id(run, tc_id)
         if test_case is None:
             return web.Response(status=404, text="Test case not found")
         if not test_case.load_log_from_disk():
@@ -868,11 +976,11 @@ async def test_case_log_handler(request):
         'test_case_log.html',
         run_id=run_id,
         run_name=run.run_name,
-        test_case_id=test_case_id,
+        test_case_id=tc_id,
         run=run,
         run_meta=run_dict,
         test_case=test_case,
-        test_case_meta=test_case.to_dict(),
+        tc_meta=test_case.to_dict(),
         logs=[] if live_run else test_case.logs,  # Don't embed logs for live runs, WebSocket will send them
         # Don't embed stack traces for live runs either; /ws/logs will replay existing exceptions on connect.
         # Embedding + replay would cause duplicate stack traces in the stack trace section.
@@ -983,9 +1091,9 @@ async def zip_export_handler(request):
                 zf.writestr("static/test_case_log.js", tc_js_content)
 
             # Add each test case log page (static mode via unified template)
-            for tc_id, tc in run.test_cases.items():
-                sanitized_tc_id = sanitize_filename(tc_id)
-                log_path = get_case_log_path(run_id, tc_id)
+            for tc_full_name, tc in run.test_cases.items():
+                case_slug = tc.tc_id
+                log_path = get_case_log_path(run_id, tc_id=tc.tc_id)
                 if log_path.exists():
                     raw_logs = read_jsonl(log_path)
                     logs = []
@@ -996,7 +1104,7 @@ async def zip_export_handler(request):
 
                     # Collect attachment information for this test case
                     attachments = []
-                    attachments_dir = get_attachments_dir(run_id, tc_id)
+                    attachments_dir = get_attachments_dir(run_id, tc_id=tc.tc_id)
                     if attachments_dir.exists():
                         for attachment_file in attachments_dir.iterdir():
                             if attachment_file.is_file():
@@ -1010,24 +1118,24 @@ async def zip_export_handler(request):
                         'test_case_log.html',
                         run_id=run_id,
                         run_name=meta.get('run_name'),
-                        test_case_id=tc_id,
+                        test_case_id=tc.tc_id,
                         run_meta=meta,
-                        test_case_meta=tc.to_dict(),
+                        tc_meta=tc.to_dict(),
                         logs=logs,
                         attachments=attachments,  # Add attachments to template
                         live_run=False,
                         server_mode=False
                     )
-                    zf.writestr(f"log/{sanitized_tc_id}.html", log_html)
+                    zf.writestr(f"log/{case_slug}.html", log_html)
 
                 # Add attachments for this test case
-                attachments_dir = get_attachments_dir(run_id, tc_id)
+                attachments_dir = get_attachments_dir(run_id, tc_id=tc.tc_id)
                 if attachments_dir.exists():
                     for attachment_file in attachments_dir.iterdir():
                         if attachment_file.is_file():
                             with open(attachment_file, "rb") as f:
                                 attachment_data = f.read()
-                            zf.writestr(f"attachments/{sanitized_tc_id}/{attachment_file.name}", attachment_data)
+                            zf.writestr(f"attachments/{case_slug}/{attachment_file.name}", attachment_data)
         headers = {
             "Content-Disposition": f"attachment; filename={zip_name}"
         }
@@ -1101,16 +1209,23 @@ async def upload_attachment_handler(request):
         return web.Response(status=403, text="Attachment upload is disabled")
 
     run_id = request.match_info["run_id"]
-    test_case_id = request.match_info["test_case_id"]
+    tc_id = request.match_info["test_case_id"]
 
-    # Validate run_id and test_case_id to prevent path traversal
-    if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
+    # Validate run_id and tc_id to prevent path traversal
+    if not validate_run_id(run_id) or not validate_test_case_id(tc_id):
         return web.Response(status=400, text="Invalid run ID or test case ID")
 
     # Verify the test run exists
     run_path = get_run_path(run_id)
     if not run_path.exists():
         return web.Response(status=404, text="Test run not found")
+
+    run_obj, test_case = get_run_and_test_case_by_tc_id(request.app, run_id, tc_id)
+    if not test_case:
+        logger.error(f"Attachment upload failed to resolve test case tc_id {tc_id} in run {run_id}")
+        return web.Response(status=404, text="Test case not found")
+
+    tc_id_val = test_case.tc_id
 
     try:
         # Parse multipart form data
@@ -1140,11 +1255,11 @@ async def upload_attachment_handler(request):
                 max_size = ATTACHMENT_MAX_SIZE
 
                 # Create attachments directory
-                attachments_dir = get_attachments_dir(run_id, test_case_id)
+                attachments_dir = get_attachments_dir(run_id, tc_id=tc_id_val)
                 attachments_dir.mkdir(parents=True, exist_ok=True)
 
                 # Save the file with size validation
-                file_path = get_attachment_path(run_id, test_case_id, sanitized_filename)
+                file_path = get_attachment_path(run_id, sanitized_filename, tc_id=tc_id_val)
                 async with aiofiles.open(file_path, 'wb') as f:
                     while True:
                         chunk = await part.read_chunk(8192)  # 8KB chunks
@@ -1166,7 +1281,7 @@ async def upload_attachment_handler(request):
                     "upload_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                 })
 
-                log_event("attachment_uploaded", run_id=run_id, test_case_id=test_case_id,
+                log_event("attachment_uploaded", run_id=run_id, test_case_id=test_case.id,
                          filename=filename, size=file_path.stat().st_size)
 
         return web.json_response({
@@ -1175,17 +1290,17 @@ async def upload_attachment_handler(request):
         })
 
     except Exception as e:
-        log_event("attachment_upload_error", run_id=run_id, test_case_id=test_case_id, error=str(e))
+        log_event("attachment_upload_error", run_id=run_id, test_case_id=tc_id, error=str(e))
         return web.Response(status=500, text=f"Upload failed: {str(e)}")
 
 async def download_attachment_handler(request):
     """Handle attachment downloads for test cases"""
     run_id = request.match_info["run_id"]
-    test_case_id = request.match_info["test_case_id"]
+    tc_id = request.match_info["test_case_id"]
     filename = request.match_info["filename"]
 
-    # Validate run_id and test_case_id to prevent path traversal
-    if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
+    # Validate run_id and tc_id to prevent path traversal
+    if not validate_run_id(run_id) or not validate_test_case_id(tc_id):
         return web.Response(status=400, text="Invalid run ID or test case ID")
 
     # Validate filename
@@ -1202,8 +1317,15 @@ async def download_attachment_handler(request):
     if not run_path.exists():
         return web.Response(status=404, text="Test run not found")
 
+    run_obj, test_case = get_run_and_test_case_by_tc_id(request.app, run_id, tc_id)
+    if not test_case:
+        logger.error(f"Attachment download failed to resolve test case tc_id {tc_id} in run {run_id}")
+        return web.Response(status=404, text="Test case not found")
+
+    tc_id_val = test_case.tc_id
+
     # Get the attachment file path
-    file_path = get_attachment_path(run_id, test_case_id, filename)
+    file_path = get_attachment_path(run_id, filename, tc_id=tc_id_val)
 
     if not file_path.exists() or not file_path.is_file():
         return web.Response(status=404, text="Attachment not found")
@@ -1219,10 +1341,10 @@ async def download_attachment_handler(request):
 async def list_attachments_handler(request):
     """List all attachments for a test case"""
     run_id = request.match_info["run_id"]
-    test_case_id = request.match_info["test_case_id"]
+    tc_id = request.match_info["test_case_id"]
 
-    # Validate run_id and test_case_id to prevent path traversal
-    if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
+    # Validate run_id and tc_id to prevent path traversal
+    if not validate_run_id(run_id) or not validate_test_case_id(tc_id):
         return web.Response(status=400, text="Invalid run ID or test case ID")
 
     # Verify the test run exists
@@ -1230,8 +1352,15 @@ async def list_attachments_handler(request):
     if not run_path.exists():
         return web.Response(status=404, text="Test run not found")
 
+    run_obj, test_case = get_run_and_test_case_by_tc_id(request.app, run_id, tc_id)
+    if not test_case:
+        logger.error(f"Attachment listing failed to resolve test case tc_id {tc_id} in run {run_id}")
+        return web.Response(status=404, text="Test case not found")
+
+    tc_id_val = test_case.tc_id
+
     # Get attachments directory
-    attachments_dir = get_attachments_dir(run_id, test_case_id)
+    attachments_dir = get_attachments_dir(run_id, tc_id=tc_id_val)
 
     attachments = []
     if attachments_dir.exists():
@@ -1281,7 +1410,7 @@ async def cleanup_abandoned_running_runs():
                     try:
                         await database.log_test_case_finished(
                             run_id,
-                            tc['test_case_id'],
+                            tc['tc_full_name'],
                             'aborted'
                         )
                         aborted_count += 1
@@ -1290,7 +1419,7 @@ async def cleanup_abandoned_running_runs():
                         if start_time and (not last_tc_event_time or start_time > last_tc_event_time):
                             last_tc_event_time = start_time
                     except Exception as e:
-                        logger.error(f"Error aborting test case {tc['test_case_id']}: {e}")
+                        logger.error(f"Error aborting test case {tc['tc_full_name']}: {e}")
 
             # Only update run status if it's still running
             if run_status == 'running' and aborted_count > 0:
@@ -1376,8 +1505,9 @@ class TestRunData:  # pytest: disable=collection
         self.status = "running"
         self.start_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
         self.end_time = None
-        self.test_cases: dict[str, TestCaseData] = {}  # tc_id -> metadata dict
-        self.logs = {}  # tc_id -> list of logs entries
+        self.test_cases: dict[str, TestCaseData] = {}  # tc_full_name -> TestCaseData
+        self.test_cases_by_tc_id: dict[str, TestCaseData] = {}  # tc_id (hash) -> TestCaseData
+        self.logs = {}  # tc_full_name -> list of logs entries
         self.last_update = datetime.now(UTC)
 
     def update_last(self):
@@ -1395,7 +1525,7 @@ class TestRunData:  # pytest: disable=collection
             "status": self.status,
             "start_time": self.start_time,
             "end_time": self.end_time,
-            "test_cases": {tc_id: tc.to_dict() for tc_id, tc in self.test_cases.items()},
+            "test_cases": {tc_full_name: tc.to_dict() for tc_full_name, tc in self.test_cases.items()},
         }
 
     @classmethod
@@ -1415,7 +1545,8 @@ class TestRunData:  # pytest: disable=collection
         run.status = meta.get("status", "running")
         run.start_time = meta.get("start_time", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z")
         run.end_time = meta.get("end_time", "")
-        run.test_cases = {tc_id: TestCaseData.from_dict(run, tc_id, tc_meta) for tc_id, tc_meta in meta.get("test_cases", {}).items()}
+        run.test_cases = {tc_full_name: TestCaseData.from_dict(run, tc_full_name, tc_meta) for tc_full_name, tc_meta in meta.get("test_cases", {}).items()}
+        run.test_cases_by_tc_id = {tc.tc_id: tc for tc in run.test_cases.values() if getattr(tc, "tc_id", None)}
         return run
 
     def load_from_disk(run_id):
@@ -1434,9 +1565,10 @@ class TestCaseData:  # pytest: disable=collection
     _ALLOWED_PHASE_VALUES = {"teardown"}
     _ALLOWED_DIR_VALUES = {"tx", "rx"}
 
-    def __init__(self, run, test_case_id, meta={}):
+    def __init__(self, run, tc_full_name, meta={}):
         self.run = run
-        self.id = test_case_id
+        self.id = tc_full_name
+        self.full_name = tc_full_name
         self.status = meta.get("status", "running")
         self.start_time = meta.get("start_time", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z")
         self.end_time = meta.get("end_time", None)
@@ -1444,8 +1576,14 @@ class TestCaseData:  # pytest: disable=collection
         self.stack_traces = meta.get("stack_traces", [])
         self.subscribers = []
 
+        # tc_id MUST be in meta - it should have been generated once when test case started
+        # and stored in meta.json. If it's missing, that's a bug.
+        if TC_ID_FIELD not in meta:
+            raise ValueError(f"tc_id missing in meta for test case {tc_full_name}. tc_id must be generated once and stored.")
+        self.tc_id = meta[TC_ID_FIELD]
+
         # Ensure persisted stack traces are loaded even if meta.json lacked them
-        stack_path = get_case_stack_path(self.run.id, self.id)
+        stack_path = get_case_stack_path(self.run.id, tc_id=self.tc_id)
         if stack_path.exists():
             try:
                 file_traces = read_jsonl(stack_path)
@@ -1491,6 +1629,8 @@ class TestCaseData:  # pytest: disable=collection
 
     def to_dict(self):
         return {
+            TC_ID_FIELD: self.tc_id,
+            TC_FULL_NAME_FIELD: self.id,
             "status": self.status,
             "start_time": self.start_time,
             "end_time": self.end_time,
@@ -1500,11 +1640,11 @@ class TestCaseData:  # pytest: disable=collection
         }
 
     @classmethod
-    def from_dict(cls, run, test_case_id, meta):
-        return cls(run, test_case_id, meta)
+    def from_dict(cls, run, tc_full_name, meta):
+        return cls(run, tc_full_name, meta)
 
     async def add_log_entries(self, entries):
-        log_path = get_case_log_path(self.run.id, self.id)
+        log_path = get_case_log_path(self.run.id, tc_id=self.tc_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Append entries to log file and in-memory logs
@@ -1547,7 +1687,7 @@ class TestCaseData:  # pytest: disable=collection
             "is_error": bool(trace_entry.get("is_error", False)),
         }
 
-        stack_path = get_case_stack_path(self.run.id, self.id)
+        stack_path = get_case_stack_path(self.run.id, tc_id=self.tc_id)
         stack_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -1572,7 +1712,7 @@ class TestCaseData:  # pytest: disable=collection
 
     def load_log_from_disk(self) -> bool:
         self.logs = []
-        log_path = get_case_log_path(self.run.id, self.id)
+        log_path = get_case_log_path(self.run.id, tc_id=self.tc_id)
         if not log_path.exists():
             return False
 
@@ -1717,7 +1857,7 @@ class WebSocketServer:
                         "type": "test_case_finished",
                         "run_id": run.id,
                         "test_case_id": tc_id,
-                        "test_case_meta": tc_meta,
+                        "tc_meta": tc_meta,
                         "counts": {
                             "passed": passed_count,
                             "failed": failed_count,
@@ -1924,11 +2064,28 @@ class WebSocketServer:
                     elif msg_type == "test_case_started":
                         try:
                             run_id = data.get("run_id")
-                            tc_id = data.get("test_case_id")
+                            tc_full_name = data.get("tc_full_name")
+                            tc_id = data.get("tc_id")
 
                             if not run_id:
                                 logger.info("Error: run_id missing from test_case_started message")
                                 continue
+
+                            if not tc_full_name:
+                                logger.info("Error: tc_full_name missing from test_case_started message")
+                                continue
+
+                            if not tc_id:
+                                logger.info("Error: tc_id missing from test_case_started message")
+                                continue
+
+                            # Validate tc_id is 8-character hex string
+                            if not isinstance(tc_id, str) or len(tc_id) != 8 or not all(c in '0123456789abcdefABCDEF' for c in tc_id):
+                                logger.info(f"Error: Invalid tc_id '{tc_id}' - must be 8 hex characters")
+                                continue
+
+                            # Normalize to lowercase
+                            tc_id = tc_id.lower()
 
                             # Find the run by run_id
                             run = self.test_runs.get(run_id)
@@ -1938,21 +2095,28 @@ class WebSocketServer:
                                 continue
 
                             # Replace HTML entities with actual quotes
-                            tc_id = tc_id.replace("&quot;", '"')
-                            tc_meta = data.get("test_case_meta", {})
-                            run.test_cases[tc_id] = TestCaseData(run, tc_id, tc_meta)
+                            tc_full_name = tc_full_name.replace("&quot;", '"')
+                            tc_meta = dict(data.get("tc_meta", {}) or {})
+
+                            # Client sends tc_id - store it
+                            tc_meta[TC_ID_FIELD] = tc_id
+                            tc_meta[TC_FULL_NAME_FIELD] = tc_full_name
+
+                            test_case_obj = TestCaseData(run, tc_full_name, tc_meta)
+                            run.test_cases[tc_full_name] = test_case_obj
+                            run.test_cases_by_tc_id[test_case_obj.tc_id] = test_case_obj
                             run.update_last()
                             # Ensure log file exists
-                            log_path = get_case_log_path(run.id, tc_id)
+                            log_path = get_case_log_path(run.id, tc_id=test_case_obj.tc_id)
                             log_path.parent.mkdir(parents=True, exist_ok=True)
                             if not log_path.exists():
                                 with open(log_path, "w", encoding="utf-8") as f:
                                     pass
-                            log_event("test_case_started", run_id=run.id, test_case_id=tc_id)
+                            log_event("test_case_started", run_id=run.id, test_case_id=tc_full_name)
 
                             # Log to database
                             try:
-                                await database.log_test_case_started(run.id, tc_id, tc_meta.get("start_time"))
+                                await database.log_test_case_started(run.id, tc_full_name, tc_id, tc_meta.get("start_time"))
                             except Exception as db_error:
                                 logger.error(f"Database logging error for test_case_started: {db_error}")
 
@@ -1991,8 +2155,8 @@ class WebSocketServer:
                             await self.broadcast_ui({
                                 "type": "test_case_started",
                                 "run_id": run.id,
-                                "test_case_id": tc_id,
-                                "test_case_meta": tc_meta,
+                                "test_case_id": tc_full_name,
+                                "tc_meta": tc_meta,
                                 "counts": {
                                     "passed": passed_count,
                                     "failed": failed_count,
@@ -2008,10 +2172,14 @@ class WebSocketServer:
                     elif msg_type == "log_batch":
                         try:
                             run_id = data.get("run_id")
-                            tc_id = data.get("test_case_id")
+                            tc_id = data.get("tc_id")
 
                             if not run_id:
                                 logger.info("Error: run_id missing from log_batch message")
+                                continue
+
+                            if not tc_id:
+                                logger.info("Error: tc_id missing from log_batch message")
                                 continue
 
                             # Find the run by run_id
@@ -2021,15 +2189,16 @@ class WebSocketServer:
                                 logger.info(f"Error: Run '{run_id}' not found for log_batch message")
                                 continue
 
-                            # Replace HTML entities with actual quotes
-                            tc_id = tc_id.replace("&quot;", '"')
+                            # Find test case by tc_id
+                            test_case = run.test_cases_by_tc_id.get(tc_id)
+                            if not test_case:
+                                logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
+                                continue
+
                             entries = data.get("entries", [])
                             run.update_last()
-                            if tc_id not in run.test_cases:
-                                continue
-                            test_case = run.test_cases[tc_id]
                             await test_case.add_log_entries(entries)
-                            log_event("log_batch", run_id=run.id, test_case_id=tc_id, count=len(entries))
+                            log_event("log_batch", run_id=run.id, tc_id=tc_id, count=len(entries))
                         except Exception as e:
                             logger.error(f"Error in log_batch: {e}")
                             import traceback
@@ -2038,10 +2207,10 @@ class WebSocketServer:
                     elif msg_type == "exception":
                         try:
                             run_id = data.get("run_id")
-                            tc_id = data.get("test_case_id")
+                            tc_id = data.get("tc_id")
 
                             if not run_id or not tc_id:
-                                logger.info("Error: run_id or test_case_id missing from exception message")
+                                logger.info("Error: run_id or tc_id missing from exception message")
                                 continue
 
                             run = self.test_runs.get(run_id)
@@ -2049,10 +2218,10 @@ class WebSocketServer:
                                 logger.info(f"Error: Run '{run_id}' not found for exception message")
                                 continue
 
-                            tc_id = tc_id.replace("&quot;", '"')
-                            test_case = run.test_cases.get(tc_id)
+                            # Find test case by tc_id
+                            test_case = run.test_cases_by_tc_id.get(tc_id)
                             if not test_case:
-                                logger.info(f"Error: Test case '{tc_id}' not found for exception message")
+                                logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
                                 continue
 
                             # Extract fields directly from data (NUnit sends them at top level)
@@ -2086,7 +2255,7 @@ class WebSocketServer:
                             with open(meta_path, "w", encoding="utf-8") as f:
                                 json.dump(run_data, f)
 
-                            log_event("exception", run_id=run.id, test_case_id=tc_id)
+                            log_event("exception", run_id=run.id, test_case_id=tc_full_name)
 
                         except Exception as e:
                             logger.error(f"Error in exception handling: {e}")
@@ -2096,10 +2265,14 @@ class WebSocketServer:
                     elif msg_type == "test_case_finished":
                         try:
                             run_id = data.get("run_id")
-                            tc_id = data.get("test_case_id")
+                            tc_id = data.get("tc_id")
 
                             if not run_id:
                                 logger.info("Error: run_id missing from test_case_finished message")
+                                continue
+
+                            if not tc_id:
+                                logger.info("Error: tc_id missing from test_case_finished message")
                                 continue
 
                             # Find the run by run_id
@@ -2109,11 +2282,11 @@ class WebSocketServer:
                                 logger.info(f"Error: Run '{run_id}' not found for test_case_finished message")
                                 continue
 
-                            # Replace HTML entities with actual quotes
-                            tc_id = tc_id.replace("&quot;", '"')
-                            if tc_id not in run.test_cases:
-                                raise Exception(f"Test case {tc_id} not found")
-                            test_case = run.test_cases[tc_id]
+                            # Find test case by tc_id
+                            test_case = run.test_cases_by_tc_id.get(tc_id)
+                            if not test_case:
+                                logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
+                                continue
 
                             # Validate and set status
                             status = data.get("status", "").lower()
@@ -2122,7 +2295,7 @@ class WebSocketServer:
                                 test_case.status = status
                                 test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                             else:
-                                logger.info(f"Error: Invalid test status '{data.get('status')}' for test case {tc_id}, ignoring test case")
+                                logger.info(f"Error: Invalid test status '{data.get('status')}' for test case {test_case.full_name}, ignoring test case")
                                 continue
                             tc_meta = test_case.to_dict()
 
@@ -2148,8 +2321,8 @@ class WebSocketServer:
                             await self.broadcast_ui({
                                 "type": "test_case_updated",
                                 "run_id": run.id,
-                                "test_case_id": tc_id,
-                                "test_case_meta": tc_meta,
+                                "test_case_id": test_case.full_name,
+                                "tc_meta": tc_meta,
                                 "counts": {
                                     "passed": passed_count,
                                     "failed": failed_count,
@@ -2171,11 +2344,11 @@ class WebSocketServer:
                                 run_data["deletes_at"] = current_meta["deletes_at"]
                             with open(meta_path, "w", encoding="utf-8") as f:
                                 json.dump(run_data, f)
-                            log_event("test_case_finished", run_id=run.id, test_case_id=tc_id, status=test_case.status)
+                            log_event("test_case_finished", run_id=run.id, tc_id=tc_id, status=test_case.status)
 
                             # Log to database
                             try:
-                                await database.log_test_case_finished(run.id, tc_id, test_case.status)
+                                await database.log_test_case_finished(run.id, test_case.full_name, test_case.status)
                             except Exception as db_error:
                                 logger.error(f"Database logging error for test_case_finished: {db_error}")
 
@@ -2201,8 +2374,8 @@ class WebSocketServer:
                             await self.broadcast_ui({
                                 "type": "test_case_finished",
                                 "run_id": run.id,
-                                "test_case_id": tc_id,
-                                "test_case_meta": tc_meta,
+                                "test_case_id": test_case.full_name,
+                                "tc_meta": tc_meta,
                                 "counts": {
                                     "passed": passed_count,
                                     "failed": failed_count,
@@ -2233,18 +2406,18 @@ class WebSocketServer:
                             # CRITICAL: Before marking run as finished, check for any test cases still in "running" state
                             # This can happen if WebSocket closes or test case crashes before sending test_case_finished
                             aborted_test_cases = []
-                            for tc_id, test_case in run.test_cases.items():
+                            for tc_full_name, test_case in run.test_cases.items():
                                 if test_case.status == "running":
-                                    logger.info(f"Test case {tc_id} was still running when run_finished received, marking as aborted")
+                                    logger.info(f"Test case {tc_full_name} was still running when run_finished received, marking as aborted")
                                     test_case.status = "aborted"
                                     test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
-                                    aborted_test_cases.append(tc_id)
+                                    aborted_test_cases.append(tc_full_name)
 
                                     # Log to database
                                     try:
-                                        await database.log_test_case_finished(run.id, tc_id, 'aborted')
+                                        await database.log_test_case_finished(run.id, tc_full_name, 'aborted')
                                     except Exception as db_error:
-                                        logger.error(f"Database logging error for aborted test case {tc_id}: {db_error}")
+                                        logger.error(f"Database logging error for aborted test case {tc_full_name}: {db_error}")
 
                             # Broadcast updates for aborted test cases
                             if aborted_test_cases:
@@ -2267,14 +2440,14 @@ class WebSocketServer:
                                             aborted_count += 1
 
                                 # Broadcast each aborted test case
-                                for tc_id in aborted_test_cases:
-                                    test_case = run.test_cases[tc_id]
+                                for tc_full_name in aborted_test_cases:
+                                    test_case = run.test_cases[tc_full_name]
                                     tc_meta = test_case.to_dict()
                                     await self.broadcast_ui({
                                         "type": "test_case_finished",
                                         "run_id": run.id,
-                                        "test_case_id": tc_id,
-                                        "test_case_meta": tc_meta,
+                                        "test_case_id": tc_full_name,
+                                        "tc_meta": tc_meta,
                                         "counts": {
                                             "passed": passed_count,
                                             "failed": failed_count,
@@ -2348,7 +2521,7 @@ class WebSocketServer:
             self.ui_clients.remove(ws)
 
     async def handle_log_stream(self, ws, run_id, test_case_id):
-        logger.info(f"WebSocket log stream request: run_id={run_id}, test_case_id={test_case_id}")
+        logger.info(f"WebSocket log stream request: run_id={run_id}, test_case_storage_id={test_case_id}")
 
         # Validate run_id and test_case_id to prevent path traversal
         if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
@@ -2365,7 +2538,7 @@ class WebSocketServer:
             await ws.close()
             return
 
-        test_case = test_run.test_cases.get(test_case_id)
+        test_case = find_test_case_by_tc_id(test_run, test_case_id)
         if not test_case:
             logger.info(f"Couldn't find test case {test_case_id} in test run {run_id}")
             await ws.send_json({ "type": "error", "message": "Test case not found" })
@@ -2542,11 +2715,31 @@ async def api_test_results_for_runs_handler(request):
             }, status=400)
 
         # Get test results for all runs in one efficient query
-        test_results = await database.db.get_test_results_for_runs(run_ids)
+        raw_test_results = await database.db.get_test_results_for_runs(run_ids)
+
+        enriched_results = {}
+        for run_id, cases in raw_test_results.items():
+            enriched_cases = []
+            for case in cases:
+                case_copy = dict(case)
+                # Get the full name and tc_id from the database
+                full_name = case_copy.get('tc_full_name')
+                tc_id = case_copy.get('tc_id')
+
+                if full_name:
+                    case_copy[TC_FULL_NAME_FIELD] = full_name
+                if tc_id:
+                    case_copy[TC_ID_FIELD] = tc_id
+                else:
+                    case_copy[TC_ID_FIELD] = ""
+
+                enriched_cases.append(case_copy)
+
+            enriched_results[run_id] = enriched_cases
 
         return web.json_response({
             "success": True,
-            "data": test_results
+            "data": enriched_results
         })
 
     except Exception as e:
@@ -2604,11 +2797,11 @@ async def api_test_results_over_time_handler(request):
 async def api_test_case_history_handler(request):
     """Get execution history for a specific test case."""
     try:
-        test_case_id = request.query.get('test_case_id')
-        if not test_case_id:
+        tc_full_name = request.query.get('tc_full_name')
+        if not tc_full_name:
             return web.json_response({
                 "success": False,
-                "error": "test_case_id parameter is required"
+                "error": "tc_full_name parameter is required"
             }, status=400)
 
         limit = int(request.query.get('limit', 50))
@@ -2629,7 +2822,7 @@ async def api_test_case_history_handler(request):
 
         # Get test case history
         history = await database.db.get_test_case_history(
-            test_case_id=test_case_id,
+            tc_full_name=tc_full_name,
             limit=limit,
             metadata_filters=metadata_filters if metadata_filters else None,
             group_hash=group_hash
@@ -2651,11 +2844,11 @@ async def api_test_case_history_handler(request):
 async def api_test_case_history_with_links_handler(request):
     """Get test case history with log file existence check."""
     try:
-        test_case_id = request.query.get('test_case_id')
-        if not test_case_id:
+        tc_full_name = request.query.get('tc_full_name')
+        if not tc_full_name:
             return web.json_response({
                 "success": False,
-                "error": "test_case_id is required"
+                "error": "tc_full_name is required"
             }, status=400)
 
         limit = int(request.query.get('limit', 10))
@@ -2670,7 +2863,7 @@ async def api_test_case_history_with_links_handler(request):
 
         # Get test case history
         history = await database.db.get_test_case_history(
-            test_case_id=test_case_id,
+            tc_full_name=tc_full_name,
             limit=limit + 1,  # Get one extra to account for current run exclusion
             group_hash=group_hash
         )
@@ -2682,9 +2875,16 @@ async def api_test_case_history_with_links_handler(request):
             if current_run_id and run_id == current_run_id:
                 continue
 
-            # Check if log file exists
-            log_path = get_case_log_path(run_id, test_case_id)
-            item['has_log'] = log_path.exists()
+            # tc_id comes directly from database
+            tc_id = item.get('tc_id')
+            if tc_id:
+                try:
+                    log_path = get_case_log_path(run_id, tc_id=tc_id)
+                    item['has_log'] = log_path.exists()
+                except Exception:
+                    item['has_log'] = False
+            else:
+                item['has_log'] = False
 
             result.append(item)
 
@@ -2810,11 +3010,18 @@ async def api_failures_toplist_handler(request):
             symptom_map = {}
             for case in failed_cases:
                 # Load stack trace from file
-                stack_path = get_case_stack_path(case['run_id'], case['test_case_id'])
+                tc_id = case.get('tc_id')
+                try:
+                    if tc_id:
+                        stack_path = get_case_stack_path(case['run_id'], tc_id=tc_id)
+                    else:
+                        stack_path = get_case_stack_path(case['run_id'], case['tc_full_name'])
+                except Exception:
+                    stack_path = None
                 symptom = None
                 stack_trace_sample = None
 
-                if stack_path.exists():
+                if stack_path and stack_path.exists():
                     try:
                         traces = read_jsonl(stack_path)
                         if traces and len(traces) > 0:
@@ -2835,7 +3042,7 @@ async def api_failures_toplist_handler(request):
                     symptom_map[symptom] = {
                         'symptom': symptom,
                         'failure_count': 0,
-                        'affected_test_cases': {},  # Dict: test_case_id -> {run_id, time}
+                        'affected_test_cases': {},  # Dict: tc_full_name -> {run_id, time}
                         'last_failure': None,
                         'last_failure_run_id': None,
                         'last_failure_test_case': None,
@@ -2845,19 +3052,22 @@ async def api_failures_toplist_handler(request):
                 symptom_map[symptom]['failure_count'] += 1
 
                 # Track last failure and count for each test case
-                tc_id = case['test_case_id']
+                tc_full_name = case['tc_full_name']
+                tc_id = case.get('tc_id', '')
                 case_time = case.get('start_time')
-                if tc_id not in symptom_map[symptom]['affected_test_cases']:
-                    symptom_map[symptom]['affected_test_cases'][tc_id] = {
+                if tc_full_name not in symptom_map[symptom]['affected_test_cases']:
+                    symptom_map[symptom]['affected_test_cases'][tc_full_name] = {
                         'run_id': case['run_id'],
+                        'tc_id': tc_id,
                         'time': case_time,
                         'count': 1
                     }
                 else:
-                    symptom_map[symptom]['affected_test_cases'][tc_id]['count'] += 1
-                    if case_time and case_time > (symptom_map[symptom]['affected_test_cases'][tc_id].get('time') or ''):
-                        symptom_map[symptom]['affected_test_cases'][tc_id]['run_id'] = case['run_id']
-                        symptom_map[symptom]['affected_test_cases'][tc_id]['time'] = case_time
+                    symptom_map[symptom]['affected_test_cases'][tc_full_name]['count'] += 1
+                    if case_time and case_time > (symptom_map[symptom]['affected_test_cases'][tc_full_name].get('time') or ''):
+                        symptom_map[symptom]['affected_test_cases'][tc_full_name]['run_id'] = case['run_id']
+                        symptom_map[symptom]['affected_test_cases'][tc_full_name]['tc_id'] = tc_id
+                        symptom_map[symptom]['affected_test_cases'][tc_full_name]['time'] = case_time
 
                 # Track overall last failure for the symptom
                 if case_time:
@@ -2865,32 +3075,55 @@ async def api_failures_toplist_handler(request):
                     if not current_last or case_time > current_last:
                         symptom_map[symptom]['last_failure'] = case_time
                         symptom_map[symptom]['last_failure_run_id'] = case['run_id']
-                        symptom_map[symptom]['last_failure_test_case'] = case['test_case_id']
+                        symptom_map[symptom]['last_failure_test_case'] = case['tc_full_name']
+                        symptom_map[symptom]['last_failure_tc_id'] = tc_id
                         if stack_trace_sample:
                             symptom_map[symptom]['stack_trace_sample'] = stack_trace_sample
 
             # Convert to list and sort
             results = list(symptom_map.values())
             for r in results:
-                # Convert affected_test_cases dict to list of objects with run_id and count
-                # Only include run_id if the log file still exists
+                # Convert affected_test_cases dict to list of objects with tc_id and count
                 affected_list = []
-                for tc_id, info in r['affected_test_cases'].items():
+                for tc_full_name, info in r['affected_test_cases'].items():
                     run_id = info['run_id']
+                    tc_id = info.get('tc_id', '')
                     count = info.get('count', 1)
-                    log_path = get_case_log_path(run_id, tc_id)
-                    if log_path.exists():
-                        affected_list.append({'test_case_id': tc_id, 'last_failure_run_id': run_id, 'failure_count': count})
-                    else:
-                        affected_list.append({'test_case_id': tc_id, 'last_failure_run_id': None, 'failure_count': count})
+                    try:
+                        if tc_id:
+                            log_path = get_case_log_path(run_id, tc_id=tc_id)
+                        else:
+                            log_path = get_case_log_path(run_id, tc_full_name)
+                        has_log = log_path.exists()
+                    except Exception:
+                        has_log = False
+                    affected_list.append({
+                        TC_ID_FIELD: tc_id,
+                        TC_FULL_NAME_FIELD: tc_full_name,
+                        'last_failure_run_id': run_id if has_log else None,
+                        'failure_count': count
+                    })
                 # Sort by failure count descending
                 affected_list.sort(key=lambda x: x['failure_count'], reverse=True)
                 r['affected_test_cases'] = affected_list
 
                 # Also check if the overall last failure log exists
                 if r['last_failure_run_id'] and r['last_failure_test_case']:
-                    last_log_path = get_case_log_path(r['last_failure_run_id'], r['last_failure_test_case'])
-                    if not last_log_path.exists():
+                    last_tc_id = r.get('last_failure_tc_id', '')
+                    try:
+                        if last_tc_id:
+                            last_log_path = get_case_log_path(r['last_failure_run_id'], tc_id=last_tc_id)
+                        else:
+                            last_log_path = get_case_log_path(r['last_failure_run_id'], r['last_failure_test_case'])
+                        has_last_log = last_log_path.exists()
+                    except Exception:
+                        has_last_log = False
+                    if has_last_log:
+                        r['last_failure_test_case'] = {
+                            TC_ID_FIELD: last_tc_id,
+                            TC_FULL_NAME_FIELD: r['last_failure_test_case']
+                        }
+                    else:
                         r['last_failure_run_id'] = None
                         r['last_failure_test_case'] = None
 
@@ -2910,11 +3143,24 @@ async def api_failures_toplist_handler(request):
                 metadata_filters=metadata_filters if metadata_filters else None
             )
 
-            # Check if log files exist for each result
+            # Check if log files exist for each result while enriching identifiers
             for r in results:
-                if r.get('last_failure_run_id') and r.get('test_case_id'):
-                    log_path = get_case_log_path(r['last_failure_run_id'], r['test_case_id'])
-                    if not log_path.exists():
+                full_name = r.get('tc_full_name')
+                tc_id = r.get('last_failure_tc_id', '')
+                if full_name:
+                    r[TC_FULL_NAME_FIELD] = full_name
+                if tc_id:
+                    r[TC_ID_FIELD] = tc_id
+                else:
+                    r[TC_ID_FIELD] = ""
+
+                if r.get('last_failure_run_id') and tc_id:
+                    try:
+                        log_path = get_case_log_path(r['last_failure_run_id'], tc_id=tc_id)
+                        has_log = log_path.exists()
+                    except Exception:
+                        has_log = False
+                    if not has_log:
                         r['last_failure_run_id'] = None
 
             return web.json_response({
@@ -3027,8 +3273,11 @@ async def api_classifications_for_run_handler(request):
                 for hist_item in class_data['history']:
                     hist_run_id = hist_item.get('run_id')
                     if hist_run_id:
-                        log_path = get_case_log_path(hist_run_id, tc_id)
-                        hist_item['has_log'] = log_path.exists()
+                        try:
+                            log_path = get_case_log_path(hist_run_id, tc_id)
+                            hist_item['has_log'] = log_path.exists()
+                        except Exception:
+                            hist_item['has_log'] = False
 
         return web.json_response({
             "success": True,
@@ -3051,11 +3300,11 @@ async def api_tc_hover_history_handler(request):
     Returns both previous results (before current run) and latest results (all runs).
     """
     try:
-        test_case_id = request.query.get('test_case_id')
-        if not test_case_id:
+        tc_full_name = request.query.get('tc_full_name')
+        if not tc_full_name:
             return web.json_response({
                 "success": False,
-                "error": "test_case_id is required"
+                "error": "tc_full_name is required"
             }, status=400)
 
         group_hash = request.query.get('group')
@@ -3081,7 +3330,7 @@ async def api_tc_hover_history_handler(request):
 
         # Get previous results (before current run)
         previous_history = await database.db.get_test_case_classification_data(
-            test_case_id=test_case_id,
+            tc_full_name=tc_full_name,
             group_hash=group_hash,
             limit=10,
             current_run_id=current_run_id,
@@ -3090,7 +3339,7 @@ async def api_tc_hover_history_handler(request):
 
         # Get latest results (all runs, including current and future)
         latest_history = await database.db.get_test_case_classification_data(
-            test_case_id=test_case_id,
+            tc_full_name=tc_full_name,
             group_hash=group_hash,
             limit=10
         )
@@ -3100,13 +3349,22 @@ async def api_tc_hover_history_handler(request):
             result = []
             for item in history_items:
                 run_id = item.get('run_id')
-                log_path = get_case_log_path(run_id, test_case_id)
+                tc_id = item.get('tc_id')
+                try:
+                    if tc_id:
+                        log_path = get_case_log_path(run_id, tc_id=tc_id)
+                    else:
+                        log_path = get_case_log_path(run_id, tc_full_name)
+                    has_log = log_path.exists()
+                except Exception:
+                    has_log = False
                 result.append({
                     'status': item['status'],
                     'run_id': run_id,
+                    'tc_id': tc_id,
                     'run_name': item.get('run_name'),
                     'run_start_time': item.get('run_start_time'),
-                    'has_log': log_path.exists()
+                    'has_log': has_log
                 })
             return result
 

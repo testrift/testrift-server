@@ -25,6 +25,7 @@ from testrift_server.tr_server import (
     get_case_log_path,
     TestRunData,
     TestCaseData,
+    generate_storage_id,
 )
 
 
@@ -77,8 +78,10 @@ class TestTemplateHandlers:
         await database.db.insert_test_run(test_run, user_metadata)
 
         # Add test case
+        from testrift_server.tr_server import generate_storage_id
+        tc_id = generate_storage_id()
         test_case = database.TestCaseData(
-            0, run_id, "Test.TemplateTest", "passed",
+            0, run_id, "Test.TemplateTest", tc_id, "passed",
             datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
         )
@@ -205,14 +208,21 @@ class TestTemplateHandlers:
                 test_case_id: {
                     "status": "passed",
                     "start_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-                    "end_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+                    "end_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
+                    "logs": [],
+                    "stack_traces": []
                 }
             }
         }
+
+        from testrift_server.tr_server import TC_ID_FIELD
+        storage_id = generate_storage_id()
+        meta["test_cases"][test_case_id][TC_ID_FIELD] = storage_id
+
         (run_path / "meta.json").write_text(json.dumps(meta))
 
         # Create log file
-        log_path = get_case_log_path(run_id, test_case_id)
+        log_path = get_case_log_path(run_id, tc_id=storage_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", "message": "Test log"}) + "\n"
@@ -220,7 +230,7 @@ class TestTemplateHandlers:
 
         request = MagicMock()
         request.app = mock_app
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id}
+        request.match_info = {"run_id": run_id, "test_case_id": storage_id}
 
         response = await handle_test_case_log(request)
 

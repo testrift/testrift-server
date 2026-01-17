@@ -875,6 +875,7 @@
         let runExecutionTimer = null;
         const STATUS_FILTER_STORAGE_KEY = 'testRunStatusFilters';
         const STATUS_FILTER_KEYS = ['passed', 'failed', 'skipped', 'error'];
+        const LOG_URL_BASE = "{% if live_run %}/testRun/{{ run_id }}/log/{% else %}log/{% endif %}";
         let statusFilters = {
             passed: true,
             failed: true,
@@ -1304,10 +1305,11 @@
 
         // TestHtmlEntry class for tree building
         class TestHtmlEntry {
-            constructor(fullName, traceHtmlFile = null) {
+            constructor(fullName, traceHtmlFile = null, storageId = null) {
                 this.status = '';
                 this.fullName = fullName;
                 this.traceHtmlFile = traceHtmlFile;
+                this.storageId = storageId || null;
                 this.children = [];
                 this.parent = null;
                 this.indicator = null;
@@ -1325,11 +1327,13 @@
                 if (traceHtmlFile) {
                     // Only create badge for actual test cases (those with URLs)
                     badge = $("<span>").addClass("badge " + getBadgeClass(this.status)).text(this.status);
-                    badge.attr('data-tc-id', fullName); // Store TC ID for classification lookup
+                    badge.attr('data-tc-id', fullName); // Store display name for lookup
+                    badge.attr('data-storage-id', this.storageId || fullName);
 
                     // Mark this as an end test case node for CSS targeting
                     listItem.addClass("test-case-node");
                     listItem.attr('data-tc-id', fullName);
+                    listItem.attr('data-storage-id', this.storageId || fullName);
 
                     // Check if files exist on disk
                     const filesExist = {{ files_exist | tojson }};
@@ -1918,7 +1922,7 @@
 
             // Create all test entries first
             testData.forEach(test => {
-                const testEntry = new TestHtmlEntry(test.name, test.url);
+                const testEntry = new TestHtmlEntry(test.name, test.url, test.storageId);
                 testEntry.Status = test.status;
                 testMap.set(test.name, testEntry);
             });
@@ -1987,7 +1991,7 @@
 
             // Add all test cases to the test map
             testData.forEach(test => {
-                const testEntry = new TestHtmlEntry(test.name, test.url);
+                const testEntry = new TestHtmlEntry(test.name, test.url, test.storageId);
                 testEntry.Status = test.status || 'running';
 
                 // Store start and end times for execution time calculation
@@ -2049,14 +2053,20 @@
         }
 
 
-        function addOrUpdateTestCase(tc_id, tc_meta, forceRunning = false) {
+        function addOrUpdateTestCase(tc_full_name, tc_meta, forceRunning = false) {
             let testEntry = null;
             let isNewTest = false;
-            if (testMap.has(tc_id)) {
-                testEntry = testMap.get(tc_id);
+            if (testMap.has(tc_full_name)) {
+                testEntry = testMap.get(tc_full_name);
             } else {
-                testEntry = new TestHtmlEntry(tc_id, `{% if live_run %}/testRun/{{ run_id }}/log/${tc_id}.html{% else %}log/${tc_id}.html{% endif %}`);
-                testMap.set(tc_id, testEntry);
+                const tc_id = tc_meta.tc_id;
+                if (!tc_id) {
+                    console.warn('Missing tc_id for entry', tc_full_name, tc_meta);
+                    return;
+                }
+                const traceUrl = `${LOG_URL_BASE}${encodeURIComponent(tc_id)}.html`;
+                testEntry = new TestHtmlEntry(tc_full_name, traceUrl, tc_id);
+                testMap.set(tc_full_name, testEntry);
                 isNewTest = true;
             }
 
@@ -2101,8 +2111,8 @@
 
             if (isNewTest) {
                 // Track the order test cases are received
-                if (!testCaseOrder.includes(tc_id)) {
-                    testCaseOrder.push(tc_id);
+                if (!testCaseOrder.includes(tc_full_name)) {
+                    testCaseOrder.push(tc_full_name);
                 }
             }
 
@@ -2117,6 +2127,7 @@
                 const badgeEl = testEntry.badge[0]; // Get DOM element from jQuery object
                 const hadHistory = badgeEl && badgeEl.classList.contains('status-badge-with-history');
                 const tcId = testEntry.fullName;
+                const storageId = testEntry.storageId || tcId;
 
                 // Update badge class and text - preserve status-badge-with-history if it exists
                 const newClass = 'badge ' + badgeClass + (hadHistory ? ' status-badge-with-history' : '');
@@ -2126,8 +2137,10 @@
 
                 // Ensure data-tc-id is set on DOM element and list item
                 badgeEl.setAttribute('data-tc-id', tcId);
+                badgeEl.setAttribute('data-storage-id', storageId);
                 if (testEntry.listItem && testEntry.listItem.length > 0) {
                     testEntry.listItem[0].setAttribute('data-tc-id', tcId);
+                    testEntry.listItem[0].setAttribute('data-storage-id', storageId);
                 }
 
                 // Add/remove spinner for running status
@@ -2147,7 +2160,7 @@
                     badgeEl.setAttribute('data-tc-id', tcId);
 
                     // Reattach handlers (function handles removing old ones)
-                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, tcId, runConfig.groupHash || null, runConfig.runId);
+                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, runConfig.groupHash || null, runConfig.runId, tcId);
                 }
             }
         }
@@ -2317,6 +2330,7 @@
 
                     // Use fullName from testMap - this is the EXACT same ID that list view uses
                     const tcId = fullName;
+                    const storageId = testEntry.storageId || tcId;
 
                     // Find the corresponding DOM node
                     let node = null;
@@ -2364,10 +2378,12 @@
 
                     // Ensure data-tc-id is set
                     badgeEl.setAttribute('data-tc-id', tcId);
+                    badgeEl.setAttribute('data-storage-id', storageId);
                     node.setAttribute('data-tc-id', tcId);
+                    node.setAttribute('data-storage-id', storageId);
 
                     // Attach handlers (function handles removing old ones)
-                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, tcId, runConfig.groupHash || null, runConfig.runId);
+                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, runConfig.groupHash || null, runConfig.runId, tcId);
                 });
             };
 
@@ -2739,7 +2755,7 @@
 
                     // Create new TestHtmlEntry for intermediate / virtual nodes,
                     // but always preserve timing/status on leaves.
-                    const tempTc = new TestHtmlEntry(name, originalTc ? originalTc.traceHtmlFile : null);
+                    const tempTc = new TestHtmlEntry(name, originalTc ? originalTc.traceHtmlFile : null, originalTc ? originalTc.storageId : null);
                     tempTc.fullName = name; // Use the shortened name for recursive call
 
                     if (originalTc) {
@@ -2851,7 +2867,7 @@
             const result = [];
             if (node.traceHtmlFile) {
                 // This is an actual test case (has traceHtmlFile)
-                const newEntry = new TestHtmlEntry(node.fullName, node.traceHtmlFile);
+                const newEntry = new TestHtmlEntry(node.fullName, node.traceHtmlFile, node.storageId || null);
                 newEntry.Status = node.Status;
                 result.push(newEntry);
             } else {
@@ -3105,7 +3121,8 @@
 
                     // Setup history hover on badge using async method
                     if (typeof Classifications !== 'undefined') {
-                        Classifications.setupBadgeHistoryHoverAsync(badgeEl, testCase.fullName, runConfig.groupHash || null, runConfig.runId);
+                        const canonicalId = testCase.storageId || testCase.fullName;
+                        Classifications.setupBadgeHistoryHoverAsync(badgeEl, canonicalId, runConfig.groupHash || null, runConfig.runId, testCase.fullName);
                     }
                 }
 
@@ -3205,11 +3222,12 @@
             applyUserPreferences();
 
             const testData = [
-                {% for tc_id, tc_meta in test_cases.items() %}
+                {% for tc_full_name, tc_meta in test_cases.items() %}
                 {
-                    name: {{ tc_id|tojson }},
+                    name: {{ tc_meta.tc_full_name|tojson }},
                     status: "{{ tc_meta.status }}",
-                    url: "{% if live_run %}/testRun/{{ run_id }}/log/{{ tc_id|urlencode }}.html{% else %}log/{{ tc_id|urlencode }}.html{% endif %}",
+                    url: LOG_URL_BASE + "{{ tc_meta.tc_id|urlencode }}.html",
+                    storageId: {{ tc_meta.tc_id|tojson }},
                     start_time: "{{ tc_meta.start_time if tc_meta.start_time else '' }}",
                     end_time: "{{ tc_meta.end_time if tc_meta.end_time else '' }}"
                 }{% if not loop.last %},{% endif %}
@@ -3488,12 +3506,12 @@
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'test_case_started' && msg.run_id === '{{ run_id }}') {
-                        addOrUpdateTestCase(msg.test_case_id, msg.test_case_meta, true); // Force running status
+                        addOrUpdateTestCase(msg.test_case_id, msg.tc_meta, true); // Force running status
                         // Add live indicator when tests are running
                         addLiveIndicator();
                     }
                     else if ((msg.type === 'test_case_finished' || msg.type === 'test_case_updated') && msg.run_id === '{{ run_id }}') {
-                        addOrUpdateTestCase(msg.test_case_id, msg.test_case_meta);
+                        addOrUpdateTestCase(msg.test_case_id, msg.tc_meta);
 
                         // Check if any tests are still running
                         let hasRunningTests = false;

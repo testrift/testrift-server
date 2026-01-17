@@ -22,11 +22,40 @@ from testrift_server.tr_server import (
     list_attachments_handler,
     zip_export_handler,
     get_run_path,
+    get_case_log_path,
+    get_case_storage_dir,
     get_attachments_dir,
     sanitize_filename,
     parse_size_string,
     TestRunData,
+    generate_storage_id,
+    TC_ID_FIELD,
 )
+
+
+def register_test_case(run_id: str, test_case_id: str, status: str = "running") -> str:
+    """Register a test case in meta.json and return its tc_id."""
+    meta_path = get_run_path(run_id) / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    test_cases = meta.setdefault("test_cases", {})
+    if test_case_id in test_cases and test_cases[test_case_id].get(TC_ID_FIELD):
+        return test_cases[test_case_id][TC_ID_FIELD]
+
+    tc_id = generate_storage_id()
+    test_cases[test_case_id] = {
+        "status": status,
+        "start_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
+        "end_time": None,
+        "logs": [],
+        "stack_traces": [],
+        TC_ID_FIELD: tc_id,
+    }
+    meta_path.write_text(json.dumps(meta))
+
+    case_dir = get_case_storage_dir(run_id, tc_id)
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    return tc_id
 
 
 class TestAttachmentHandlers:
@@ -81,12 +110,16 @@ class TestAttachmentHandlers:
         run_id = sample_run
         test_case_id = "Test.AttachmentTest"
 
-        # Create test case log directory
-        (get_run_path(run_id) / test_case_id).mkdir(parents=True, exist_ok=True)
+        tc_id = register_test_case(run_id, test_case_id)
 
-        # Create mock multipart request
+        # Create minimal real app structure (not mock)
+        from types import SimpleNamespace
+        ws_server = SimpleNamespace(test_runs={})
+
+        # Create multipart request
         request = MagicMock()
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id}
+        request.match_info = {"run_id": run_id, "test_case_id": tc_id}
+        request.app = {"ws_server": ws_server}
 
         # Mock multipart reader
         part = MagicMock()
@@ -110,7 +143,7 @@ class TestAttachmentHandlers:
         assert data["attachments"][0]["filename"] == "test_file.txt"
 
         # Verify file was saved
-        attachment_path = get_attachments_dir(run_id, test_case_id) / "test_file.txt"
+        attachment_path = get_attachments_dir(run_id, test_case_id, tc_id=tc_id) / "test_file.txt"
         assert attachment_path.exists()
         assert attachment_path.read_text() == "test content"
 
@@ -135,7 +168,7 @@ class TestAttachmentHandlers:
         run_id = sample_run
         test_case_id = "Test.AttachmentTest"
 
-        (get_run_path(run_id) / test_case_id).mkdir(parents=True, exist_ok=True)
+        tc_id = register_test_case(run_id, test_case_id)
 
         # Create large content (exceeds 1MB limit)
         large_content = b"x" * (2 * 1024 * 1024)  # 2MB
@@ -147,8 +180,14 @@ class TestAttachmentHandlers:
 
         reader = AsyncMock()
         reader.next = AsyncMock(side_effect=[part, None])
+
+        # Create minimal real app structure (not mock)
+        from types import SimpleNamespace
+        ws_server = SimpleNamespace(test_runs={})
+
         request = MagicMock()
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id}
+        request.match_info = {"run_id": run_id, "test_case_id": tc_id}
+        request.app = {"ws_server": ws_server}
         request.multipart = AsyncMock(return_value=reader)
 
         with patch("testrift_server.tr_server.ATTACHMENTS_ENABLED", True):
@@ -165,14 +204,21 @@ class TestAttachmentHandlers:
         test_case_id = "Test.AttachmentTest"
         filename = "test_file.txt"
 
+        tc_id = register_test_case(run_id, test_case_id)
+
         # Create attachment file
-        attachments_dir = get_attachments_dir(run_id, test_case_id)
+        attachments_dir = get_attachments_dir(run_id, test_case_id, tc_id=tc_id)
         attachments_dir.mkdir(parents=True, exist_ok=True)
         attachment_path = attachments_dir / filename
         attachment_path.write_text("test content")
 
+        # Create minimal real app structure (not mock)
+        from types import SimpleNamespace
+        ws_server = SimpleNamespace(test_runs={})
+
         request = MagicMock()
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id, "filename": filename}
+        request.match_info = {"run_id": run_id, "test_case_id": tc_id, "filename": filename}
+        request.app = {"ws_server": ws_server}
 
         response = await download_attachment_handler(request)
 
@@ -189,8 +235,15 @@ class TestAttachmentHandlers:
         test_case_id = "Test.AttachmentTest"
         filename = "nonexistent.txt"
 
+        tc_id = register_test_case(run_id, test_case_id)
+
+        # Create minimal real app structure (not mock)
+        from types import SimpleNamespace
+        ws_server = SimpleNamespace(test_runs={})
+
         request = MagicMock()
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id, "filename": filename}
+        request.match_info = {"run_id": run_id, "test_case_id": tc_id, "filename": filename}
+        request.app = {"ws_server": ws_server}
 
         response = await download_attachment_handler(request)
 
@@ -203,14 +256,21 @@ class TestAttachmentHandlers:
         run_id = sample_run
         test_case_id = "Test.AttachmentTest"
 
+        tc_id = register_test_case(run_id, test_case_id)
+
         # Create multiple attachment files
-        attachments_dir = get_attachments_dir(run_id, test_case_id)
+        attachments_dir = get_attachments_dir(run_id, test_case_id, tc_id=tc_id)
         attachments_dir.mkdir(parents=True, exist_ok=True)
         (attachments_dir / "file1.txt").write_text("content1")
         (attachments_dir / "file2.txt").write_text("content2")
 
+        # Create minimal real app structure (not mock)
+        from types import SimpleNamespace
+        ws_server = SimpleNamespace(test_runs={})
+
         request = MagicMock()
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id}
+        request.match_info = {"run_id": run_id, "test_case_id": tc_id}
+        request.app = {"ws_server": ws_server}
 
         response = await list_attachments_handler(request)
 
@@ -230,8 +290,15 @@ class TestAttachmentHandlers:
         run_id = sample_run
         test_case_id = "Test.EmptyAttachments"
 
+        tc_id = register_test_case(run_id, test_case_id)
+
+        # Create minimal real app structure (not mock)
+        from types import SimpleNamespace
+        ws_server = SimpleNamespace(test_runs={})
+
         request = MagicMock()
-        request.match_info = {"run_id": run_id, "test_case_id": test_case_id}
+        request.match_info = {"run_id": run_id, "test_case_id": tc_id}
+        request.app = {"ws_server": ws_server}
 
         response = await list_attachments_handler(request)
 
@@ -267,6 +334,8 @@ class TestZipExport:
 
         test_case_id = "Test.ExportTest"
 
+        tc_id = generate_storage_id()
+
         # Create meta.json
         meta = {
             "run_id": run_id,
@@ -281,21 +350,24 @@ class TestZipExport:
                 test_case_id: {
                     "status": "passed",
                     "start_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-                    "end_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+                    "end_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
+                    TC_ID_FIELD: tc_id,
+                    "logs": [],
+                    "stack_traces": []
                 }
             }
         }
         (run_path / "meta.json").write_text(json.dumps(meta))
 
         # Create test case log
-        log_path = run_path / test_case_id / "log.jsonl"
+        log_path = get_case_log_path(run_id, tc_id=tc_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(
             json.dumps({"timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", "message": "Test log"}) + "\n"
         )
 
         # Create attachment
-        attachments_dir = get_attachments_dir(run_id, test_case_id)
+        attachments_dir = get_attachments_dir(run_id, test_case_id, tc_id=tc_id)
         attachments_dir.mkdir(parents=True, exist_ok=True)
         (attachments_dir / "test_attachment.txt").write_text("attachment content")
 

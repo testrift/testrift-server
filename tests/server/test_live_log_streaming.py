@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer
+from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer, generate_storage_id, TC_ID_FIELD
 
 
 class TestLiveLogStreaming:
@@ -35,7 +35,8 @@ class TestLiveLogStreaming:
     @pytest.fixture
     def sample_test_case(self, sample_run):
         """Create a sample test case with logs."""
-        test_case = TestCaseData(sample_run, "Test.TestMethod")
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
         test_case.logs = [
             {
                 "timestamp": "2025-10-01T18:49:17.803300Z",

@@ -20,7 +20,7 @@ from testrift_server import database
 from testrift_server.database import TestCaseData as DatabaseTestCaseData
 from testrift_server.database import TestRunData as DatabaseTestRunData
 from testrift_server.database import UserMetadata
-from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer
+from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer, generate_storage_id, TC_ID_FIELD
 
 
 class TestClientServerIntegration:
@@ -118,7 +118,8 @@ class TestClientServerIntegration:
             run = ws_server.test_runs.get(run_id)
             assert run is not None
 
-            test_case = TestCaseData(run, tc_id, {})
+            tc_id_hash = generate_storage_id()
+            test_case = TestCaseData(run, tc_id, {TC_ID_FIELD: tc_id_hash})
             run.test_cases[tc_id] = test_case
 
             # Verify the test case was created
@@ -138,7 +139,8 @@ class TestClientServerIntegration:
         ws_server.test_runs[run_id] = run
 
         tc_id = "Test.IntegrationTest"
-        test_case = TestCaseData(run, tc_id, {})
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(run, tc_id, {TC_ID_FIELD: tc_id_hash})
         run.test_cases[tc_id] = test_case
 
         # Simulate a test_case_finished message
@@ -208,7 +210,8 @@ class TestClientServerIntegration:
 
         data = test_case_started_message
         tc_id = data.get("test_case_id")
-        test_case = TestCaseData(run, tc_id, {})
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(run, tc_id, {TC_ID_FIELD: tc_id_hash})
         run.test_cases[tc_id] = test_case
 
         # 3. Process test_case_finished message
@@ -306,7 +309,8 @@ class TestClientServerIntegration:
 
                     run = ws_server.test_runs.get(run_id)
                     if run:
-                        test_case = TestCaseData(run, tc_id, {})
+                        tc_id_hash = generate_storage_id()
+                        test_case = TestCaseData(run, tc_id, {TC_ID_FIELD: tc_id_hash})
                         run.test_cases[tc_id] = test_case
 
                 elif msg_type == "test_case_finished":
@@ -342,7 +346,8 @@ class TestClientServerIntegration:
 
         # 2. Test case started
         tc_id = "Test.DatabaseIntegration"
-        test_case = TestCaseData(run, tc_id, {})
+        tc_id_hash = generate_storage_id()
+        test_case = TestCaseData(run, tc_id, {TC_ID_FIELD: tc_id_hash})
         run.test_cases[tc_id] = test_case
 
         # 3. Test case finished
@@ -367,7 +372,8 @@ class TestClientServerIntegration:
         test_case_data = DatabaseTestCaseData(
             id=0,
             run_id=run_id,
-            test_case_id=tc_id,
+            tc_full_name=test_case.full_name,
+            tc_id=test_case.tc_id,
             status=test_case.status,
             start_time=test_case.start_time,
             end_time=test_case.end_time
@@ -382,7 +388,7 @@ class TestClientServerIntegration:
 
         stored_test_cases = await initialized_db.get_test_cases_for_run(run_id)
         assert len(stored_test_cases) == 1
-        assert stored_test_cases[0]["test_case_id"] == tc_id
+        assert stored_test_cases[0]["tc_full_name"] == tc_id
         assert stored_test_cases[0]["status"] == "passed"
 
 

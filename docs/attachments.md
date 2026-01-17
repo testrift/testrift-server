@@ -4,7 +4,7 @@ This document describes the attachment functionality implemented for the NUnit t
 
 ## Overview
 
-The system supports uploading, storing, and downloading attachments for individual test cases. Attachments are stored in the test run data directory under `attachments/{test_case_id}/` and are accessible through the web UI and HTTP API.
+The system supports uploading, storing, and downloading attachments for individual test cases. Each test case now has an internal storage identifier (similar to a run ID) that maps the original test case name to filesystem paths. Attachments live inside the case folder (`cases/{storage_id}/attachments/`) within a run directory and remain accessible through the web UI and HTTP API using the full test case name.
 
 ## Features
 
@@ -52,7 +52,7 @@ Response: file content with appropriate headers
 
 ### 4. ZIP Export Integration
 - Attachments are automatically included in ZIP file downloads
-- Stored under `attachments/{test_case_id}/` in the ZIP structure
+- Stored under `attachments/{sanitized_test_case_name}/` in the ZIP structure for readability
 - Maintains the same directory structure as the server
 
 ## Usage Examples
@@ -119,18 +119,21 @@ response = requests.get(
 data/
 ├── {run_id}/
 │   ├── meta.json
-│   ├── {test_case_id}.jsonl
-│   └── attachments/
-│       └── {test_case_id}/
-│           ├── attachment1.txt
-│           ├── screenshot.png
-│           └── log_file.log
+│   └── cases/
+│       └── {storage_id}/
+│           ├── log.jsonl
+│           ├── stack.jsonl
+│           └── attachments/
+│               ├── attachment1.txt
+│               ├── screenshot.png
+│               └── log_file.log
 ```
 
 ### File Naming
 - Original filenames are preserved.
 - Invalid characters are sanitized for filesystem compatibility.
 - Duplicate names for the same test case overwrite the previous file after sanitization.
+- On disk, attachment folders are keyed by the generated storage ID; when exporting a ZIP we continue to group attachments under `attachments/{sanitized_test_case_name}/` for readability.
 
 ## Security Considerations
 

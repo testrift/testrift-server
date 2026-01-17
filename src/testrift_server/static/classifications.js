@@ -201,10 +201,9 @@ function createHistoryTabs(tooltip, previousLabel, latestLabel) {
 /**
  * Render history items into a container
  * @param {HTMLElement} container - Container element
- * @param {Array} history - Array of {status, run_id, run_name, has_log} objects
- * @param {string} testCaseId - Test case ID for building links
+ * @param {Array} history - Array of {status, run_id, run_name, has_log, tc_id} objects
  */
-function renderHistoryItems(container, history, testCaseId) {
+function renderHistoryItems(container, history) {
     container.innerHTML = '';
 
     if (!history || history.length === 0) {
@@ -220,9 +219,12 @@ function renderHistoryItems(container, history, testCaseId) {
         const nameContainer = document.createElement('span');
         nameContainer.className = 'tc-history-name';
 
-        if (item.has_log && item.run_id && testCaseId) {
+        // Use tc_id from the history item itself - each run has its own tc_id
+        const tcId = item.tc_id;
+
+        if (item.has_log && item.run_id && tcId) {
             const link = document.createElement('a');
-            link.href = `/testRun/${item.run_id}/log/${encodeURIComponent(testCaseId)}.html`;
+            link.href = `/testRun/${item.run_id}/log/${encodeURIComponent(tcId)}.html`;
             link.textContent = item.run_name || item.run_id.substring(0, 8);
             link.className = 'tc-history-link';
             nameContainer.appendChild(link);
@@ -245,11 +247,10 @@ function renderHistoryItems(container, history, testCaseId) {
 /**
  * Show history tooltip for a status badge
  * @param {HTMLElement} badge - The status badge element
- * @param {Array|Object} history - Array of {status, run_id, run_name, has_log} objects, or {previous: [], latest: []}
+ * @param {Array|Object} history - Array of {status, run_id, run_name, has_log, tc_id} objects, or {previous: [], latest: []}
  * @param {string} title - Tooltip title
- * @param {string} testCaseId - Test case ID for building links
  */
-function showHistoryTooltip(badge, history, title, testCaseId) {
+function showHistoryTooltip(badge, history, title) {
     hideTooltip();
 
     const { previous: previousHistory, latest: latestHistory } = normalizeHistory(history);
@@ -265,8 +266,8 @@ function showHistoryTooltip(badge, history, title, testCaseId) {
     const { previousContent, latestContent } = createHistoryTabs(tooltip, 'Previous Results', 'Latest Results');
 
     // Render initial content
-    renderHistoryItems(previousContent, previousHistory, testCaseId);
-    renderHistoryItems(latestContent, latestHistory, testCaseId);
+    renderHistoryItems(previousContent, previousHistory);
+    renderHistoryItems(latestContent, latestHistory);
 
     document.body.appendChild(tooltip);
     positionTooltip(tooltip, badge);
@@ -430,9 +431,11 @@ function hideTooltip() {
  * @param {string} currentRunId
  * @returns {Promise<Array>}
  */
-async function fetchTcHistory(testCaseId, groupHash, currentRunId) {
+async function fetchTcHistory(testCaseId, groupHash, currentRunId, testCaseFullName) {
     try {
-        let url = `/api/tc-hover-history?test_case_id=${encodeURIComponent(testCaseId)}`;
+        // Use testCaseFullName if provided, otherwise fall back to testCaseId
+        const tcName = testCaseFullName || testCaseId;
+        let url = `/api/tc-hover-history?tc_full_name=${encodeURIComponent(tcName)}`;
         if (groupHash) {
             url += `&group=${encodeURIComponent(groupHash)}`;
         }
@@ -564,9 +567,8 @@ let hideTimeout = null;
  * @param {HTMLElement} badge - The badge element
  * @param {Array} history - The history array
  * @param {string} title - Optional title
- * @param {string} testCaseId - Test case ID for building links
  */
-function setupBadgeHistoryHover(badge, history, title, testCaseId) {
+function setupBadgeHistoryHover(badge, history, title) {
     badge.classList.add('status-badge-with-history');
 
     badge.addEventListener('mouseenter', () => {
@@ -574,7 +576,7 @@ function setupBadgeHistoryHover(badge, history, title, testCaseId) {
             clearTimeout(hideTimeout);
             hideTimeout = null;
         }
-        showHistoryTooltip(badge, history, title, testCaseId);
+        showHistoryTooltip(badge, history, title);
     });
 
     badge.addEventListener('mouseleave', () => {
@@ -592,7 +594,7 @@ function setupBadgeHistoryHover(badge, history, title, testCaseId) {
  * @param {string} groupHash - The group hash (optional)
  * @param {string} currentRunId - Current run ID to exclude (optional)
  */
-function setupBadgeHistoryHoverAsync(badge, testCaseId, groupHash, currentRunId) {
+function setupBadgeHistoryHoverAsync(badge, testCaseId, groupHash, currentRunId, testCaseFullName) {
     // Remove any existing event listeners by cloning the element
     // This prevents duplicate listeners that cause tooltip to not close
     if (badge._historyHandlersAttached) {
@@ -617,7 +619,7 @@ function setupBadgeHistoryHoverAsync(badge, testCaseId, groupHash, currentRunId)
         }
         if (!historyCache) {
             try {
-                historyCache = await fetchTcHistory(testCaseId, groupHash, currentRunId);
+                historyCache = await fetchTcHistory(testCaseId, groupHash, currentRunId, testCaseFullName);
             } catch (e) {
                 console.error('Error fetching history for', testCaseId, e);
                 historyCache = []; // Set to empty array so we don't retry
@@ -628,7 +630,7 @@ function setupBadgeHistoryHoverAsync(badge, testCaseId, groupHash, currentRunId)
             const historyData = Array.isArray(historyCache)
                 ? { previous: historyCache, latest: historyCache }
                 : historyCache;
-            showHistoryTooltip(badge, historyData, 'Test Case History', testCaseId);
+            showHistoryTooltip(badge, historyData, 'Test Case History');
         }
     };
 
