@@ -1107,12 +1107,12 @@ function initializeTestCaseLog() {
                 const msg = JSON.parse(event.data);
                 // Stack traces are delivered via the per-test-case /ws/logs socket (not /ws/ui).
                 if ((msg.type === 'test_case_started' || msg.type === 'test_case_finished' || msg.type === 'test_case_updated') && msg.run_id === runId && msg.test_case_id === testCaseId) {
-                    if (msg.test_case_meta) {
-                        if (msg.test_case_meta.status) {
+                    if (msg.tc_meta) {
+                        if (msg.tc_meta.status) {
                             // Update status badge
                             const statusBadge = document.getElementById('tc-status-badge');
                             if (statusBadge) {
-                                const status = msg.test_case_meta.status.toLowerCase();
+                                const status = msg.tc_meta.status.toLowerCase();
                                 let statusClass = 'status-unknown';
                                 let displayText = status.toUpperCase();
 
@@ -1159,17 +1159,17 @@ function initializeTestCaseLog() {
                                     }
                                     // Stop real-time execution time tracking and show final time
                                     stopTcExecutionTimer();
-                                    showFinalTcExecutionTime(msg.test_case_meta);
+                                    showFinalTcExecutionTime(msg.tc_meta);
                                     // Remove live indicator when test case finishes
                                     removeLiveIndicator();
                                 }
                             }
 
                             // Calculate and display execution time if test case has finished
-                            if (status !== 'running' && msg.test_case_meta.start_time && msg.test_case_meta.end_time) {
+                            if (status !== 'running' && msg.tc_meta.start_time && msg.tc_meta.end_time) {
                                 // Ensure both times are in proper ISO format
-                                let startTimeStr = msg.test_case_meta.start_time;
-                                let endTimeStr = msg.test_case_meta.end_time;
+                                let startTimeStr = msg.tc_meta.start_time;
+                                let endTimeStr = msg.tc_meta.end_time;
 
                                 // Add 'Z' to endTime if it doesn't have timezone info
                                 if (!endTimeStr.includes('Z') && !endTimeStr.includes('+') && !endTimeStr.includes('-', 10)) {
@@ -1202,14 +1202,14 @@ function initializeTestCaseLog() {
                         }
 
                         // Update end time if available
-                        if (msg.test_case_meta.end_time) {
+                        if (msg.tc_meta && msg.tc_meta.end_time) {
                             const infoItems = document.querySelectorAll('.info-item');
                             infoItems.forEach(item => {
                                 const strong = item.querySelector('strong');
                                 if (strong && strong.textContent === 'End Time') {
                                     const valueElement = strong.nextSibling;
                                     if (valueElement) {
-                                        valueElement.textContent = ' ' + convertToLocalTime(msg.test_case_meta.end_time);
+                                        valueElement.textContent = ' ' + convertToLocalTime(msg.tc_meta.end_time);
                                     }
                                 }
                             });

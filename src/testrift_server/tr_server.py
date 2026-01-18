@@ -497,16 +497,19 @@ def validate_custom_run_id(run_id):
 
 
 def validate_test_case_id(test_case_id):
-    """Validate that test_case_id is safe"""
+    """Validate that test_case_id is safe.
+    NUnit IDs are like "0-1008" (alphanumeric and hyphens)."""
     if not test_case_id or not isinstance(test_case_id, str):
         return False
 
-    # Check for path traversal attempts
-    if '..' in test_case_id or '/' in test_case_id or '\\' in test_case_id:
+    # Limit length
+    if len(test_case_id) > 20:
         return False
 
-    # Limit length
-    if len(test_case_id) > 200:
+    # NUnit test IDs contain only alphanumeric characters and hyphens (e.g., "0-1008")
+    # Allow these characters for NUnit test IDs
+    import re
+    if not re.match(r'^[a-zA-Z0-9\-]+$', test_case_id):
         return False
 
     return True
@@ -645,6 +648,9 @@ async def build_run_index_entries(runs_from_db):
         files_exist = run_path.exists()
 
         # Build run info for template
+        # Note: aborted_count is combined into error_count for display
+        aborted_count = run.get('aborted_count', 0)
+        error_count = run.get('error_count', 0)
         run_info = {
             'run_id': run_id,
             'run_name': run.get('run_name'),
@@ -655,7 +661,8 @@ async def build_run_index_entries(runs_from_db):
             'passed_count': run.get('passed_count', 0),
             'failed_count': run.get('failed_count', 0),
             'skipped_count': run.get('skipped_count', 0),
-            'error_count': run.get('error_count', 0),
+            'aborted_count': aborted_count,  # Keep for template logic that combines it
+            'error_count': error_count + aborted_count,  # Combine aborted into error
             'user_metadata': user_metadata,
             'group': group_info,
             'group_hash': group_hash,  # Also include at top level for easy access
@@ -1603,8 +1610,12 @@ class TestCaseData:  # pytest: disable=collection
 
         timestamp = entry.get("timestamp")
         message = entry.get("message")
-        if not timestamp or not message:
+        # Require timestamp, but allow empty/whitespace messages (they'll be filtered by JS if needed)
+        if not timestamp:
             return None
+        # Allow None/empty message - convert to empty string
+        if message is None:
+            message = ""
 
         out = {
             "timestamp": timestamp,
@@ -1648,18 +1659,26 @@ class TestCaseData:  # pytest: disable=collection
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Append entries to log file and in-memory logs
+        sanitized_count = 0
+        skipped_count = 0
         with open(log_path, "a", encoding="utf-8") as f:
             for entry in entries:
                 log_entry = self._sanitize_log_entry(entry)
                 if not log_entry:
+                    skipped_count += 1
+                    logger.debug(f"Skipped log entry for {self.tc_id}: missing timestamp or message")
                     continue
 
+                sanitized_count += 1
                 f.write(json.dumps(log_entry) + "\n")
                 # Save in memory
                 self.logs.append(log_entry)
                 # Send to subscribers
                 for subscriber in self.subscribers:
                     await subscriber.put(log_entry)
+
+        if skipped_count > 0:
+            logger.warning(f"Skipped {skipped_count} log entries for {self.tc_id} (missing timestamp or message), added {sanitized_count} entries")
 
     async def add_stack_trace(self, trace_entry):
         # Canonical exception representation:
@@ -1842,21 +1861,22 @@ class WebSocketServer:
                             aborted_count += 1
 
                 # Broadcast test case updates for all aborted test cases and log to database
-                for tc_id in aborted_test_cases:
-                    test_case = run.test_cases[tc_id]
+                for tc_full_name in aborted_test_cases:
+                    test_case = run.test_cases[tc_full_name]
                     tc_meta = test_case.to_dict()
 
                     # Log test case as aborted in database
                     try:
-                        await database.log_test_case_finished(run.id, tc_id, 'aborted')
+                        await database.log_test_case_finished(run.id, tc_full_name, 'aborted')
                     except Exception as db_error:
-                        logger.error(f"Database logging error for aborted test case {tc_id}: {db_error}")
+                        logger.error(f"Database logging error for aborted test case {tc_full_name}: {db_error}")
 
                     # Broadcast UI update
                     await self.broadcast_ui({
                         "type": "test_case_finished",
                         "run_id": run.id,
-                        "test_case_id": tc_id,
+                        "test_case_id": test_case.tc_id,  # Use tc_id for matching
+                        "test_case_full_name": tc_full_name,  # Include full name for reference
                         "tc_meta": tc_meta,
                         "counts": {
                             "passed": passed_count,
@@ -2079,13 +2099,10 @@ class WebSocketServer:
                                 logger.info("Error: tc_id missing from test_case_started message")
                                 continue
 
-                            # Validate tc_id is 8-character hex string
-                            if not isinstance(tc_id, str) or len(tc_id) != 8 or not all(c in '0123456789abcdefABCDEF' for c in tc_id):
-                                logger.info(f"Error: Invalid tc_id '{tc_id}' - must be 8 hex characters")
+                            # Validate tc_id (now accepts NUnit test IDs like "0-1009")
+                            if not validate_test_case_id(tc_id):
+                                logger.info(f"Error: Invalid tc_id '{tc_id}' - must be alphanumeric with hyphens")
                                 continue
-
-                            # Normalize to lowercase
-                            tc_id = tc_id.lower()
 
                             # Find the run by run_id
                             run = self.test_runs.get(run_id)
@@ -2152,10 +2169,12 @@ class WebSocketServer:
                                         aborted_count += 1
 
                             # Broadcast targeted test_case_started event
+                            # Include both tc_id (for matching) and full_name (for display)
                             await self.broadcast_ui({
                                 "type": "test_case_started",
                                 "run_id": run.id,
-                                "test_case_id": tc_full_name,
+                                "test_case_id": tc_id,  # Use tc_id for matching
+                                "test_case_full_name": tc_full_name,  # Include full name for reference
                                 "tc_meta": tc_meta,
                                 "counts": {
                                     "passed": passed_count,
@@ -2318,10 +2337,12 @@ class WebSocketServer:
                                         aborted_count += 1
 
                             # Broadcast targeted test_case_updated event
+                            # Include both tc_id (for matching) and full_name (for display)
                             await self.broadcast_ui({
                                 "type": "test_case_updated",
                                 "run_id": run.id,
-                                "test_case_id": test_case.full_name,
+                                "test_case_id": test_case.tc_id,  # Use tc_id for matching
+                                "test_case_full_name": test_case.full_name,  # Include full name for reference
                                 "tc_meta": tc_meta,
                                 "counts": {
                                     "passed": passed_count,
@@ -2371,10 +2392,12 @@ class WebSocketServer:
                                         aborted_count += 1
 
                             # Broadcast targeted test_case_finished event
+                            # Include both tc_id (for matching) and full_name (for display)
                             await self.broadcast_ui({
                                 "type": "test_case_finished",
                                 "run_id": run.id,
-                                "test_case_id": test_case.full_name,
+                                "test_case_id": test_case.tc_id,  # Use tc_id for matching
+                                "test_case_full_name": test_case.full_name,  # Include full name for reference
                                 "tc_meta": tc_meta,
                                 "counts": {
                                     "passed": passed_count,
@@ -2446,7 +2469,8 @@ class WebSocketServer:
                                     await self.broadcast_ui({
                                         "type": "test_case_finished",
                                         "run_id": run.id,
-                                        "test_case_id": tc_full_name,
+                                        "test_case_id": test_case.tc_id,  # Use tc_id for matching
+                                        "test_case_full_name": tc_full_name,  # Include full name for reference
                                         "tc_meta": tc_meta,
                                         "counts": {
                                             "passed": passed_count,
@@ -2566,8 +2590,10 @@ class WebSocketServer:
             # ISO 8601 timestamps sort lexicographically in chronological order.
             initial_items.sort(key=lambda x: x[0] or "")
 
+            logger.info(f"Replaying {len(initial_items)} log entries for {run_id}/{test_case_id}")
             for _, item in initial_items:
                 await ws.send_json(item)
+            logger.info(f"Finished replaying log entries for {run_id}/{test_case_id}")
         except Exception as e:
             logger.error(f"Error sending existing logs: {e}")
             await ws.send_json({ "type": "error", "message": "Error sending existing logs" })

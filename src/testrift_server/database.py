@@ -295,8 +295,10 @@ class TestResultsDatabase:
         """Get test runs with optional filtering."""
         async with self.get_connection() as db:
             # Build query with joins for metadata filtering
+            # Note: user_metadata JOIN removed to prevent duplicate rows inflating counts
+            # Metadata filtering is handled via EXISTS subqueries in WHERE clause
             query = """
-                SELECT DISTINCT tr.*,
+                SELECT tr.*,
                        COUNT(tc.id) as test_case_count,
                        SUM(CASE WHEN tc.status = 'passed' THEN 1 ELSE 0 END) as passed_count,
                        SUM(CASE WHEN tc.status = 'failed' THEN 1 ELSE 0 END) as failed_count,
@@ -305,7 +307,6 @@ class TestResultsDatabase:
                        SUM(CASE WHEN tc.status = 'error' THEN 1 ELSE 0 END) as error_count
                 FROM test_runs tr
                 LEFT JOIN test_cases tc ON tr.run_id = tc.run_id
-                LEFT JOIN user_metadata um ON tr.run_id = um.run_id
             """
 
             conditions = []

@@ -721,18 +721,18 @@
                 <tr class="run-item" data-runid="{{ run.run_id }}">
                     <td class="status-column">
                                 {% if run.status.lower() == 'running' %}
-                                <span class="status-badge status-running">RUNNING <span class="spinner"></span></span>
+                                <span class="status-badge status-running"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>RUNNING <span class="spinner"></span></span>
                                 {% elif run.status.lower() == 'aborted' %}
-                                <span class="status-badge status-aborted">ABORTED</span>
+                                <span class="status-badge status-aborted"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>ABORTED</span>
                                 {% else %}
                                 {% if run.skipped_count > 0 and run.passed_count == 0 and run.failed_count == 0 and (run.error_count is not defined or run.error_count == 0) %}
-                                <span class="status-badge status-skipped">SKIPPED</span>
+                                <span class="status-badge status-skipped"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>SKIPPED</span>
                                 {% elif run.error_count is defined and run.error_count > 0 %}
-                                <span class="status-badge status-error">ERROR</span>
+                                <span class="status-badge status-error"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>ERROR</span>
                                 {% elif run.failed_count > 0 %}
-                                <span class="status-badge status-finished-failed">FAILED</span>
+                                <span class="status-badge status-finished-failed"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>FAILED</span>
                                 {% else %}
-                                <span class="status-badge status-finished-passed">PASSED</span>
+                                <span class="status-badge status-finished-passed"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>PASSED</span>
                                 {% endif %}
                                 {% endif %}
 
@@ -939,6 +939,17 @@
     // Convert all timestamps to local time
     convertIndexTimestampsToLocal();
 
+    // Set up hover history for statically rendered status badges
+    if (typeof Classifications !== 'undefined') {
+      document.querySelectorAll('.status-badge[data-group-hash]').forEach(badge => {
+        const groupHash = badge.getAttribute('data-group-hash');
+        const runId = badge.getAttribute('data-run-id');
+        if (groupHash && runId) {
+          Classifications.setupRunBadgeHistoryHover(badge, groupHash, runId);
+        }
+      });
+    }
+
     const runExecutionTimeElements = document.querySelectorAll('.run-execution-time');
 
     runExecutionTimeElements.forEach(element => {
@@ -949,13 +960,20 @@
       if (runItem) {
         // Look for start time and end time in the run details
         const startTimeElement = runItem.querySelector('.start-time-display');
-        const endTimeElement = runItem.querySelector('.end-time-display');
+        const durationDisplayElement = runItem.querySelector('.duration-display');
         const statusElement = runItem.querySelector('.status-badge');
 
         if (startTimeElement && statusElement) {
           const startTimeText = startTimeElement.textContent;
-          const endTimeText = endTimeElement ? endTimeElement.textContent : null;
           const status = statusElement.textContent.toLowerCase();
+
+          // Remove any duration-display elements since we use run-execution-time instead
+          if (durationDisplayElement) {
+            const durationItem = durationDisplayElement.closest('.meta-item');
+            if (durationItem) {
+              durationItem.remove();
+            }
+          }
 
           if (status.includes('running') && startTimeText) {
             // Run is running - start real-time tracking
@@ -967,18 +985,12 @@
               });
               showRunExecutionTime(runId);
             }
-          } else if (endTimeText && startTimeText && startTimeText !== 'Invalid Date' && endTimeText !== 'Invalid Date') {
-            // Run is finished - calculate final execution time
-            const startTime = new Date(startTimeText).getTime();
-            const endTime = new Date(endTimeText).getTime();
-
-            if (!isNaN(startTime) && !isNaN(endTime)) {
-              const duration = endTime - startTime;
-              if (duration > 0) {
-                const formattedTime = formatExecutionTime(duration);
-                element.textContent = `⏱️ ${formattedTime}`;
-                element.style.display = 'inline';
-              }
+          } else if (durationDisplayElement) {
+            // Run is finished - use the duration-display data attributes if available
+            const startTimeAttr = durationDisplayElement.getAttribute('data-start');
+            const endTimeAttr = durationDisplayElement.getAttribute('data-end');
+            if (startTimeAttr && endTimeAttr) {
+              showFinalRunExecutionTime(runId, startTimeAttr, endTimeAttr);
             }
           }
         }
@@ -1065,6 +1077,7 @@
       if (!run || !run.run_id) { console.warn('Missing run or run_id', run); return; }
       const tbody = document.getElementById('runs-list');
       if (!tbody) { console.error('runs-list element not found'); return; }
+      const isGroupContext = window.location.pathname.startsWith('/groups/');
       let tr = document.querySelector('tr[data-runid="' + run.run_id + '"]');
       let daysLeft = '';
       if (run.retention_days && run.start_time) {
@@ -1128,12 +1141,14 @@
           statusBadgeEl = runningBadge;
         } else {
           // Count test results to determine badge type
-          let passedCount = 0;
-          let failedCount = 0;
-          let skippedCount = 0;
-          let abortedCount = 0;
-          let errorCount = 0;
-          if (run.test_cases) {
+          // Note: aborted counts are combined into error counts
+          let passedCount = run.passed_count || 0;
+          let failedCount = run.failed_count || 0;
+          let skippedCount = run.skipped_count || 0;
+          let abortedCount = run.aborted_count || 0;
+          let errorCount = run.error_count || 0;
+
+          if (passedCount === 0 && failedCount === 0 && skippedCount === 0 && abortedCount === 0 && errorCount === 0 && run.test_cases) {
             for (const tcId in run.test_cases) {
               const tc = run.test_cases[tcId];
               if (!tc.status) continue;
@@ -1152,16 +1167,19 @@
             }
           }
 
+          // Combine aborted into error
+          errorCount = errorCount + abortedCount;
+
           const finishedBadge = document.createElement('span');
-          // Priority: Error > Failed/Aborted > Skipped (all) > Passed
-          // If ALL tests are skipped (and no passed/failed/aborted/error)
-          if (skippedCount > 0 && passedCount === 0 && failedCount === 0 && abortedCount === 0 && errorCount === 0) {
+          // Priority: Error (includes aborted) > Failed > Skipped (all) > Passed
+          // If ALL tests are skipped (and no passed/failed/error)
+          if (skippedCount > 0 && passedCount === 0 && failedCount === 0 && errorCount === 0) {
             finishedBadge.className = 'status-badge status-skipped';
             finishedBadge.textContent = 'SKIPPED';
           } else if (errorCount > 0) {
             finishedBadge.className = 'status-badge status-error';
             finishedBadge.textContent = 'ERROR';
-          } else if (failedCount > 0 || abortedCount > 0) {
+          } else if (failedCount > 0) {
             finishedBadge.className = 'status-badge status-finished-failed';
             finishedBadge.textContent = 'FAILED';
           } else {
@@ -1174,22 +1192,25 @@
       }
 
       // Add hover history for run status badge if we have a group
-      if (statusBadgeEl && run.group_hash && typeof Classifications !== 'undefined') {
-        Classifications.setupRunBadgeHistoryHover(statusBadgeEl, run.group_hash, run.run_id);
+      const groupHash = run.group_hash || (run.group && run.group.hash);
+      if (statusBadgeEl && groupHash && typeof Classifications !== 'undefined') {
+        Classifications.setupRunBadgeHistoryHover(statusBadgeEl, groupHash, run.run_id);
       }
 
       // Create result badges container within status column
       const resultBadgesContainer = document.createElement('div');
       resultBadgesContainer.className = 'result-badges-container';
 
-      // Count test results for badges
-      let passedCount = 0;
-      let failedCount = 0;
-      let skippedCount = 0;
-      let abortedCount = 0;
-      let errorCount = 0;
+      // Count test results for badges - prefer direct counts from run object, otherwise count from test_cases
+      // Note: aborted counts are combined into error counts
+      let passedCount = run.passed_count || 0;
+      let failedCount = run.failed_count || 0;
+      let skippedCount = run.skipped_count || 0;
+      let abortedCount = run.aborted_count || 0;
+      let errorCount = run.error_count || 0;
 
-      if (run.test_cases) {
+      // If counts are not provided directly, count from test_cases
+      if (passedCount === 0 && failedCount === 0 && skippedCount === 0 && abortedCount === 0 && errorCount === 0 && run.test_cases) {
         for (const tcId in run.test_cases) {
           const tc = run.test_cases[tcId];
           if (!tc.status) continue;
@@ -1207,6 +1228,10 @@
           }
         }
       }
+
+      // Combine aborted into error
+      errorCount = errorCount + abortedCount;
+      abortedCount = 0;
 
       // Create result badges
       if (passedCount > 0) {
@@ -1233,14 +1258,6 @@
         resultBadgesContainer.appendChild(failedBadge);
       }
 
-      if (abortedCount > 0) {
-        const abortedBadge = document.createElement('span');
-        abortedBadge.className = 'result-badge result-aborted';
-        abortedBadge.title = 'Aborted';
-        abortedBadge.textContent = abortedCount;
-        resultBadgesContainer.appendChild(abortedBadge);
-      }
-
       if (errorCount > 0) {
         const errorBadge = document.createElement('span');
         errorBadge.className = 'result-badge result-error';
@@ -1264,7 +1281,6 @@
       link.textContent = run.run_name;
       title.appendChild(link);
 
-
       // Create run meta section for start time and duration
       const runMetaSection = document.createElement('div');
       runMetaSection.className = 'run-meta-section';
@@ -1274,40 +1290,14 @@
         const startItem = document.createElement('div');
         startItem.className = 'meta-item';
         const startValue = document.createElement('span');
-        startValue.className = 'meta-value';
+        startValue.className = 'meta-value start-time-display';
         startValue.textContent = convertToLocalTime(run.start_time);
         startItem.appendChild(startValue);
         runMetaSection.appendChild(startItem);
       }
 
-      // Duration (if both start and end times exist)
-      if (run.start_time && run.end_time) {
-        const durationItem = document.createElement('div');
-        durationItem.className = 'meta-item';
-        const durationValue = document.createElement('span');
-        durationValue.className = 'meta-value duration-display';
-        durationValue.setAttribute('data-start', run.start_time);
-        durationValue.setAttribute('data-end', run.end_time);
-
-        // Calculate duration
-        try {
-          const start = new Date(run.start_time);
-          const end = new Date(run.end_time);
-          const duration = end - start;
-
-          if (duration > 0) {
-            const formattedDuration = formatExecutionTime(duration);
-            durationValue.textContent = `⏱️ ${formattedDuration}`;
-          }
-        } catch (e) {
-          console.warn('Failed to parse duration times:', run.start_time, run.end_time, e);
-        }
-
-        durationItem.appendChild(durationValue);
-        runMetaSection.appendChild(durationItem);
-      }
-
       // Add execution time element to run-meta-section
+      // This will be used for both running (real-time) and finished runs
       const executionTimeItem = document.createElement('div');
       executionTimeItem.className = 'meta-item';
 
@@ -1321,8 +1311,31 @@
       executionTimeItem.appendChild(executionTimeSpan);
       runMetaSection.appendChild(executionTimeItem);
 
-      // Add title and meta section directly to title column
+      // Add title, then group pill, then meta section to title column (matching template order)
       titleColumn.appendChild(title);
+
+      // Add group pill if group exists and we're not in a group context (similar to template)
+      if (run.group && (run.group.name || run.group.hash) && !isGroupContext) {
+        const groupPill = document.createElement('div');
+        groupPill.className = 'group-pill';
+        const groupLabel = document.createElement('span');
+        groupLabel.textContent = 'Group:';
+        groupPill.appendChild(groupLabel);
+        if (run.group.hash) {
+          const groupLink = document.createElement('a');
+          groupLink.href = `/groups/${run.group.hash}`;
+          groupLink.className = 'group-link';
+          groupLink.textContent = run.group.name || `Group ${run.group.hash}`;
+          groupPill.appendChild(groupLink);
+        } else {
+          const groupSpan = document.createElement('span');
+          groupSpan.className = 'group-link';
+          groupSpan.textContent = run.group.name;
+          groupPill.appendChild(groupSpan);
+        }
+        titleColumn.appendChild(groupPill);
+      }
+
       if (runMetaSection.children.length > 0) {
         titleColumn.appendChild(runMetaSection);
       }
@@ -1355,35 +1368,11 @@
         metadataColumn.appendChild(metaItem);
       };
 
-      if (run.group) {
-        if (run.group.name || run.group.hash) {
-          const metaItem = document.createElement('div');
-          metaItem.className = 'meta-item';
-          const metaLabel = document.createElement('span');
-          metaLabel.className = 'meta-label';
-          metaLabel.textContent = 'Group:';
-          const metaValue = document.createElement('span');
-          metaValue.className = 'meta-value';
-
-          if (run.group.hash) {
-            const link = document.createElement('a');
-            link.href = `/groups/${run.group.hash}`;
-            link.className = 'group-link';
-            link.textContent = run.group.name || `Group ${run.group.hash}`;
-            metaValue.appendChild(link);
-          } else {
-            metaValue.textContent = run.group.name || 'Group';
-          }
-
-          metaItem.appendChild(metaLabel);
-          metaItem.appendChild(metaValue);
-          metadataColumn.appendChild(metaItem);
-        }
-
-        if (run.group.metadata) {
-          for (const [name, metadata] of Object.entries(run.group.metadata)) {
-            appendMetadataItem(name, metadata);
-          }
+      // Only show group metadata items (not the group name itself) in metadata column if we're not in a group context
+      // The group name is shown as a pill in the title column, not here
+      if (run.group && !isGroupContext && run.group.metadata) {
+        for (const [name, metadata] of Object.entries(run.group.metadata)) {
+          appendMetadataItem(name, metadata);
         }
       }
 
@@ -1435,6 +1424,7 @@
 
       // Handle run execution time
 
+      // Handle run execution time
       if (run.status && run.status.toLowerCase() === 'running' && run.start_time) {
         // For index page, we don't have access to individual test case start times
         // So we'll use the run start time, but this might show longer durations
@@ -1444,7 +1434,18 @@
         });
         showRunExecutionTime(run.run_id);
       } else if (run.start_time && run.end_time) {
-        // Run is finished - show final execution time
+        // Run is finished - remove any duration-display elements and show final execution time
+        const runItem = document.querySelector(`tr[data-runid="${run.run_id}"]`);
+        if (runItem) {
+          const durationDisplayElement = runItem.querySelector('.duration-display');
+          if (durationDisplayElement) {
+            const durationItem = durationDisplayElement.closest('.meta-item');
+            if (durationItem) {
+              durationItem.remove();
+            }
+          }
+        }
+        // Show final execution time
         showFinalRunExecutionTime(run.run_id, run.start_time, run.end_time);
         // Clear any existing timer
         const existingData = runExecutionTimes.get(run.run_id);
@@ -1516,25 +1517,28 @@
         resultBadgesContainer.appendChild(failedBadge);
       }
 
-      if (counts.aborted > 0) {
-        const abortedBadge = document.createElement('span');
-        abortedBadge.className = 'result-badge result-aborted';
-        abortedBadge.title = 'Aborted';
-        abortedBadge.textContent = counts.aborted;
-        resultBadgesContainer.appendChild(abortedBadge);
+      // Combine aborted into error
+      const totalErrorCount = (counts.error || 0) + (counts.aborted || 0);
+      if (totalErrorCount > 0) {
+        const errorBadge = document.createElement('span');
+        errorBadge.className = 'result-badge result-error';
+        errorBadge.title = 'Error';
+        errorBadge.textContent = totalErrorCount;
+        resultBadgesContainer.appendChild(errorBadge);
       }
 
       // Update the leftmost status badge based on counts
       const statusBadge = tr.querySelector('.status-badge');
       if (statusBadge && (statusBadge.textContent.trim() === 'FINISHED' || statusBadge.textContent.trim() === 'PASSED' || statusBadge.textContent.trim() === 'FAILED' || statusBadge.textContent.trim() === 'SKIPPED' || statusBadge.textContent.trim() === 'ERROR')) {
-        // Priority: Error > Failed/Aborted > Skipped (all) > Passed
-        if (counts.skipped > 0 && counts.passed === 0 && counts.failed === 0 && counts.aborted === 0 && (counts.error === undefined || counts.error === 0)) {
+        // Priority: Error (includes aborted) > Failed > Skipped (all) > Passed
+        const totalError = (counts.error || 0) + (counts.aborted || 0);
+        if (counts.skipped > 0 && counts.passed === 0 && counts.failed === 0 && totalError === 0) {
           statusBadge.className = 'status-badge status-skipped';
           statusBadge.textContent = 'SKIPPED';
-        } else if (counts.error > 0) {
+        } else if (totalError > 0) {
           statusBadge.className = 'status-badge status-error';
           statusBadge.textContent = 'ERROR';
-        } else if (counts.failed > 0 || counts.aborted > 0) {
+        } else if (counts.failed > 0) {
           statusBadge.className = 'status-badge status-finished-failed';
           statusBadge.textContent = 'FAILED';
         } else {

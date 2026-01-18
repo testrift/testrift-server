@@ -3506,12 +3506,12 @@
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg.type === 'test_case_started' && msg.run_id === '{{ run_id }}') {
-                        addOrUpdateTestCase(msg.test_case_id, msg.tc_meta, true); // Force running status
+                        addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta, true); // Force running status
                         // Add live indicator when tests are running
                         addLiveIndicator();
                     }
                     else if ((msg.type === 'test_case_finished' || msg.type === 'test_case_updated') && msg.run_id === '{{ run_id }}') {
-                        addOrUpdateTestCase(msg.test_case_id, msg.tc_meta);
+                        addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta);
 
                         // Check if any tests are still running
                         let hasRunningTests = false;

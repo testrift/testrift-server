@@ -969,10 +969,12 @@
         // Get status badge HTML
         function getStatusBadge(status, run) {
             if (status === 'finished') {
-                const hasFailures = (run.failed_count > 0) || (run.aborted_count > 0);
+                // Combine aborted into error
+                const totalError = (run.error_count || 0) + (run.aborted_count || 0);
+                const hasFailures = run.failed_count > 0;
                 const hasPassed = run.passed_count > 0;
                 const hasSkipped = run.skipped_count > 0;
-                const hasError = run.error_count > 0;
+                const hasError = totalError > 0;
 
                 // If ALL tests are skipped (and no passed/failed/error)
                 if (hasSkipped && !hasPassed && !hasFailures && !hasError) {
@@ -1005,8 +1007,10 @@
             if (run.skipped_count > 0) {
                 badges.push(`<span class="result-badge result-skipped">SKIPPED: ${run.skipped_count}</span>`);
             }
-            if (run.error_count > 0) {
-                badges.push(`<span class="result-badge result-error">ERROR: ${run.error_count}</span>`);
+            // Combine aborted into error
+            const totalError = (run.error_count || 0) + (run.aborted_count || 0);
+            if (totalError > 0) {
+                badges.push(`<span class="result-badge result-error">ERROR: ${totalError}</span>`);
             }
             return badges.length > 0 ? `<div class="result-badges-container">${badges.join('')}</div>` : '<span class="text-muted">No results</span>';
         }
@@ -1226,13 +1230,15 @@
             const errorData = data.map(d => {
                 const passed = d.passed_tests || 0;
                 const skipped = d.skipped_tests || 0;
-                const error = d.error_tests || 0;
+                // Combine aborted into error
+                const error = (d.error_tests || 0) + (d.aborted_tests || 0);
                 return passed + skipped + error;
             });
             const failedData = data.map(d => {
                 const passed = d.passed_tests || 0;
                 const skipped = d.skipped_tests || 0;
-                const error = d.error_tests || 0;
+                // Combine aborted into error
+                const error = (d.error_tests || 0) + (d.aborted_tests || 0);
                 const failed = d.failed_tests || 0;
                 return passed + skipped + error + failed;
             });
@@ -1324,7 +1330,8 @@
                                     } else if (context.dataset.label === 'Skipped') {
                                         value = runData.skipped_tests || 0;
                                     } else if (context.dataset.label === 'Error') {
-                                        value = runData.error_tests || 0;
+                                        // Combine aborted into error
+                                        value = (runData.error_tests || 0) + (runData.aborted_tests || 0);
                                     } else if (context.dataset.label === 'Failed') {
                                         value = runData.failed_tests || 0;
                                     } else {
@@ -1394,12 +1401,12 @@
                 distributionChart.destroy();
             }
 
-            // Calculate totals
+            // Calculate totals (combine aborted into error)
             const totals = runs.reduce((acc, run) => {
                 acc.passed += run.passed_count || 0;
                 acc.failed += run.failed_count || 0;
                 acc.skipped += run.skipped_count || 0;
-                acc.error += run.error_count || 0;
+                acc.error += (run.error_count || 0) + (run.aborted_count || 0);
                 return acc;
             }, { passed: 0, failed: 0, skipped: 0, error: 0 });
 
