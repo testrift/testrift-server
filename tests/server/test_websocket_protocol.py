@@ -181,9 +181,9 @@ class TestWebSocketProtocol:
         # Add run to server
         ws_server.test_runs["test-run-123"] = sample_run
 
-        # Create a test case with logs
-        tc_id_hash = generate_storage_id()
-        test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
+        # Create a test case with logs (using NUnit test ID format)
+        tc_id = "0-1009"  # NUnit test ID format
+        test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id})
         test_case.logs = [
             {
                 "timestamp": "2025-10-01T18:49:17.803300Z",
@@ -199,17 +199,20 @@ class TestWebSocketProtocol:
             }
         ]
         sample_run.test_cases["Test.TestMethod"] = test_case
+        # Ensure test case is in test_cases_by_tc_id for lookup by tc_id
+        sample_run.test_cases_by_tc_id[test_case.tc_id] = test_case
 
         # Test the validation functions that handle_log_stream uses
         from testrift_server.tr_server import validate_run_id, validate_test_case_id
 
-        # Test valid IDs
+        # Test valid IDs (NUnit test ID format)
         assert validate_run_id("test-run-123") is True
-        assert validate_test_case_id("Test.TestMethod") is True
+        assert validate_test_case_id("0-1009") is True
 
         # Test that the test run and test case exist
         assert "test-run-123" in ws_server.test_runs
         assert "Test.TestMethod" in sample_run.test_cases
+        assert "0-1009" in sample_run.test_cases_by_tc_id
 
         # Test that logs exist
         assert len(test_case.logs) == 2

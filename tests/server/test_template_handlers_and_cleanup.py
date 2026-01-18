@@ -243,7 +243,7 @@ class TestTemplateHandlers:
         """Test test case log handler when run doesn't exist."""
         request = MagicMock()
         request.app = mock_app
-        request.match_info = {"run_id": "nonexistent-run", "test_case_id": "Test.Test"}
+        request.match_info = {"run_id": "nonexistent-run", "test_case_id": "0-1009"}
 
         response = await handle_test_case_log(request)
 

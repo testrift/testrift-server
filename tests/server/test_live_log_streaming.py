@@ -114,9 +114,9 @@ class TestLiveLogStreaming:
         # Test the validation functions that handle_log_stream uses
         from testrift_server.tr_server import validate_run_id, validate_test_case_id
 
-        # Test valid IDs
+        # Test valid IDs (NUnit test ID format)
         assert validate_run_id("test-run-123") is True
-        assert validate_test_case_id("Test.TestMethod") is True
+        assert validate_test_case_id("0-1009") is True
 
         # Test invalid IDs
         assert validate_run_id("") is False
@@ -154,10 +154,10 @@ class TestLiveLogStreaming:
         assert "test-run-123" in ws_server.test_runs
         assert "NonExistent.Test" not in sample_run.test_cases
 
-        # Test validation
+        # Test validation (NUnit test ID format)
         from testrift_server.tr_server import validate_run_id, validate_test_case_id
         assert validate_run_id("test-run-123") is True
-        assert validate_test_case_id("NonExistent.Test") is True  # Valid format, just doesn't exist
+        assert validate_test_case_id("0-9999") is True  # Valid format, just doesn't exist
 
     @pytest.mark.asyncio
     async def test_log_entry_processing(self, ws_server, sample_run, sample_test_case):

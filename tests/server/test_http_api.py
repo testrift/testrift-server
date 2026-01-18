@@ -712,10 +712,11 @@ class TestValidationFunctions:
         """Test test case ID validation function."""
         from testrift_server.tr_server import validate_test_case_id
 
-        # Test valid test case IDs
-        assert validate_test_case_id("Test.TestMethod") is True
-        assert validate_test_case_id("Namespace.Class.Method") is True
-        assert validate_test_case_id("SimpleTest") is True
+        # Test valid NUnit test IDs (alphanumeric and hyphens, e.g., "0-1009")
+        assert validate_test_case_id("0-1009") is True
+        assert validate_test_case_id("0-1008") is True
+        assert validate_test_case_id("abc123") is True
+        assert validate_test_case_id("test-42") is True
 
         # Test invalid test case IDs
         assert validate_test_case_id("") is False
@@ -723,6 +724,7 @@ class TestValidationFunctions:
         assert validate_test_case_id("../invalid") is False
         assert validate_test_case_id("invalid/path") is False
         assert validate_test_case_id("invalid\\path") is False
+        assert validate_test_case_id("Test.TestMethod") is False  # Dots not allowed (old format)
 
 
 if __name__ == "__main__":
