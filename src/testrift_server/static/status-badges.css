@@ -1,0 +1,190 @@
+/**
+ * Shared status badge styles for TestRift
+ * Used across test run, index, analyzer, and test case log pages
+ */
+
+/* Base status badge - fixed width to accommodate "ABORTED" */
+.status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 15px;
+    font-weight: 600;
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    min-width: 70px;
+    text-align: center;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+/* Status badge variants for run status (larger size) */
+.status-badge-lg {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 1em;
+    letter-spacing: 0.5px;
+    min-width: 90px;
+}
+
+/* Running status */
+.status-running {
+    background: #ffc107;
+    color: #000;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    overflow: visible;
+}
+
+/* Passed status */
+.status-passed {
+    background: #28a745;
+    color: white;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
+}
+
+/* Failed status */
+.status-failed {
+    background: #dc3545;
+    color: white;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
+}
+
+/* Skipped status */
+.status-skipped {
+    background: #ffc107;
+    color: #000;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
+}
+
+/* Aborted status */
+.status-aborted {
+    background: #6c757d;
+    color: white;
+    box-shadow: 0 2px 8px rgba(108, 117, 125, 0.2);
+}
+
+/* Error status */
+.status-error {
+    background: #6c757d;
+    color: white;
+    box-shadow: 0 2px 8px rgba(108, 117, 125, 0.2);
+}
+
+/* Unknown status */
+.status-unknown {
+    background: #6f42c1;
+    color: white;
+    box-shadow: 0 2px 8px rgba(111, 66, 193, 0.2);
+}
+
+/* Finished status (for run level) */
+.status-finished {
+    background: #28a745;
+    color: white;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
+}
+
+.status-finished-passed {
+    background: #28a745;
+    color: white;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
+}
+
+.status-finished-failed {
+    background: #dc3545;
+    color: white;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
+}
+
+/* Result count badges (lighter colors for count displays) */
+.result-badge {
+    padding: 4px 8px;
+    border-radius: 15px;
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.result-passed {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.result-skipped {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.result-failed {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.result-aborted {
+    background-color: #e2e3e5;
+    color: #6c757d;
+}
+
+.result-error {
+    background-color: #e2e3e5;
+    color: #6c757d;
+}
+
+.result-badges-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Spinner for running status */
+.status-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(0, 0, 0, 0.2);
+    border-top: 2px solid #000;
+    border-radius: 50%;
+    animation: status-spin 1s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+@keyframes status-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Legacy badge class mappings (for tree view) */
+.bg-green {
+    background-color: #28a745;
+    color: white;
+}
+
+.bg-red {
+    background-color: #dc3545;
+    color: white;
+}
+
+.bg-skipped {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.bg-aborted {
+    background-color: #6c757d;
+    color: white;
+}
+
+.bg-running {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.bg-error {
+    background-color: #6c757d;
+    color: white;
+}

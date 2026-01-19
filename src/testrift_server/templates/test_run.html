@@ -6,13 +6,18 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>{{ run_name }}</title>
+    <title>Test Run - {{ run_name or run_id }}</title>
     <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.0/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.0/js/bootstrap.min.js"></script>
     {% if server_mode %}
+    <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
     <script src="/static/classifications.js"></script>
+    {% else %}
+    <link href="static/status-badges.css" rel="stylesheet">
+    <link href="static/classifications.css" rel="stylesheet">
+    <script src="static/classifications.js"></script>
     {% endif %}
     <style>
         body {
@@ -71,14 +76,12 @@
             padding-bottom: 10px;
         }
 
-        .status-badge {
-            display: inline-block;
+        /* Run-level status badge (larger) - inherits from shared CSS, override size */
+        .run-info .status-badge {
             padding: 8px 16px;
             border-radius: 20px;
-            font-weight: 600;
             font-size: 1em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            min-width: 100px;
         }
 
         .run-header {
@@ -89,8 +92,17 @@
         }
 
         .run-title-section {
-            display: inline-flex;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .run-timing-row {
+            display: flex;
             align-items: center;
+            gap: 12px;
+            font-size: 0.9em;
+            color: #6c757d;
         }
 
         .run-status-section {
@@ -118,98 +130,14 @@
             align-items: center;
         }
 
-        .result-badges-container {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .result-badge {
+        /* Result badges - larger size for run header, colors from shared CSS */
+        .run-info .result-badge {
             padding: 8px 16px;
             border-radius: 20px;
             font-size: 0.9em;
-            font-weight: 600;
-            text-transform: uppercase;
         }
 
-        .result-passed {
-            background-color: #d4edda;
-            color: #155724;
-        }
-
-        .result-skipped {
-            background-color: #fff3cd;
-            color: #856404;
-        }
-
-        .result-failed {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-
-        .result-aborted {
-            background-color: #e2e3e5;
-            color: #6c757d;
-        }
-
-        .result-error {
-            background-color: #e2e3e5;
-            color: #6c757d;
-        }
-
-        .status-running {
-            background: #ffc107;
-            color: #000;
-            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
-            display: inline-flex;
-            align-items: center;
-        }
-        .status-finished {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
-        }
-        .status-passed {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
-        }
-
-        .status-skipped {
-            background: #ffc107;
-            color: #000;
-            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
-        }
-
-        .status-failed {
-            background: #dc3545;
-            color: white;
-            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
-        }
-
-        .status-aborted {
-            background: #6c757d;
-            color: white;
-            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.2);
-        }
-
-        .bg-error, .status-error {
-            background: #6c757d;
-            color: #fff;
-            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.2);
-        }
-
-        .status-finished-passed {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
-        }
-
-        .status-finished-failed {
-            background: #dc3545;
-            color: white;
-            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
-        }
+        /* Status badge color overrides for run-level - use shared CSS */
 
         .download-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -263,6 +191,12 @@
             font-size: 0.9em;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        .run-id-value {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #6c757d;
         }
 
         .group-link {
@@ -331,7 +265,9 @@
         }
 
         #test-cases-list {
-            max-width: 600px;
+            max-width: 100%;
+            position: relative;
+            /* --tc-status-left is set dynamically by JavaScript to align all status badges */
         }
 
         /* List view styling */
@@ -372,6 +308,33 @@
             color: #6c757d;
             cursor: not-allowed;
             flex-grow: 1;
+        }
+
+        .list-view .list-left {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            min-width: 0;
+            max-width: calc(var(--tc-status-left, 400px) - 16px);
+        }
+
+        .list-view .list-left > a,
+        .list-view .list-left > span {
+            display: inline-block;
+            width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* List view right side (badge, time, classification) - absolute positioned like .tc-right */
+        .list-view-right {
+            position: absolute;
+            left: var(--tc-status-left, 400px);
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-start;
+            min-width: var(--tc-right-width, 200px);
         }
 
         /* Sort select styling */
@@ -453,7 +416,6 @@
         .tree ul {
             margin-left: 1.5em;      /* original indent behaviour */
             padding-left: 0;
-            position: relative;
             border-left: 2px solid #e9ecef;
             margin-top: 5px;
         }
@@ -464,7 +426,6 @@
             line-height: 1.2;
             font-weight: 500;
             font-size: 1em;
-            position: relative;
             background: transparent;
             margin-bottom: 1px;
             border-radius: 4px;
@@ -480,7 +441,6 @@
         .tc-row {
             display: flex;
             align-items: center;
-            justify-content: space-between;
             width: 100%;
         }
 
@@ -488,30 +448,65 @@
             display: inline-flex;
             align-items: center;
             min-width: 0;
-            flex: 1 1 auto;
+            flex: 0 1 auto;
             font-size: 0.9em;  /* controls TC name size in tree view */
+            overflow: hidden;
+            max-width: calc(var(--tc-status-left, 400px) - var(--tc-indent, 0px));
+        }
+
+        .tc-main > a,
+        .tc-main > span:first-child {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex-shrink: 1;
         }
 
         .tc-right {
-            flex: 0 0 auto;
+            position: absolute;
+            left: var(--tc-status-left, 400px);
             display: inline-flex;
             align-items: center;
+            justify-content: flex-start;
+            min-width: var(--tc-right-width, 200px);
+        }
+
+        /* Badge styling */
+        .tc-right .badge {
+            min-width: 65px;
+            text-align: center;
+        }
+
+        /* Running badges need flex layout to properly show spinner */
+        .tc-right .badge.bg-running {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .list-view-right .badge.bg-running {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .tc-right .execution-time {
+            margin-left: 6px;
+        }
+
+        .tc-right .classification-container {
+            margin-left: 4px;
+        }
+
+        .tc-right .collapsed-classification-container {
+            margin-left: 4px;
         }
 
         /* Hover effect for all li elements */
         .tree li:hover {
             background: rgba(102, 126, 234, 0.08);
-        }
-
-        /* Only apply horizontal animation to end test case nodes */
-        .tree li.test-case-node:hover {
-            transform: translateX(5px);
-            transition: transform 0.2s ease;
-        }
-
-        /* Explicitly prevent transform on container nodes (those without test-case-node class) */
-        .tree li:not(.test-case-node):hover {
-            transform: none;
         }
 
         .tree li a {
@@ -540,44 +535,44 @@
 
         .badge {
             margin-left: 10px;
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 15px;
             font-size: 0.75em;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.4px;
+            min-width: 65px;
+            text-align: center;
+            box-sizing: border-box;
+            flex-shrink: 0;
         }
 
-        .bg-red {
-            background: #dc3545;
-            color: white;
-            box-shadow: 0 1px 3px rgba(220, 53, 69, 0.25);
-        }
+        /* bg-* colors are in shared status-badges.css */
 
-        .bg-green {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 1px 3px rgba(40, 167, 69, 0.25);
-        }
-
-        .bg-skipped {
-            background: #ffc107;
-            color: #000;
-            box-shadow: 0 1px 3px rgba(255, 193, 7, 0.25);
-        }
-
-        .bg-aborted {
-            background: #6c757d;
-            color: white;
-            box-shadow: 0 1px 3px rgba(108, 117, 125, 0.25);
-        }
-
-        .bg-running {
-            background: #ffc107;
-            color: #000;
+        /* Collapsed classification container for parent nodes */
+        .collapsed-classification-container {
             display: inline-flex;
             align-items: center;
-            box-shadow: 0 1px 3px rgba(255, 193, 7, 0.25);
+            gap: 2px;
+            margin-left: 4px;
+        }
+
+        /* Remove individual icon margins inside collapsed container */
+        .collapsed-classification-container .classification-icon,
+        .collapsed-classification-container .new-tc-indicator {
+            margin-left: 0;
+        }
+
+        .collapsed-classification-container .classification-icon {
+            width: 16px;
+            height: 16px;
+            font-size: 12px;
+        }
+
+        .collapsed-classification-container .new-tc-indicator {
+            width: 14px;
+            height: 14px;
+            font-size: 12px;
         }
 
         .spinner {
@@ -587,7 +582,7 @@
             border-top: 2px solid transparent;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin-left: 8px;
+            flex-shrink: 0;
         }
 
         @keyframes spin {
@@ -699,13 +694,13 @@
     </style>
 </head>
 <body>
-    {% if not live_run %}
+    {% if not server_mode %}
         {% include 'static_banner.html' %}
     {% endif %}
 
     <div class="main-container">
         <div class="header-section">
-            <h1>{{ run_name }}</h1>
+            <h1>Test Run</h1>
             <div class="subtitle">Test Execution Details</div>
         </div>
 
@@ -713,13 +708,17 @@
             <div class="run-info">
                 <div class="run-header">
                     <div class="run-title-section">
-                        <h3 style="margin: 0;">Run Information <span id="run-execution-time" class="execution-time" style="display: none; margin-left: 12px; font-size: 0.85em; color: #6c757d;"></span></h3>
+                        <h3 class="run-name" style="margin: 0 0 4px 0;">{{ run_name or run_id }}</h3>
+                        <div class="run-timing-row">
+                            <span id="start-time-display">{{ start_time }}</span>
+                            <span id="run-execution-time" class="execution-time" style="display: none;"></span>
+                        </div>
                     </div>
                     <div class="run-status-section">
                         <div class="status-badge-top">
                         {% if status.lower() == 'running' %}
-                            <span id="run-status" class="status-badge status-running">
-                                RUNNING <span class="spinner"></span>
+                            <span id="run-status" class="status-badge status-badge-lg status-running">
+                                RUNNING <span class="status-spinner"></span>
                             </span>
                             {% elif status.lower() == 'aborted' %}
                             <span class="status-badge status-aborted">ABORTED</span>
@@ -739,14 +738,6 @@
                 </div>
 
                 <div class="info-grid">
-                    <div class="info-item">
-                        <strong>Start Time</strong>
-                        <span id="start-time-display">{{ start_time }}</span>
-                    </div>
-                    <div class="info-item">
-                        <strong>End Time</strong>
-                        <span id="end-time-display">{{ end_time or 'Not finished' }}</span>
-                    </div>
                     {% if group %}
                     <div class="info-item">
                         <strong>Group</strong>
@@ -777,10 +768,6 @@
                         {% endif %}
                     </div>
                     {% endfor %}
-                    <div class="info-item">
-                        <strong>Days to Keep</strong>
-                        {{ retention_days or 'N/A' }}
-                    </div>
                 </div>
 
                 <div class="run-bottom-section">
@@ -957,8 +944,6 @@
                     element = $("<span>").addClass("execution-time").css({
                         "font-size": "0.85em",
                         "color": "#6c757d",
-                        "margin-left": "12px",
-                        "margin-right": "8px",
                         "display": "inline"
                     });
                 }
@@ -1047,6 +1032,22 @@
             } else {
                 return `${seconds}s`;
             }
+        }
+
+        function formatExecutionTimeWithMillis(milliseconds) {
+            const totalSeconds = Math.floor(milliseconds / 1000);
+            const ms = Math.floor(milliseconds % 1000);
+            const seconds = totalSeconds % 60;
+            const minutes = Math.floor(totalSeconds / 60) % 60;
+            const hours = Math.floor(totalSeconds / 3600);
+            const msStr = String(ms).padStart(3, '0');
+
+            if (hours > 0) {
+                return `${hours}h ${minutes}m ${seconds}.${msStr}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${seconds}.${msStr}s`;
+            }
+            return `${seconds}.${msStr}s`;
         }
 
         // Run execution time tracking functions
@@ -1333,6 +1334,7 @@
                     // Mark this as an end test case node for CSS targeting
                     listItem.addClass("test-case-node");
                     listItem.attr('data-tc-id', fullName);
+                    listItem.attr('data-tc-full-name', fullName); // For classification lookup
                     listItem.attr('data-storage-id', this.storageId || fullName);
 
                     // Check if files exist on disk
@@ -1352,8 +1354,6 @@
                     this.executionTimeElement = $("<span>").addClass("execution-time").css({
                         "font-size": "0.85em",
                         "color": "#6c757d",
-                        "margin-left": "12px",
-                        "margin-right": "8px",
                         "display": "inline"
                     });
 
@@ -1367,26 +1367,34 @@
                     textElement = $("<span>");
                     badge = $("<span>").addClass("badge summary-badge").css("display", "none");
                     this.summaryBadge = badge; // Store reference for summary badge
+
+                    // Create container for classification icons shown when collapsed
+                    this.collapsedClassificationContainer = $("<span>").addClass("collapsed-classification-container").css("display", "none");
                 }
 
-                // Build left side: text + new TC indicator + execution time
+                // Build left side: text + new TC indicator
                 leftContainer.append(textElement);
 
                 if (this.newTcIndicatorContainer) {
                     leftContainer.append(this.newTcIndicatorContainer);
                 }
 
-                if (this.executionTimeElement) {
-                    leftContainer.append(this.executionTimeElement);
-                }
-
-                // Build right side: badge + classification icon
+                // Build right side: badge + execution time + classification icon
                 if (badge) {
                     rightContainer.append(badge);
                 }
 
+                if (this.executionTimeElement) {
+                    rightContainer.append(this.executionTimeElement);
+                }
+
                 if (this.classificationContainer) {
                     rightContainer.append(this.classificationContainer);
+                }
+
+                // Add collapsed classification container for parent nodes
+                if (this.collapsedClassificationContainer) {
+                    rightContainer.append(this.collapsedClassificationContainer);
                 }
 
                 row.append(leftContainer).append(rightContainer);
@@ -1464,6 +1472,12 @@
                     this.summaryBadge.show();
                 }
 
+                // Show collapsed classification icons (for parent nodes)
+                if (this.collapsedClassificationContainer) {
+                    this.updateCollapsedClassifications();
+                    this.collapsedClassificationContainer.show();
+                }
+
                 // Recursively collapse all children
                 this.children.forEach(child => {
                     if (child.children && child.children.length > 0) {
@@ -1480,6 +1494,11 @@
                 // Hide summary badge when expanded (for parent nodes)
                 if (this.summaryBadge) {
                     this.summaryBadge.hide();
+                }
+
+                // Hide collapsed classification icons when expanded (for parent nodes)
+                if (this.collapsedClassificationContainer) {
+                    this.collapsedClassificationContainer.hide();
                 }
 
                 // Expand children if explicitly requested or if collapse all is not active
@@ -1551,8 +1570,6 @@
                                 this.executionTimeElement = $("<span>").addClass("execution-time").css({
                                     "font-size": "0.85em",
                                     "color": "#6c757d",
-                                    "margin-left": "12px",
-                                    "margin-right": "8px",
                                     "display": "inline"
                                 });
 
@@ -1597,8 +1614,6 @@
                         this.executionTimeElement = $("<span>").addClass("execution-time").css({
                             "font-size": "0.85em",
                             "color": "#6c757d",
-                            "margin-left": "12px",
-                            "margin-right": "8px",
                             "display": "inline"
                         });
 
@@ -1647,7 +1662,7 @@
                     const duration = end - start;
 
                     if (duration > 0) {
-                        const formattedTime = formatExecutionTime(duration);
+                        const formattedTime = formatExecutionTimeWithMillis(duration);
                         if (this.executionTimeElement) {
                             this.executionTimeElement.text(`⏱️ ${formattedTime}`);
                         }
@@ -1729,6 +1744,62 @@
                 return counts;
             }
 
+            // Get unique classification types from all leaf nodes
+            getAllLeafClassifications() {
+                const classifications = new Set();
+
+                const collectClassifications = (node) => {
+                    node.children.forEach(child => {
+                        if (child.traceHtmlFile) {
+                            // This is a leaf node (actual test case)
+                            // Use originalFullName if available, otherwise fullName
+                            // (tree building may shorten fullName for display purposes)
+                            const lookupKey = child.originalFullName || child.fullName;
+                            const classData = classificationsData[lookupKey];
+                            if (classData) {
+                                if (classData.is_new) {
+                                    classifications.add('new');
+                                }
+                                if (classData.classification) {
+                                    classifications.add(classData.classification);
+                                }
+                            }
+                        } else {
+                            // This is a parent node, recurse into its children
+                            collectClassifications(child);
+                        }
+                    });
+                };
+
+                collectClassifications(this);
+                return classifications;
+            }
+
+            // Update collapsed classification icons
+            updateCollapsedClassifications() {
+                if (!this.collapsedClassificationContainer) return;
+                if (typeof Classifications === 'undefined') {
+                    return;
+                }
+
+                // Clear existing icons
+                this.collapsedClassificationContainer.empty();
+
+                // Get unique classifications from all leaf nodes
+                const classificationTypes = this.getAllLeafClassifications();
+
+                // Add one icon per classification type (deduplicated)
+                classificationTypes.forEach(classType => {
+                    if (classType === 'new') {
+                        const indicator = Classifications.createNewTcIndicator();
+                        this.collapsedClassificationContainer.append(indicator);
+                    } else {
+                        const icon = Classifications.createClassificationIcon(classType);
+                        this.collapsedClassificationContainer.append(icon);
+                    }
+                });
+            }
+
             checkChildrenStatus() {
                 // Recursively get all leaf node statuses from the entire subtree
                 const childStatuses = this.getAllLeafStatuses();
@@ -1797,28 +1868,38 @@
         }
 
         function getParentName(fullName) {
-            // Handle bracket notation - don't split on dots inside square brackets
+            // Handle bracket notation and quotes - don't split on dots/plus inside square brackets or quotes
             let bracketDepth = 0;
-            let lastDotIndex = -1;
+            let inQuotes = false;
+            let quoteChar = null;
+            let lastSeparatorIndex = -1;
 
             for (let i = fullName.length - 1; i >= 0; i--) {
                 const char = fullName[i];
 
-                if (char === ']') {
+                if ((char === '"' || char === "'") && bracketDepth === 0) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = null;
+                    }
+                } else if (char === ']' && !inQuotes) {
                     bracketDepth++;
-                } else if (char === '[') {
+                } else if (char === '[' && !inQuotes) {
                     bracketDepth--;
                     if (bracketDepth < 0) bracketDepth = 0; // Safety check
-                } else if (char === '.' && bracketDepth === 0) {
-                    lastDotIndex = i;
+                } else if ((char === '.' || char === '+') && bracketDepth === 0 && !inQuotes) {
+                    lastSeparatorIndex = i;
                     break;
                 }
             }
 
-            if (lastDotIndex === -1) {
-                return ""; // No parent if no dots outside brackets
+            if (lastSeparatorIndex === -1) {
+                return ""; // No parent if no separators outside brackets/quotes
             }
-            return fullName.substring(0, lastDotIndex);
+            return fullName.substring(0, lastSeparatorIndex);
         }
 
 
@@ -2009,7 +2090,7 @@
                     const end = new Date(testEntry.endTime);
                     const duration = end - start;
                     if (duration > 0) {
-                        testEntry.executionTime = formatExecutionTime(duration);
+                        testEntry.executionTime = formatExecutionTimeWithMillis(duration);
                     }
                 }
 
@@ -2105,7 +2186,7 @@
                 const duration = endTime - startTime;
 
                 if (duration > 0) {
-                    testEntry.executionTime = formatExecutionTime(duration);
+                    testEntry.executionTime = formatExecutionTimeWithMillis(duration);
                 }
             }
 
@@ -2113,6 +2194,17 @@
                 // Track the order test cases are received
                 if (!testCaseOrder.includes(tc_full_name)) {
                     testCaseOrder.push(tc_full_name);
+                }
+
+                // Refresh classifications for new test cases (they may be marked as "new")
+                if (runConfig.serverMode && typeof Classifications !== 'undefined') {
+                    // Debounce classification refresh to avoid too many requests
+                    if (window._classificationRefreshTimeout) {
+                        clearTimeout(window._classificationRefreshTimeout);
+                    }
+                    window._classificationRefreshTimeout = setTimeout(() => {
+                        loadAndApplyClassifications();
+                    }, 500);
                 }
             }
 
@@ -2228,21 +2320,34 @@
         // NEW COMPACT TREE LOGIC
 
         function getPathSegments(path) {
-            // Split path by dots, but ignore dots inside brackets
+            // Split path by dots and plus signs, but ignore them inside brackets or quotes
+            // This handles nested classes (Parent+Child) and parameterized tests with quoted strings
             const segments = [];
             let currentSegment = '';
             let bracketDepth = 0;
+            let inQuotes = false;
+            let quoteChar = null;
 
             for (let i = 0; i < path.length; i++) {
                 const char = path[i];
 
-                if (char === '[') {
+                // Handle quote characters
+                if ((char === '"' || char === "'") && bracketDepth === 0) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = null;
+                    }
+                    currentSegment += char;
+                } else if (char === '[' && !inQuotes) {
                     bracketDepth++;
                     currentSegment += char;
-                } else if (char === ']') {
+                } else if (char === ']' && !inQuotes) {
                     bracketDepth--;
                     currentSegment += char;
-                } else if (char === '.' && bracketDepth === 0) {
+                } else if ((char === '.' || char === '+') && bracketDepth === 0 && !inQuotes) {
                     if (currentSegment) {
                         segments.push(currentSegment);
                         currentSegment = '';
@@ -2271,7 +2376,8 @@
             if (['skipped', 'skip', 'ignored'].includes(normalized)) {
                 return !!statusFilters.skipped;
             }
-            if (['error'].includes(normalized)) {
+            // Error filter also includes aborted TCs
+            if (['error', 'aborted'].includes(normalized)) {
                 return !!statusFilters.error;
             }
             return true;
@@ -2307,6 +2413,73 @@
             }
         }
 
+        // Align status badges in tree/list view so they form a table-like column
+        function alignStatusBadges() {
+            const container = document.getElementById('test-cases-list');
+            if (!container) return;
+
+            const containerRect = container.getBoundingClientRect();
+            const containerLeft = containerRect.left;
+            const containerWidth = containerRect.width;
+            const computedStyle = getComputedStyle(container);
+            const rightWidthRaw = computedStyle.getPropertyValue('--tc-right-width');
+            const parsedRightWidth = parseInt(rightWidthRaw, 10);
+
+            // Find all tc-main elements (test case name containers)
+            const tcMainElements = container.querySelectorAll('.tc-main');
+
+            // Calculate the maximum right edge position (relative to container)
+            let maxRightEdge = 0;
+            tcMainElements.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                const rightEdge = rect.right - containerLeft;
+                if (rightEdge > maxRightEdge) {
+                    maxRightEdge = rightEdge;
+                }
+            });
+
+            // For list view, check the left side text spans/links
+            const listTextSpans = container.querySelectorAll('.list-view .list-left .list-left-text');
+            listTextSpans.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                const naturalWidth = Math.max(el.scrollWidth || 0, rect.width);
+                const rightEdge = (rect.left - containerLeft) + naturalWidth;
+                if (rightEdge > maxRightEdge) {
+                    maxRightEdge = rightEdge;
+                }
+            });
+
+            // Determine the max width needed for the right column (badge/time/classifications)
+            let maxRightWidth = 0;
+            const rightElements = container.querySelectorAll('.tc-right, .list-view-right');
+            rightElements.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                if (rect.width > maxRightWidth) {
+                    maxRightWidth = rect.width;
+                }
+            });
+
+            const rightMinWidth = Math.max(
+                Number.isFinite(parsedRightWidth) ? parsedRightWidth : 0,
+                maxRightWidth,
+                160
+            );
+            container.style.setProperty('--tc-right-width', rightMinWidth + 'px');
+
+            // Add some padding
+            const padding = container.classList.contains('list-view') ? 12 : 20;
+            let statusLeft = Math.max(maxRightEdge + padding, 100);
+
+            // Clamp so the right column stays inside the container
+            if (containerWidth > 0) {
+                const maxLeft = Math.max(containerWidth - rightMinWidth - 8, 0);
+                statusLeft = Math.min(statusLeft, maxLeft);
+            }
+
+            // Set the CSS variable on the container
+            container.style.setProperty('--tc-status-left', statusLeft + 'px');
+        }
+
         // Setup hover handlers for all badges in tree view
         function setupBadgeHoverHandlers() {
             const testCasesList = document.getElementById('test-cases-list');
@@ -2335,16 +2508,27 @@
                     // Find the corresponding DOM node
                     let node = null;
 
-                    // First try: find by data-tc-id (most reliable)
-                    const nodesById = testCasesList.querySelectorAll('.test-case-node[data-tc-id="' + CSS.escape(tcId) + '"]');
-                    for (let n of nodesById) {
+                    // First try: find by data-tc-full-name (most reliable after updateTreeDataAttributes)
+                    const nodesByFullName = testCasesList.querySelectorAll('.test-case-node[data-tc-full-name="' + CSS.escape(tcId) + '"]');
+                    for (let n of nodesByFullName) {
                         if (!processedNodes.has(n)) {
                             node = n;
                             break;
                         }
                     }
 
-                    // Second try: find by matching link href with fullName (exact match)
+                    // Second try: find by data-tc-id
+                    if (!node) {
+                        const nodesById = testCasesList.querySelectorAll('.test-case-node[data-tc-id="' + CSS.escape(tcId) + '"]');
+                        for (let n of nodesById) {
+                            if (!processedNodes.has(n)) {
+                                node = n;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Third try: find by matching link href with storageId
                     if (!node) {
                         const links = testCasesList.querySelectorAll('.test-case-node a');
                         for (let link of links) {
@@ -2353,8 +2537,8 @@
                                 const linkMatch = link.href.match(/log\/([^/]+)\.html/);
                                 if (linkMatch) {
                                     const linkId = decodeURIComponent(linkMatch[1]);
-                                    // Exact match with fullName (this is what list view uses)
-                                    if (linkId === fullName) {
+                                    // Match with storageId (tc_id in URL)
+                                    if (linkId === storageId) {
                                         const candidateNode = link.closest('.test-case-node');
                                         // Only use if not already processed
                                         if (candidateNode && !processedNodes.has(candidateNode)) {
@@ -2376,10 +2560,11 @@
                     const badgeEl = node.querySelector('.badge');
                     if (!badgeEl) return;
 
-                    // Ensure data-tc-id is set
+                    // Ensure data attributes are set correctly
                     badgeEl.setAttribute('data-tc-id', tcId);
                     badgeEl.setAttribute('data-storage-id', storageId);
                     node.setAttribute('data-tc-id', tcId);
+                    node.setAttribute('data-tc-full-name', tcId);
                     node.setAttribute('data-storage-id', storageId);
 
                     // Attach handlers (function handles removing old ones)
@@ -2392,6 +2577,27 @@
             setTimeout(attemptSetup, 100);
             setTimeout(attemptSetup, 300);
             setTimeout(attemptSetup, 600);
+        }
+
+        // Update data-tc-full-name attributes on all tree nodes to match their actual fullName
+        // This is needed because buildCompactTree creates temp entries with shortened names
+        // and restores original fullNames afterwards
+        function updateTreeDataAttributes(node) {
+            if (!node) return;
+
+            // Update data attribute for actual test cases (those with traceHtmlFile)
+            if (node.traceHtmlFile && node.listItem && node.listItem.length > 0) {
+                node.listItem.attr('data-tc-full-name', node.fullName);
+                node.listItem.attr('data-tc-id', node.fullName);
+                if (node.storageId) {
+                    node.listItem.attr('data-storage-id', node.storageId);
+                }
+            }
+
+            // Recursively update children
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => updateTreeDataAttributes(child));
+            }
         }
 
         function rebuildCompactTree() {
@@ -2428,6 +2634,9 @@
             listElement.append(treeRoot.listItem);
             root = treeRoot;
 
+            // Update data attributes on all tree nodes (needed for classification lookup)
+            updateTreeDataAttributes(root);
+
             // Restore collapsed state after rebuilding
             restoreCollapsedState(root);
 
@@ -2451,6 +2660,11 @@
 
             // Always setup badge hover handlers after tree rebuild (even without classifications)
             setupBadgeHoverHandlers();
+
+            // Align status badges after tree is fully rendered
+            requestAnimationFrame(() => {
+                alignStatusBadges();
+            });
         }
 
         // Recursively save collapsed state of all nodes
@@ -2547,8 +2761,6 @@
                             executionTimeElement = $("<span>").addClass("execution-time").css({
                                 "font-size": "0.85em",
                                 "color": "#6c757d",
-                                "margin-left": "12px",
-                                "margin-right": "8px",
                                 "display": "inline"
                             });
                         }
@@ -2690,6 +2902,26 @@
             }
         }
 
+        // Recursively restore originalFullName to fullName for all nodes in a tree
+        function restoreOriginalFullNames(node) {
+            if (!node) return;
+
+            // Restore this node's fullName if originalFullName exists
+            if (node.originalFullName) {
+                node.fullName = node.originalFullName;
+                // Update data attribute to match restored fullName
+                if (node.listItem && node.listItem.length > 0) {
+                    node.listItem.attr('data-tc-full-name', node.fullName);
+                }
+                // Keep originalFullName for classification lookups (don't delete it)
+            }
+
+            // Recursively restore children
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => restoreOriginalFullNames(child));
+            }
+        }
+
         function buildCompactTree(testCases) {
             if (testCases.length === 0) return null;
             if (testCases.length === 1) {
@@ -2760,7 +2992,9 @@
 
                     if (originalTc) {
                         tempTc.Status = originalTc.Status;
-                        tempTc.originalFullName = originalTc.fullName;
+                        // Preserve the TRUE original fullName through recursion levels
+                        // If originalTc already has an originalFullName, use that; otherwise use its fullName
+                        tempTc.originalFullName = originalTc.originalFullName || originalTc.fullName;
                         // Propagate timing information so execution time works in tree view
                         tempTc.startTime = originalTc.startTime;
                         tempTc.endTime = originalTc.endTime;
@@ -2790,19 +3024,13 @@
                     if (subtree.fullName === "Test Cases") {
                         // If it's a virtual root, add all its children directly
                         subtree.children.forEach(child => {
-                            // Restore original full name if it exists
-                            if (child.originalFullName) {
-                                child.fullName = child.originalFullName;
-                                delete child.originalFullName;
-                            }
+                            // Restore original full name if it exists (recursively)
+                            restoreOriginalFullNames(child);
                             parent.addChild(child);
                         });
                     } else {
-                        // If it's a single node, restore original full name and add it as a child
-                        if (subtree.originalFullName) {
-                            subtree.fullName = subtree.originalFullName;
-                            delete subtree.originalFullName;
-                        }
+                        // If it's a single node, restore original full name and add it as a child (recursively)
+                        restoreOriginalFullNames(subtree);
                         parent.addChild(subtree);
                     }
                     return parent;
@@ -3025,6 +3253,13 @@
             // Calculate and display execution time after view switch
             calculatePreloadedExecutionTimes();
 
+            // Ensure classifications are applied after view switch
+            if (classificationsData && Object.keys(classificationsData).length > 0) {
+                requestAnimationFrame(() => {
+                    applyClassificationsToTree();
+                });
+            }
+
             // Save user preference
             saveUserPreferences();
         }
@@ -3044,6 +3279,8 @@
 
             sortedTestCases.forEach(testCase => {
                 const listItem = document.createElement('li');
+                // Add data attribute for easy lookup by fullName
+                listItem.setAttribute('data-tc-full-name', testCase.fullName);
 
                 // Create main content container
                 const contentContainer = document.createElement('div');
@@ -3054,6 +3291,7 @@
 
                 // Create left side with link
                 const leftSide = document.createElement('div');
+                leftSide.className = 'list-left';
                 leftSide.style.display = 'flex';
                 leftSide.style.flexDirection = 'column';
                 leftSide.style.flexGrow = '1';
@@ -3080,15 +3318,17 @@
                 timeElement.className = 'execution-time';
                 timeElement.style.fontSize = '0.85em';
                 timeElement.style.color = '#6c757d';
-                timeElement.style.marginLeft = '12px';
+                timeElement.style.marginLeft = '8px';
+                timeElement.style.marginRight = '2px';
 
                 // Set initial execution time if available
                 if (testCase.executionTime) {
                     timeElement.textContent = `⏱️ ${testCase.executionTime}`;
                 }
 
-                // Create container for TC name + new TC indicator + execution time
+                // Create container for TC name + new TC indicator
                 const textContainer = document.createElement('span');
+                textContainer.className = 'list-left-text';
                 textContainer.appendChild(document.createTextNode(testCase.fullName));
 
                 // Add new TC indicator if applicable
@@ -3098,17 +3338,18 @@
                     textContainer.appendChild(newIndicator);
                 }
 
-                textContainer.appendChild(timeElement);
                 link.appendChild(textContainer);
 
                 leftSide.appendChild(link);
                 contentContainer.appendChild(leftSide);
 
-                // Create right side with badge + classification icon
+                // Create right side with badge + execution time + classification icon
                 const rightSide = document.createElement('div');
+                rightSide.className = 'list-view-right';
                 rightSide.style.display = 'flex';
                 rightSide.style.alignItems = 'center';
-                rightSide.style.gap = '8px';
+                rightSide.style.justifyContent = 'flex-start';
+                rightSide.style.flexShrink = '0';
 
                 // Store reference for real-time updates
                 testCase.listViewExecutionTimeElement = timeElement;
@@ -3126,9 +3367,14 @@
                     }
                 }
 
+                // Add execution time element after badge
+                timeElement.style.marginLeft = '6px';
+                rightSide.appendChild(timeElement);
+
                 // Add classification icon if applicable
                 if (classData && classData.classification && typeof Classifications !== 'undefined') {
                     const classIcon = Classifications.createClassificationIcon(classData.classification);
+                    classIcon.style.marginLeft = '4px';
                     rightSide.appendChild(classIcon);
                 }
 
@@ -3140,6 +3386,11 @@
 
             // Re-establish execution time tracking for running tests
             reestablishExecutionTimeTracking();
+
+            // Align status badges after list is fully rendered
+            requestAnimationFrame(() => {
+                alignStatusBadges();
+            });
         }
 
         function sortTestCases(testCases) {
@@ -3150,8 +3401,18 @@
                     return testCases.sort((a, b) => b.fullName.localeCompare(a.fullName));
                 case 'received':
                 default:
-                    // Sort by the order they were received
+                    // Sort by test case start time (order received)
                     return testCases.sort((a, b) => {
+                        const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
+                        const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
+                        // If both have start times, sort by time
+                        if (timeA && timeB) {
+                            return timeA - timeB;
+                        }
+                        // If only one has a start time, it comes first
+                        if (timeA && !timeB) return -1;
+                        if (!timeA && timeB) return 1;
+                        // Fallback to testCaseOrder for tests without start times
                         const indexA = testCaseOrder.indexOf(a.fullName);
                         const indexB = testCaseOrder.indexOf(b.fullName);
                         return indexA - indexB;
@@ -3165,6 +3426,13 @@
 
             rebuildCurrentView();
 
+            // Ensure classifications are applied after sort change
+            if (classificationsData && Object.keys(classificationsData).length > 0) {
+                requestAnimationFrame(() => {
+                    applyClassificationsToTree();
+                });
+            }
+
             // Save user preference
             saveUserPreferences();
         }
@@ -3175,6 +3443,13 @@
             statusFilters[filterKey] = isChecked;
             saveUserPreferences();
             rebuildCurrentView();
+
+            // Ensure classifications are applied after filter change
+            if (classificationsData && Object.keys(classificationsData).length > 0) {
+                requestAnimationFrame(() => {
+                    applyClassificationsToTree();
+                });
+            }
         }
 
         // Expand/Collapse All functionality
@@ -3310,23 +3585,8 @@
                     const classData = classificationsData[fullName];
                     if (!classData) return;
 
-                    // Find the list item for this test case
-                    const listItems = listElement.querySelectorAll('li');
-                    let targetListItem = null;
-
-                    for (let item of listItems) {
-                        const link = item.querySelector('a');
-                        if (link && link.href) {
-                            const match = link.href.match(/log\/([^/]+)\.html/);
-                            if (match) {
-                                const linkId = decodeURIComponent(match[1]);
-                                if (linkId === fullName) {
-                                    targetListItem = item;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    // Find the list item for this test case using data attribute
+                    const targetListItem = listElement.querySelector(`li[data-tc-full-name="${CSS.escape(fullName)}"]`);
 
                     if (!targetListItem) return;
 
@@ -3364,36 +3624,36 @@
                     }
                 });
             } else {
-                // For tree view, use existing logic
+                // For tree view, find elements in DOM by data attribute (like list view)
+                // This ensures we're working with the actual DOM elements after tree rebuild
+                const treeElement = document.getElementById('test-cases-list');
+                if (!treeElement) return;
+
                 testMap.forEach((testEntry, fullName) => {
                     if (!testEntry.traceHtmlFile) return; // Skip parent containers
 
                     const classData = classificationsData[fullName];
                     if (!classData) return;
 
-                    // Add classification icon (only if not already added)
-                    if (classData.classification && testEntry.classificationContainer) {
-                        const container = testEntry.classificationContainer;
-                        if (container && container.length > 0) {
-                            // Check if already has content - use native DOM check for reliability
-                            const containerEl = container[0];
-                            if (containerEl && !containerEl.querySelector('.classification-icon')) {
-                                const icon = Classifications.createClassificationIcon(classData.classification);
-                                container.append(icon);
-                            }
+                    // Find the tree node for this test case using data attribute
+                    const targetNode = treeElement.querySelector(`li[data-tc-full-name="${CSS.escape(fullName)}"]`);
+                    if (!targetNode) return;
+
+                    // Find classification container in the DOM
+                    const classificationContainer = targetNode.querySelector('.classification-container');
+                    if (classData.classification && classificationContainer) {
+                        if (!classificationContainer.querySelector('.classification-icon')) {
+                            const icon = Classifications.createClassificationIcon(classData.classification);
+                            classificationContainer.appendChild(icon);
                         }
                     }
 
-                    // Add new TC indicator (only if not already added)
-                    if (classData.is_new && testEntry.newTcIndicatorContainer) {
-                        const container = testEntry.newTcIndicatorContainer;
-                        if (container && container.length > 0) {
-                            // Check if already has content - use native DOM check for reliability
-                            const containerEl = container[0];
-                            if (containerEl && !containerEl.querySelector('.new-tc-indicator')) {
-                                const indicator = Classifications.createNewTcIndicator();
-                                container.append(indicator);
-                            }
+                    // Find new TC indicator container in the DOM
+                    const newTcContainer = targetNode.querySelector('.new-tc-container');
+                    if (classData.is_new && newTcContainer) {
+                        if (!newTcContainer.querySelector('.new-tc-indicator')) {
+                            const indicator = Classifications.createNewTcIndicator();
+                            newTcContainer.appendChild(indicator);
                         }
                     }
                 });
@@ -3406,6 +3666,27 @@
                     Classifications.setupRunBadgeHistoryHover(runStatusBadge, runConfig.groupHash, runConfig.runId);
                 }
             }
+
+            // Update collapsed classification icons for any nodes that are already collapsed
+            updateAllCollapsedClassifications();
+        }
+
+        // Update collapsed classification icons for all collapsed parent nodes
+        function updateAllCollapsedClassifications() {
+            if (!root || !classificationsData) return;
+
+            function updateCollapsedNodes(node) {
+                if (node.children && node.children.length > 0) {
+                    // This is a parent node
+                    if (node.isCollapsed && node.collapsedClassificationContainer) {
+                        node.updateCollapsedClassifications();
+                    }
+                    // Recurse into children
+                    node.children.forEach(child => updateCollapsedNodes(child));
+                }
+            }
+
+            updateCollapsedNodes(root);
         }
 
         // Function to convert UTC time to local time
@@ -3674,17 +3955,12 @@
                 runStatusContainer.appendChild(failedBadge);
             }
 
-            if (counts.aborted > 0) {
-                const abortedBadge = document.createElement('span');
-                abortedBadge.className = 'result-badge result-aborted';
-                abortedBadge.textContent = `ABORTED: ${counts.aborted}`;
-                runStatusContainer.appendChild(abortedBadge);
-            }
-
-            if (counts.error > 0) {
+            // Combine error and aborted counts into a single ERROR badge
+            const combinedErrorCount = (counts.error || 0) + (counts.aborted || 0);
+            if (combinedErrorCount > 0) {
                 const errorBadge = document.createElement('span');
                 errorBadge.className = 'result-badge result-error';
-                errorBadge.textContent = `ERROR: ${counts.error}`;
+                errorBadge.textContent = `ERROR: ${combinedErrorCount}`;
                 runStatusContainer.appendChild(errorBadge);
             }
         }

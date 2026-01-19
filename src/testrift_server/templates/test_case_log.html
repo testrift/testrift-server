@@ -32,10 +32,12 @@
     <script src="../static/at_syntax.js"></script>
     {% endif %}
     {% if server_mode %}
+    <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/test_case_log.css" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
     <script src="/static/classifications.js"></script>
     {% else %}
+    <link href="../static/status-badges.css" rel="stylesheet">
     <link href="../static/test_case_log.css" rel="stylesheet">
     {% endif %}
 </head>
@@ -88,25 +90,30 @@
                 </div>
 
                 <div class="main-content">
-{% if not live_run %}
+{% if not server_mode %}
   {% include 'static_banner.html' %}
 {% endif %}
                     <div class="header-section">
-                        <h1>{{ resolved_full_name }}<span id="new-tc-indicator"></span></h1>
-                        <div class="subtitle">Test Case Log</div>
+                        <h1>Test Case Log</h1>
                         <p><a href="{% if server_mode %}/testRun/{{ run.id if run else run_id }}/index.html{% else %}../index.html{% endif %}" class="back-link">&larr; Back to {{ run_name }}</a></p>
                     </div>
 
                     <div class="info-card">
                         <div class="test-details-header">
-                            <h5>Test Details <span id="tc-execution-time" class="execution-time" style="display: none;"></span></h5>
-                            <div class="status-container">
-                                <span id="tc-status-badge" class="status-badge">
-                                    <!-- Status will be populated by JavaScript -->
-                                </span>
-                                <span id="tc-classification-icon"></span>
-                        </div>
+                            <div class="tc-title-row">
+                                <h4 class="tc-full-name">{{ resolved_full_name }}<span id="new-tc-indicator"></span></h4>
+                                <div class="status-container">
+                                    <span id="tc-status-badge" class="status-badge">
+                                        <!-- Status will be populated by JavaScript -->
+                                    </span>
+                                    <span id="tc-classification-icon"></span>
+                                </div>
                             </div>
+                            <div class="tc-timing-row">
+                                <span id="tc-start-time-display" class="tc-start-time"></span>
+                                <span id="tc-execution-time" class="execution-time" style="display: none;"></span>
+                            </div>
+                        </div>
                         <div class="info-grid">
                             {% set user_metadata = run.user_metadata if run else (run_meta.user_metadata if run_meta else {}) %}
                             {% for name, metadata in user_metadata.items() %}
@@ -119,19 +126,8 @@
                                 {% endif %}
                             </div>
                             {% endfor %}
-                            <div class="info-item">
-                                <strong>Days to Keep</strong>
-                                {{ run.retention_days if run else (run_meta.retention_days if run_meta else 'N/A') }}
-                            </div>
-                            <div class="info-item">
-                                <strong>Start Time</strong>
-                                <span id="tc-start-time-display">{{ run.start_time if run else (run_meta.start_time if run_meta else 'N/A') }}</span>
-                            </div>
-                            <div class="info-item">
-                                <strong>End Time</strong>
-                                <span id="tc-end-time-display">{{ run.end_time if run else (run_meta.end_time if run_meta else 'N/A') }}</span>
-                            </div>
                         </div>
+                        <div id="retention-notice" class="retention-notice" style="display: none;"></div>
 
                         <!-- Attachments Header -->
                         <div class="attachments-header">
@@ -206,6 +202,8 @@
       testCaseStatus: {{ (test_case.status if test_case else (tc_meta.status if tc_meta else '')) | tojson }},
       testCaseStartTime: {{ (test_case.start_time if test_case else (tc_meta.start_time if tc_meta else '')) | tojson }},
       testCaseEndTime: {{ (test_case.end_time if test_case else (tc_meta.end_time if tc_meta else '')) | tojson }},
+      runStartTime: {{ (run.start_time if run else (run_meta.start_time if run_meta else '')) | tojson }},
+      retentionDays: {{ (run.retention_days if run else (run_meta.retention_days if run_meta else 0)) | tojson }},
       initialLogs: {{ logs | tojson }},
       liveRun: {{ live_run | tojson }},
       serverMode: {{ server_mode | tojson }},
@@ -226,7 +224,8 @@ async function loadTestCaseClassification() {
 
     try {
         const data = await Classifications.fetchClassifications(templateConfig.runId);
-        const classData = data[templateConfig.testCaseId];
+        // Classifications are keyed by tc_full_name, not tc_id
+        const classData = data[templateConfig.testCaseFullName];
 
         if (!classData) return;
 

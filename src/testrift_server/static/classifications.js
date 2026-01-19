@@ -424,6 +424,21 @@ function hideTooltip() {
     }
 }
 
+// Ensure tooltips don't get stuck when leaving the page or losing focus
+if (typeof window !== 'undefined') {
+    window.addEventListener('blur', hideTooltip);
+    window.addEventListener('mouseleave', hideTooltip);
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('mouseleave', hideTooltip);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            hideTooltip();
+        }
+    });
+}
+
 /**
  * Fetch TC history for hover tooltip
  * @param {string} testCaseId

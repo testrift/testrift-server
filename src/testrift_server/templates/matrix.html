@@ -1060,22 +1060,35 @@
             }
         }
 
-        // Split path by dots, but ignore dots inside brackets (e.g., "Test.Suite[\"Name.With.Dots\"].Method")
+        // Split path by dots and plus signs, but ignore them inside brackets or quotes
+        // This handles nested classes (Parent+Child) and parameterized tests with quoted strings
         function getPathSegments(path) {
             const segments = [];
             let currentSegment = '';
             let bracketDepth = 0;
+            let inQuotes = false;
+            let quoteChar = null;
 
             for (let i = 0; i < path.length; i++) {
                 const char = path[i];
 
-                if (char === '[') {
+                // Handle quote characters
+                if ((char === '"' || char === "'") && bracketDepth === 0) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = null;
+                    }
+                    currentSegment += char;
+                } else if (char === '[' && !inQuotes) {
                     bracketDepth++;
                     currentSegment += char;
-                } else if (char === ']') {
+                } else if (char === ']' && !inQuotes) {
                     bracketDepth--;
                     currentSegment += char;
-                } else if (char === '.' && bracketDepth === 0) {
+                } else if ((char === '.' || char === '+') && bracketDepth === 0 && !inQuotes) {
                     if (currentSegment) {
                         segments.push(currentSegment);
                         currentSegment = '';

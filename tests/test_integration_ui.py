@@ -43,6 +43,11 @@ from aiohttp import ClientSession, WSMsgType
 import aiohttp
 
 
+# Default timeout for integration tests (30 seconds)
+INTEGRATION_TEST_TIMEOUT = 30
+
+
+@pytest.mark.timeout(INTEGRATION_TEST_TIMEOUT)
 class TestIntegrationUI:
     """Integration tests with browser automation (WebSocket -> Server -> UI)."""
 
@@ -442,3 +447,394 @@ data:
 
         # Verify the exception message is visible
         await expect(page.locator("#stackTraceList").get_by_text("Unexpected runtime error")).to_be_visible()
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
+    async def test_collapsed_subtree_shows_classification_indicators(self, server_process, browser_page):
+        """Test that collapsed subtrees show classification indicators for child test cases.
+
+        This tests the scenario where:
+        1. First run contains some test cases in a namespace
+        2. Second run adds a NEW test case to the same namespace
+        3. When the namespace parent node is collapsed, it should show the "new" indicator
+        """
+        port, server_proc = server_process
+        page = browser_page
+
+        # Create a group hash for this test
+        group_hash = f"test-group-{int(time.time())}"
+
+        # Step 1: Create first run with one test case
+        first_run_id = None
+        async with ClientSession() as session:
+            async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
+                await ws.send_json({
+                    "type": "run_started",
+                    "user_metadata": {},
+                    "retention_days": 1,
+                    "local_run": False,
+                    "group": {"hash": group_hash, "name": "Classification Test Group"}
+                })
+
+                response = await ws.receive_json()
+                if response.get("type") == "run_started_response":
+                    first_run_id = response.get("run_id")
+                else:
+                    pytest.fail(f"Unexpected response: {response}")
+
+                # Add first test case
+                tc_id_1 = "00000001"
+                await ws.send_json({
+                    "type": "test_case_started",
+                    "run_id": first_run_id,
+                    "tc_full_name": "MyNamespace.MyTests.ExistingTest",
+                    "tc_id": tc_id_1
+                })
+
+                await ws.send_json({
+                    "type": "test_case_finished",
+                    "run_id": first_run_id,
+                    "tc_id": tc_id_1,
+                    "status": "passed"
+                })
+
+                await ws.send_json({
+                    "type": "run_finished",
+                    "run_id": first_run_id
+                })
+
+                await asyncio.sleep(0.3)
+
+        # Step 2: Create second run with two test cases (one existing, one new)
+        second_run_id = None
+        async with ClientSession() as session:
+            async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
+                await ws.send_json({
+                    "type": "run_started",
+                    "user_metadata": {},
+                    "retention_days": 1,
+                    "local_run": False,
+                    "group": {"hash": group_hash, "name": "Classification Test Group"}
+                })
+
+                response = await ws.receive_json()
+                if response.get("type") == "run_started_response":
+                    second_run_id = response.get("run_id")
+                else:
+                    pytest.fail(f"Unexpected response: {response}")
+
+                # Add existing test case
+                tc_id_1 = "00000001"
+                await ws.send_json({
+                    "type": "test_case_started",
+                    "run_id": second_run_id,
+                    "tc_full_name": "MyNamespace.MyTests.ExistingTest",
+                    "tc_id": tc_id_1
+                })
+
+                await ws.send_json({
+                    "type": "test_case_finished",
+                    "run_id": second_run_id,
+                    "tc_id": tc_id_1,
+                    "status": "passed"
+                })
+
+                # Add NEW test case (not in first run)
+                tc_id_2 = "00000002"
+                await ws.send_json({
+                    "type": "test_case_started",
+                    "run_id": second_run_id,
+                    "tc_full_name": "MyNamespace.MyTests.NewTest",
+                    "tc_id": tc_id_2
+                })
+
+                await ws.send_json({
+                    "type": "test_case_finished",
+                    "run_id": second_run_id,
+                    "tc_id": tc_id_2,
+                    "status": "passed"
+                })
+
+                await ws.send_json({
+                    "type": "run_finished",
+                    "run_id": second_run_id
+                })
+
+                await asyncio.sleep(0.3)
+
+        # Step 3: Open the second run's test run page
+        url = f"http://127.0.0.1:{port}/testRun/{second_run_id}/index.html"
+        await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+
+        # Wait for the tree to be built
+        await page.wait_for_selector("#test-cases-list", timeout=5000)
+
+        # Wait for classifications to load (they load asynchronously)
+        await asyncio.sleep(1.0)
+
+        # Step 4: Find and verify the "new" indicator exists on the NewTest node
+        # The new-tc-indicator should be present on the new test case
+        new_indicator = page.locator(".new-tc-indicator")
+        await expect(new_indicator).to_be_visible()
+
+        # Step 5: Click the collapse button to collapse all nodes
+        collapse_btn = page.locator("#collapse-all-btn")
+        await collapse_btn.click()
+
+        # Wait for collapse animation
+        await asyncio.sleep(0.3)
+
+        # Step 6: Verify that the collapsed parent node shows the classification indicator
+        # When collapsed, the parent node should show the "new" indicator in its
+        # collapsed-classification-container
+        # Use .first to handle case where there may be multiple collapsed containers
+        collapsed_classification = page.locator(".collapsed-classification-container .new-tc-indicator").first
+        await expect(collapsed_classification).to_be_visible()
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
+    async def test_status_badges_are_horizontally_aligned_in_tree_view(self, server_process, browser_page):
+        """Test that status badges are horizontally aligned in tree view.
+
+        When test case names have different lengths, all status badges should
+        still be aligned at the same X position (like a table column).
+        """
+        port, server_proc = server_process
+        page = browser_page
+
+        run_id = None
+        async with ClientSession() as session:
+            async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
+                await ws.send_json({
+                    "type": "run_started",
+                    "user_metadata": {},
+                    "retention_days": 1,
+                    "local_run": False
+                })
+
+                response = await ws.receive_json()
+                if response.get("type") == "run_started_response":
+                    run_id = response.get("run_id")
+                else:
+                    pytest.fail(f"Unexpected response: {response}")
+
+                # Add test cases with varying name lengths
+                test_cases = [
+                    ("MyNamespace.Tests.Short", "00000001"),
+                    ("MyNamespace.Tests.AVeryLongTestCaseNameThatShouldPushTheBadge", "00000002"),
+                    ("MyNamespace.Tests.Medium", "00000003"),
+                ]
+
+                for tc_name, tc_id in test_cases:
+                    await ws.send_json({
+                        "type": "test_case_started",
+                        "run_id": run_id,
+                        "tc_full_name": tc_name,
+                        "tc_id": tc_id
+                    })
+
+                    await ws.send_json({
+                        "type": "test_case_finished",
+                        "run_id": run_id,
+                        "tc_id": tc_id,
+                        "status": "passed"
+                    })
+
+                await ws.send_json({
+                    "type": "run_finished",
+                    "run_id": run_id
+                })
+
+                await asyncio.sleep(0.3)
+
+        # Open the test run page
+        url = f"http://127.0.0.1:{port}/testRun/{run_id}/index.html"
+        await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+
+        # Wait for the tree to be built
+        await page.wait_for_selector("#test-cases-list", timeout=5000)
+        await asyncio.sleep(0.5)  # Wait for alignment calculation
+
+        # Get all .tc-right elements and check their X positions
+        tc_right_elements = await page.locator(".tc-right").all()
+
+        assert len(tc_right_elements) >= 3, "Expected at least 3 test case badges"
+
+        # Get the left position of each .tc-right element
+        left_positions = []
+        for element in tc_right_elements:
+            box = await element.bounding_box()
+            if box:
+                left_positions.append(box['x'])
+
+        # All left positions should be the same (within a small tolerance)
+        if left_positions:
+            first_left = left_positions[0]
+            for pos in left_positions:
+                assert abs(pos - first_left) < 5, f"Status badges not aligned: positions {left_positions}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
+    async def test_status_badges_visible_in_list_view(self, server_process, browser_page):
+        """Test that status badges are visible and within viewport in list view.
+
+        Badges should be visible on screen (not pushed off to the right).
+        """
+        port, server_proc = server_process
+        page = browser_page
+
+        run_id = None
+        async with ClientSession() as session:
+            async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
+                await ws.send_json({
+                    "type": "run_started",
+                    "user_metadata": {},
+                    "retention_days": 1,
+                    "local_run": False
+                })
+
+                response = await ws.receive_json()
+                if response.get("type") == "run_started_response":
+                    run_id = response.get("run_id")
+                else:
+                    pytest.fail(f"Unexpected response: {response}")
+
+                # Add test cases with varying name lengths
+                test_cases = [
+                    ("MyNamespace.Tests.Short", "00000001"),
+                    ("MyNamespace.Tests.AVeryLongTestCaseNameThatShouldPushTheBadge", "00000002"),
+                    ("MyNamespace.Tests.Medium", "00000003"),
+                ]
+
+                for tc_name, tc_id in test_cases:
+                    await ws.send_json({
+                        "type": "test_case_started",
+                        "run_id": run_id,
+                        "tc_full_name": tc_name,
+                        "tc_id": tc_id
+                    })
+
+                    await ws.send_json({
+                        "type": "test_case_finished",
+                        "run_id": run_id,
+                        "tc_id": tc_id,
+                        "status": "passed"
+                    })
+
+                await ws.send_json({
+                    "type": "run_finished",
+                    "run_id": run_id
+                })
+
+                await asyncio.sleep(0.3)
+
+        # Open the test run page
+        url = f"http://127.0.0.1:{port}/testRun/{run_id}/index.html"
+        await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+
+        # Wait for the tree to be built, then switch to list view
+        await page.wait_for_selector("#test-cases-list", timeout=5000)
+        await asyncio.sleep(0.3)
+
+        # Click the view toggle button to switch to list view
+        view_toggle = page.locator("#view-toggle-btn")
+        await view_toggle.click()
+
+        await asyncio.sleep(0.3)  # Wait for list view render
+
+        # Get viewport size
+        viewport = page.viewport_size
+        viewport_width = viewport['width'] if viewport else 1280
+
+        # Get all list items and check their badges are visible
+        list_items = await page.locator(".list-view > li").all()
+
+        assert len(list_items) >= 3, "Expected at least 3 test case items in list view"
+
+        # Check that each badge is within the viewport
+        for item in list_items:
+            badge = item.locator(".badge")
+            box = await badge.bounding_box()
+            assert box is not None, "Badge should have a bounding box"
+            # Badge should be within viewport (not off-screen to the right)
+            assert box['x'] < viewport_width, f"Badge is off-screen: x={box['x']}, viewport_width={viewport_width}"
+            assert box['x'] >= 0, f"Badge is off-screen to the left: x={box['x']}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
+    async def test_tree_hover_does_not_shift_tc_right(self, server_process, browser_page):
+        """Test that hovering over a test case doesn't move the status badge.
+
+        The .tc-right element (containing badge, time, classification) should
+        stay at the same X position when hovering - no horizontal shift.
+        """
+        port, server_proc = server_process
+        page = browser_page
+
+        run_id = None
+        async with ClientSession() as session:
+            async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
+                await ws.send_json({
+                    "type": "run_started",
+                    "user_metadata": {},
+                    "retention_days": 1,
+                    "local_run": False
+                })
+
+                response = await ws.receive_json()
+                if response.get("type") == "run_started_response":
+                    run_id = response.get("run_id")
+                else:
+                    pytest.fail(f"Unexpected response: {response}")
+
+                # Add a test case
+                await ws.send_json({
+                    "type": "test_case_started",
+                    "run_id": run_id,
+                    "tc_full_name": "MyNamespace.Tests.TestCase1",
+                    "tc_id": "00000001"
+                })
+
+                await ws.send_json({
+                    "type": "test_case_finished",
+                    "run_id": run_id,
+                    "tc_id": "00000001",
+                    "status": "passed"
+                })
+
+                await ws.send_json({
+                    "type": "run_finished",
+                    "run_id": run_id
+                })
+
+                await asyncio.sleep(0.3)
+
+        # Open the test run page
+        url = f"http://127.0.0.1:{port}/testRun/{run_id}/index.html"
+        await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+
+        # Wait for tree to be built
+        await page.wait_for_selector("#test-cases-list", timeout=5000)
+        await asyncio.sleep(0.3)
+
+        # Find the .tc-right element (status badge container)
+        tc_right = page.locator(".tc-right").first
+
+        # Get position before hover
+        box_before = await tc_right.bounding_box()
+        assert box_before is not None, "Could not get bounding box of .tc-right"
+        x_before = box_before['x']
+
+        # Find the parent li and hover over it
+        test_case_li = page.locator("li.test-case-node").first
+        await test_case_li.hover()
+        await asyncio.sleep(0.3)  # Wait for any transition
+
+        # Get position after hover
+        box_after = await tc_right.bounding_box()
+        assert box_after is not None, "Could not get bounding box after hover"
+        x_after = box_after['x']
+
+        # The .tc-right should NOT move horizontally
+        x_shift = abs(x_after - x_before)
+        assert x_shift < 2, f".tc-right moved {x_shift}px on hover (expected <2px)"

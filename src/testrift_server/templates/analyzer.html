@@ -6,6 +6,7 @@
     <title>Test Results Analyzer</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/status-badges.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
@@ -139,103 +140,7 @@
             background-color: #f8f9fa;
         }
 
-        .status-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 15px;
-            font-weight: 600;
-            font-size: 0.75em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .status-passed {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
-        }
-
-        .status-failed {
-            background: #dc3545;
-            color: white;
-            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
-        }
-
-        .status-skipped {
-            background: #ffc107;
-            color: #000;
-            box-shadow: 0 2px 8px rgba(255, 193, 7, 0.2);
-        }
-
-        .status-aborted {
-            background: #6c757d;
-            color: white;
-            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.2);
-        }
-
-        .status-finished {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
-        }
-
-        .status-finished-passed {
-            background: #28a745;
-            color: white;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
-        }
-
-        .status-finished-failed {
-            background: #dc3545;
-            color: white;
-            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
-        }
-
-        /* Result badges for test counts - matching index.html styling */
-        .result-badges-container {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .result-badge {
-            padding: 4px 8px;
-            border-radius: 15px;
-            font-size: 0.75em;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .result-passed {
-            background-color: #d4edda;
-            color: #155724;
-        }
-
-        .result-skipped {
-            background-color: #fff3cd;
-            color: #856404;
-        }
-
-        .result-failed {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-
-        .result-aborted {
-            background-color: #e2e3e5;
-            color: #6c757d;
-        }
-
-        .result-error {
-            background-color: #e2e3e5;
-            color: #6c757d;
-        }
-
-        .status-error {
-            background: #6c757d;
-            color: white;
-            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.2);
-        }
+        /* Status badges are in shared status-badges.css */
 
         .chart-container {
             background-color: white;

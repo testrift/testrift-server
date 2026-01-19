@@ -822,17 +822,19 @@ function showFinalTcExecutionTime(tc_meta) {
 }
 
 function formatTcExecutionTime(milliseconds) {
-  const seconds = Math.floor(milliseconds / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const ms = Math.floor(milliseconds % 1000);
+    const seconds = totalSeconds % 60;
+    const minutes = Math.floor(totalSeconds / 60) % 60;
+    const hours = Math.floor(totalSeconds / 3600);
+    const msStr = String(ms).padStart(3, '0');
 
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  } else {
-    return `${seconds}s`;
-  }
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}.${msStr}s`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${seconds}.${msStr}s`;
+    }
+    return `${seconds}.${msStr}s`;
 }
 
 // ============================================================================
@@ -1381,30 +1383,51 @@ function initializeTestCaseLog() {
     }
 
     function convertTcTimestampsToLocal() {
-        // Convert start time display
+        // Display test case start time (from testCaseStartTime, not run start time)
         const startTimeDisplay = document.getElementById('tc-start-time-display');
-        if (startTimeDisplay && startTimeDisplay.textContent) {
-            const text = startTimeDisplay.textContent.trim();
-            if (text && text !== 'N/A' && (text.includes('T') || text.includes('Z') || text.includes('-'))) {
-                startTimeDisplay.textContent = convertToLocalTime(text);
+        if (startTimeDisplay) {
+            const tcStartTimeStr = templateConfig.testCaseStartTime;
+            if (tcStartTimeStr) {
+                startTimeDisplay.textContent = convertToLocalTime(tcStartTimeStr);
             }
         }
+    }
 
-        // Convert end time display
-        const endTimeDisplay = document.getElementById('tc-end-time-display');
-        if (endTimeDisplay && endTimeDisplay.textContent) {
-            const text = endTimeDisplay.textContent.trim();
-            if (text && text !== 'N/A' && (text.includes('T') || text.includes('Z') || text.includes('-'))) {
-                endTimeDisplay.textContent = convertToLocalTime(text);
-            }
+    function displayRetentionNotice() {
+        const retentionNotice = document.getElementById('retention-notice');
+        if (!retentionNotice) return;
+
+        const retentionDays = templateConfig.retentionDays;
+        const runStartTime = templateConfig.runStartTime;
+
+        if (!retentionDays || retentionDays <= 0 || !runStartTime) {
+            retentionNotice.style.display = 'none';
+            return;
+        }
+
+        const runStart = new Date(runStartTime);
+        const expirationDate = new Date(runStart.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+        const now = new Date();
+        const daysRemaining = Math.ceil((expirationDate - now) / (24 * 60 * 60 * 1000));
+
+        if (daysRemaining <= 0) {
+            retentionNotice.textContent = '⚠️ This log is scheduled for deletion';
+            retentionNotice.style.display = 'block';
+        } else if (daysRemaining === 1) {
+            retentionNotice.textContent = '⏳ 1 day remaining until deletion';
+            retentionNotice.style.display = 'block';
+        } else {
+            retentionNotice.textContent = `⏳ ${daysRemaining} days remaining until deletion`;
+            retentionNotice.style.display = 'block';
         }
     }
 
 
     calculateInitialExecutionTime();
 
-    // Convert timestamps to local time
+    // Convert timestamps to local time and display retention notice
     convertTcTimestampsToLocal();
+    displayRetentionNotice();
 
     // Add live indicator if test case is running
     if (testCaseStatus === 'running' || testCaseStatus === 'unknown') {

@@ -1062,6 +1062,7 @@ async def zip_export_handler(request):
             run_html = render_template(
                 'test_run.html',
                 run_id=run_id,
+                run_name=meta.get('run_name'),
                 status=run.status,
                 start_time=run.start_time,
                 end_time=run.end_time,
@@ -1069,12 +1070,33 @@ async def zip_export_handler(request):
                 retention_days=meta.get("retention_days"),
                 test_cases=test_cases_dict,
                 live_run=False,
+                server_mode=False,
                 passed_count=passed_count,
                 failed_count=failed_count,
                 skipped_count=skipped_count,
                 files_exist=True  # Files always exist for ZIP export
             )
             zf.writestr("index.html", run_html)
+
+            # Add shared status badges CSS
+            status_badges_css_path = STATIC_DIR / "status-badges.css"
+            if status_badges_css_path.exists():
+                with open(status_badges_css_path, "r", encoding="utf-8") as f:
+                    status_badges_css_content = f.read()
+                zf.writestr("static/status-badges.css", status_badges_css_content)
+
+            # Add classifications CSS/JS for badges and icons
+            classifications_css_path = STATIC_DIR / "classifications.css"
+            if classifications_css_path.exists():
+                with open(classifications_css_path, "r", encoding="utf-8") as f:
+                    classifications_css_content = f.read()
+                zf.writestr("static/classifications.css", classifications_css_content)
+
+            classifications_js_path = STATIC_DIR / "classifications.js"
+            if classifications_js_path.exists():
+                with open(classifications_js_path, "r", encoding="utf-8") as f:
+                    classifications_js_content = f.read()
+                zf.writestr("static/classifications.js", classifications_js_content)
 
             # Add CSS file for test case logs
             css_path = STATIC_DIR / "test_case_log.css"
