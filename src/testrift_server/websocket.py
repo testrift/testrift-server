@@ -107,123 +107,144 @@ class WebSocketServer:
         # Helper function to mark run as aborted
         async def mark_run_aborted(reason):
             nonlocal run
-            if run and run.status == "running":
-                logger.info(f"Marking run {run.id} as aborted: {reason}")
-                run.status = "aborted"
-                run.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
-                run.update_last()
+            if run is None:
+                logger.debug(f"mark_run_aborted called but run is None, ignoring (reason={reason})")
+                return
+            if run.status != "running":
+                logger.debug(f"mark_run_aborted called but run {run.id} is already {run.status}, ignoring (reason={reason})")
+                return
+            logger.info(f"Marking run {run.id} as aborted: {reason}")
+            run.status = "aborted"
+            run.abort_reason = reason
+            run.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+            run.update_last()
 
-                # Mark all running test cases as aborted
-                aborted_test_cases = []
-                for tc_id, test_case in run.test_cases.items():
-                    if test_case.status == "running":
-                        logger.info(f"Marking test case {tc_id} as aborted")
-                        test_case.status = "aborted"
-                        test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
-                        aborted_test_cases.append(tc_id)
+            # Mark all running test cases as aborted
+            aborted_test_cases = []
+            for tc_id, test_case in run.test_cases.items():
+                if test_case.status == "running":
+                    logger.info(f"Marking test case {tc_id} as aborted")
+                    test_case.status = "aborted"
+                    test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+                    aborted_test_cases.append(tc_id)
 
-                # Save to disk
-                run_path = get_run_path(run.id)
-                meta_path = run_path / "meta.json"
-                if meta_path.exists():
-                    with open(meta_path, "r", encoding="utf-8") as f:
-                        current_meta = json.load(f)
-                else:
-                    current_meta = {}
-                run_data = run.to_dict()
-                if "deletes_at" in current_meta:
-                    run_data["deletes_at"] = current_meta["deletes_at"]
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(run_data, f)
+            # Save to disk
+            run_path = get_run_path(run.id)
+            meta_path = run_path / "meta.json"
+            if meta_path.exists():
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    current_meta = json.load(f)
+            else:
+                current_meta = {}
+            run_data = run.to_dict()
+            if "deletes_at" in current_meta:
+                run_data["deletes_at"] = current_meta["deletes_at"]
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(run_data, f)
 
-                # Calculate updated counts after aborting test cases
-                passed_count = 0
-                failed_count = 0
-                skipped_count = 0
-                aborted_count = 0
+            # Calculate updated counts after aborting test cases
+            passed_count = 0
+            failed_count = 0
+            skipped_count = 0
+            aborted_count = 0
 
-                for tc in run.test_cases.values():
-                    if tc.status.lower() in ['passed', 'failed', 'skipped', 'aborted']:
-                        status = tc.status.lower()
-                        if status == 'passed':
-                            passed_count += 1
-                        elif status == 'failed':
-                            failed_count += 1
-                        elif status == 'skipped':
-                            skipped_count += 1
-                        elif status == 'aborted':
-                            aborted_count += 1
+            for tc in run.test_cases.values():
+                if tc.status.lower() in ['passed', 'failed', 'skipped', 'aborted']:
+                    status = tc.status.lower()
+                    if status == 'passed':
+                        passed_count += 1
+                    elif status == 'failed':
+                        failed_count += 1
+                    elif status == 'skipped':
+                        skipped_count += 1
+                    elif status == 'aborted':
+                        aborted_count += 1
 
-                # Broadcast test case updates for all aborted test cases and log to database
-                for tc_full_name in aborted_test_cases:
-                    test_case = run.test_cases[tc_full_name]
-                    tc_meta = test_case.to_dict()
+            # Broadcast test case updates for all aborted test cases and log to database
+            for tc_full_name in aborted_test_cases:
+                test_case = run.test_cases[tc_full_name]
+                tc_meta = test_case.to_dict()
 
-                    # Log test case as aborted in database
-                    try:
-                        await database.log_test_case_finished(run.id, tc_full_name, 'aborted')
-                    except Exception as db_error:
-                        logger.error(f"Database logging error for aborted test case {tc_full_name}: {db_error}")
-
-                    # Broadcast UI update
-                    await self.broadcast_ui({
-                        "type": "test_case_finished",
-                        "run_id": run.id,
-                        "test_case_id": test_case.tc_id,
-                        "test_case_full_name": tc_full_name,
-                        "tc_meta": tc_meta,
-                        "counts": {
-                            "passed": passed_count,
-                            "failed": failed_count,
-                            "skipped": skipped_count,
-                            "aborted": aborted_count
-                        }
-                    })
-
-                # Log run finished to database
+                # Log test case as aborted in database
                 try:
-                    await database.log_test_run_finished(run.id, "aborted")
+                    await database.log_test_case_finished(run.id, tc_full_name, 'aborted')
                 except Exception as db_error:
-                    logger.error(f"Database logging error for run_aborted: {db_error}")
+                    logger.error(f"Database logging error for aborted test case {tc_full_name}: {db_error}")
 
-                # Broadcast run finished event
-                await self.broadcast_ui({"type": "run_finished", "run": run_data})
+                # Broadcast UI update
+                await self.broadcast_ui({
+                    "type": "test_case_finished",
+                    "run_id": run.id,
+                    "test_case_id": test_case.tc_id,
+                    "test_case_full_name": tc_full_name,
+                    "tc_meta": tc_meta,
+                    "counts": {
+                        "passed": passed_count,
+                        "failed": failed_count,
+                        "skipped": skipped_count,
+                        "aborted": aborted_count
+                    }
+                })
 
-                # Remove aborted run from memory
-                if run.id in self.test_runs:
-                    del self.test_runs[run.id]
-                    logger.info(f"Removed aborted run {run.id} from memory")
+            # Log run finished to database
+            try:
+                await database.log_test_run_finished(run.id, "aborted")
+            except Exception as db_error:
+                logger.error(f"Database logging error for run_aborted: {db_error}")
+
+            # Broadcast run finished event
+            await self.broadcast_ui({"type": "run_finished", "run": run_data})
+
+            # Remove aborted run from memory
+            if run.id in self.test_runs:
+                del self.test_runs[run.id]
+                logger.info(f"Removed aborted run {run.id} from memory")
 
         # Background task to monitor connection timeout
         async def monitor_connection():
             nonlocal run, last_activity
+            iteration = 0
             while True:
                 try:
                     await asyncio.sleep(5)  # Check every 5 seconds
+                    iteration += 1
+
+                    # Check if run is already finished - no need to monitor anymore
+                    if run is None or run.status != "running":
+                        logger.debug(f"Monitor[{iteration}]: run is finished or None, stopping monitor")
+                        break
 
                     if ws.closed:
+                        logger.info(f"Monitor[{iteration}]: WebSocket is closed, aborting run")
                         await mark_run_aborted("WebSocket closed")
                         break
 
                     # Try to send a ping frame to test the connection
                     try:
                         await ws.ping()
-                        last_activity = datetime.now(UTC)
+                        # Ping/pong success doesn't count as "activity" - only client messages do
+                        if run:
+                            time_since_activity = (datetime.now(UTC) - last_activity).total_seconds()
+                            logger.debug(f"Monitor[{iteration}]: ping OK, run={run.id}, time_since_activity={time_since_activity:.1f}s")
                     except Exception as e:
-                        logger.info(f"WebSocket ping failed: {e}")
-                        await mark_run_aborted("WebSocket ping failed")
+                        # Ping failed - socket is closing. Don't abort immediately.
+                        # The receive loop will either:
+                        # 1. Process run_finished that's already in the queue -> run finishes normally
+                        # 2. Timeout on inactivity -> run gets aborted by timeout handler
+                        logger.info(f"Monitor[{iteration}]: WebSocket ping failed ({e}), stopping monitor")
                         break
 
                     if run and run.status == "running":
                         time_since_activity = (datetime.now(UTC) - last_activity).total_seconds()
                         if time_since_activity > 30:  # 30 second timeout
-                            logger.warning(f"WebSocket watchdog triggered: no activity for {time_since_activity:.1f}s (run_id={run.id if run else 'unknown'})")
+                            logger.warning(f"Monitor[{iteration}]: WebSocket watchdog triggered: no activity for {time_since_activity:.1f}s (run_id={run.id if run else 'unknown'})")
                             await mark_run_aborted("Connection timeout")
                             break
                 except asyncio.CancelledError:
+                    logger.debug(f"Monitor[{iteration}]: cancelled")
                     break
                 except Exception as e:
-                    logger.info(f"Monitor connection error: {e}")
+                    logger.info(f"Monitor[{iteration}]: error: {e}")
                     break
 
         monitor_task = asyncio.create_task(monitor_connection())
@@ -256,6 +277,13 @@ class WebSocketServer:
                     if msg_type == "run_started":
                         run = await self._handle_run_started(ws, data)
 
+                    elif msg_type == "batch":
+                        await self._handle_batch(data, run)
+
+                    elif msg_type == "heartbeat":
+                        # Client heartbeat - just acknowledge receipt, activity is tracked by message receipt
+                        logger.debug(f"Heartbeat received for run {data.get('run_id', 'unknown')}")
+
                     elif msg_type == "test_case_started":
                         await self._handle_test_case_started(data, run)
 
@@ -280,8 +308,14 @@ class WebSocketServer:
             logger.info(f"Cleaning up NUnit WebSocket connection for run {run.id if run else 'unknown'}")
 
             if run and run.status == "running":
-                logger.info(f"Run {run.id} was still running when WebSocket closed, marking as aborted")
-                await mark_run_aborted("WebSocket closed while run was still running")
+                unfinished_cases = [tc for tc in run.test_cases.values() if tc.status == "running"]
+                if unfinished_cases:
+                    logger.info(f"Run {run.id} still has {len(unfinished_cases)} running test cases when WebSocket closed, marking as aborted")
+                    await mark_run_aborted("WebSocket closed while run was still running")
+                else:
+                    logger.info(f"Run {run.id} has no running test cases; finalizing as finished after WebSocket close")
+                    await self._handle_run_finished({"run_id": run.id, "status": "finished"}, run)
+                    run = None
 
             monitor_task.cancel()
             try:
@@ -409,6 +443,47 @@ class WebSocketServer:
             import traceback
             traceback.print_exc()
             return None
+
+    async def _handle_batch(self, data, run):
+        """Handle batch message containing multiple events for high-throughput scenarios."""
+        try:
+            run_id = data.get("run_id")
+            events = data.get("events", [])
+
+            if not run_id:
+                logger.info("Error: run_id missing from batch message")
+                return
+
+            if not run:
+                run = self.test_runs.get(run_id)
+
+            if not run:
+                logger.info(f"Error: Run '{run_id}' not found for batch message")
+                return
+
+            # Process events in order
+            for event in events:
+                event_type = event.get("event_type")
+                # Inject run_id into event for handler compatibility
+                event["run_id"] = run_id
+
+                if event_type == "test_case_started":
+                    await self._handle_test_case_started(event, run)
+                elif event_type == "log_batch":
+                    await self._handle_log_batch(event, run)
+                elif event_type == "exception":
+                    await self._handle_exception(event, run)
+                elif event_type == "test_case_finished":
+                    await self._handle_test_case_finished(event, run)
+                else:
+                    logger.warning(f"Unknown event_type in batch: {event_type}")
+
+            log_event("batch", run_id=run_id, event_count=len(events))
+
+        except Exception as e:
+            logger.error(f"Error in batch: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def _handle_test_case_started(self, data, run):
         """Handle test_case_started message."""

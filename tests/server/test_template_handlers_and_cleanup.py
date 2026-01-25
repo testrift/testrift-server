@@ -15,18 +15,15 @@ import pytest
 import pytest_asyncio
 
 from testrift_server import database
-from testrift_server.tr_server import (
+from testrift_server.handlers import (
     index_handler,
     group_runs_handler,
     test_run_index_handler as handle_test_run_index,
     test_case_log_handler as handle_test_case_log,
-    cleanup_runs_sweep,
-    get_run_path,
-    get_case_log_path,
-    TestRunData,
-    TestCaseData,
-    generate_storage_id,
 )
+from testrift_server.cleanup import cleanup_runs_sweep
+from testrift_server.utils import get_run_path, get_case_log_path, generate_storage_id
+from testrift_server.models import TestRunData, TestCaseData
 
 
 class TestTemplateHandlers:
@@ -49,7 +46,7 @@ class TestTemplateHandlers:
     @pytest_asyncio.fixture
     async def mock_app(self, temp_data_dir):
         """Create a mock aiohttp app with WebSocket server."""
-        from testrift_server.tr_server import WebSocketServer
+        from testrift_server.websocket import WebSocketServer
 
         app = MagicMock()
         ws_server = WebSocketServer()
@@ -78,7 +75,7 @@ class TestTemplateHandlers:
         await database.db.insert_test_run(test_run, user_metadata)
 
         # Add test case
-        from testrift_server.tr_server import generate_storage_id
+        from testrift_server.utils import generate_storage_id
         tc_id = generate_storage_id()
         test_case = database.TestCaseData(
             0, run_id, "Test.TemplateTest", tc_id, "passed",
@@ -215,7 +212,7 @@ class TestTemplateHandlers:
             }
         }
 
-        from testrift_server.tr_server import TC_ID_FIELD
+        from testrift_server.utils import TC_ID_FIELD
         storage_id = generate_storage_id()
         meta["test_cases"][test_case_id][TC_ID_FIELD] = storage_id
 

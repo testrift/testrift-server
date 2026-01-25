@@ -4,9 +4,12 @@ Data models for TestRift server.
 TestRunData and TestCaseData classes for managing test run state.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, UTC
+
+import aiofiles
 
 from .utils import (
     get_run_meta_path,
@@ -36,6 +39,7 @@ class TestRunData:
         self.group_hash = group_hash or (compute_group_hash(self.group) if self.group else None)
         self.run_name = run_name  # Human-readable name displayed in UI
         self.status = "running"
+        self.abort_reason = None  # Reason for abort (if status is "aborted")
         self.start_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
         self.end_time = None
         self.test_cases: dict[str, 'TestCaseData'] = {}  # tc_full_name -> TestCaseData
@@ -49,7 +53,7 @@ class TestRunData:
 
     def to_dict(self):
         """Serialize the test run to a dictionary."""
-        return {
+        result = {
             "run_id": self.id,
             "run_name": self.run_name,
             "retention_days": self.retention_days,
@@ -62,6 +66,9 @@ class TestRunData:
             "end_time": self.end_time,
             "test_cases": {tc_full_name: tc.to_dict() for tc_full_name, tc in self.test_cases.items()},
         }
+        if self.abort_reason:
+            result["abort_reason"] = self.abort_reason
+        return result
 
     @classmethod
     def from_dict(cls, run_id, meta):
@@ -79,6 +86,7 @@ class TestRunData:
         if run.group and not run.group_hash:
             run.group_hash = compute_group_hash(run.group)
         run.status = meta.get("status", "running")
+        run.abort_reason = meta.get("abort_reason")
         run.start_time = meta.get("start_time", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z")
         run.end_time = meta.get("end_time", "")
         run.test_cases = {tc_full_name: TestCaseData.from_dict(run, tc_full_name, tc_meta) for tc_full_name, tc_meta in meta.get("test_cases", {}).items()}
@@ -189,34 +197,42 @@ class TestCaseData:
         return cls(run, tc_full_name, meta)
 
     async def add_log_entries(self, entries):
-        """Add log entries to this test case."""
+        """Add log entries to this test case using async file I/O."""
         log_path = get_case_log_path(self.run.id, tc_id=self.tc_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Append entries to log file and in-memory logs
-        sanitized_count = 0
+        # Sanitize all entries first
+        sanitized_entries = []
         skipped_count = 0
-        with open(log_path, "a", encoding="utf-8") as f:
-            for entry in entries:
-                log_entry = self._sanitize_log_entry(entry)
-                if not log_entry:
-                    skipped_count += 1
-                    logger.debug(f"Skipped log entry for {self.tc_id}: missing timestamp or message")
-                    continue
-
-                sanitized_count += 1
-                f.write(json.dumps(log_entry) + "\n")
-                # Save in memory
-                self.logs.append(log_entry)
-                # Send to subscribers
-                for subscriber in self.subscribers:
-                    await subscriber.put(log_entry)
+        for entry in entries:
+            log_entry = self._sanitize_log_entry(entry)
+            if not log_entry:
+                skipped_count += 1
+                continue
+            sanitized_entries.append(log_entry)
 
         if skipped_count > 0:
-            logger.warning(f"Skipped {skipped_count} log entries for {self.tc_id} (missing timestamp or message), added {sanitized_count} entries")
+            logger.warning(f"Skipped {skipped_count} log entries for {self.tc_id} (missing timestamp or message)")
+
+        if not sanitized_entries:
+            return
+
+        # Write all entries in one async operation
+        lines = [json.dumps(entry) + "\n" for entry in sanitized_entries]
+        async with aiofiles.open(log_path, "a", encoding="utf-8") as f:
+            await f.writelines(lines)
+
+        # Update in-memory logs and notify subscribers
+        self.logs.extend(sanitized_entries)
+
+        # Batch notify subscribers
+        if self.subscribers:
+            for entry in sanitized_entries:
+                for subscriber in self.subscribers:
+                    await subscriber.put(entry)
 
     async def add_stack_trace(self, trace_entry):
-        """Add a stack trace entry to this test case."""
+        """Add a stack trace entry to this test case using async file I/O."""
         # Canonical exception representation:
         # - timestamp: ISO 8601 string
         # - message: exception or failure message
@@ -246,9 +262,9 @@ class TestCaseData:
         stack_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Append to disk file
-            with open(stack_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
+            # Append to disk file using async I/O
+            async with aiofiles.open(stack_path, "a", encoding="utf-8") as f:
+                await f.write(json.dumps(entry) + "\n")
             logger.info(f"Persisted stack trace to {stack_path}")
         except Exception as persist_error:
             logger.error(f"Failed to persist stack trace for {self.id}: {persist_error}")

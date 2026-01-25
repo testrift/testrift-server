@@ -20,7 +20,9 @@ from testrift_server import database
 from testrift_server.database import TestCaseData as DatabaseTestCaseData
 from testrift_server.database import TestRunData as DatabaseTestRunData
 from testrift_server.database import UserMetadata
-from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer, generate_storage_id, TC_ID_FIELD
+from testrift_server.models import TestCaseData, TestRunData
+from testrift_server.websocket import WebSocketServer
+from testrift_server.utils import generate_storage_id, TC_ID_FIELD
 
 
 class TestClientServerIntegration:

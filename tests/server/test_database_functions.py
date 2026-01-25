@@ -169,7 +169,7 @@ class TestDatabaseFunctions:
     async def test_log_test_case_started(self, initialized_db, sample_test_run):
         """Test log_test_case_started convenience function."""
         # Test logging test case start
-        from testrift_server.tr_server import generate_storage_id
+        from testrift_server.utils import generate_storage_id
         tc_id = generate_storage_id()
         success = await database.log_test_case_started("test-run-123", "Test.NewMethod", tc_id)
         assert success is True
@@ -185,7 +185,7 @@ class TestDatabaseFunctions:
     @pytest.mark.asyncio
     async def test_log_test_case_finished(self, initialized_db, sample_test_run):
         """Test log_test_case_finished convenience function."""
-        from testrift_server.tr_server import generate_storage_id
+        from testrift_server.utils import generate_storage_id
         tc_id = generate_storage_id()
         # First create a test case
         await database.log_test_case_started("test-run-123", "Test.NewMethod", tc_id)

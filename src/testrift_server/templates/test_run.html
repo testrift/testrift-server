@@ -721,7 +721,7 @@
                                 RUNNING <span class="status-spinner"></span>
                             </span>
                             {% elif status.lower() == 'aborted' %}
-                            <span class="status-badge status-aborted">ABORTED</span>
+                            <span class="status-badge status-aborted" {% if abort_reason %}title="{{ abort_reason }}"{% endif %}>ABORTED</span>
                             {% else %}
                             {% if skipped_count > 0 and passed_count == 0 and failed_count == 0 and (error_count is not defined or error_count == 0) %}
                             <span class="status-badge status-skipped">SKIPPED</span>
@@ -862,6 +862,11 @@
         let runExecutionTimer = null;
         const STATUS_FILTER_STORAGE_KEY = 'testRunStatusFilters';
         const STATUS_FILTER_KEYS = ['passed', 'failed', 'skipped', 'error'];
+
+        // Debounce variables for incremental updates
+        let pendingViewRebuild = false;
+        let viewRebuildDebounceTimer = null;
+        const VIEW_REBUILD_DEBOUNCE_MS = 200;
         const LOG_URL_BASE = "{% if live_run %}/testRun/{{ run_id }}/log/{% else %}log/{% endif %}";
         let statusFilters = {
             passed: true,
@@ -2206,10 +2211,75 @@
                         loadAndApplyClassifications();
                     }, 500);
                 }
+
+                // New test case - queue a debounced rebuild
+                scheduleViewRebuild();
+            } else {
+                // Existing test case - just update the badge, no rebuild needed
+                updateTestCaseBadge(testEntry);
+
+                // Also update list view item if in list view mode
+                if (isListView) {
+                    updateListViewItem(testEntry);
+                }
+            }
+        }
+
+        // Schedule a debounced view rebuild for new test cases
+        function scheduleViewRebuild() {
+            pendingViewRebuild = true;
+
+            if (viewRebuildDebounceTimer) {
+                clearTimeout(viewRebuildDebounceTimer);
             }
 
-            // Always rebuild from the full set using the compact tree logic
-            rebuildCurrentView();
+            viewRebuildDebounceTimer = setTimeout(() => {
+                if (pendingViewRebuild) {
+                    pendingViewRebuild = false;
+                    rebuildCurrentView();
+                }
+            }, VIEW_REBUILD_DEBOUNCE_MS);
+        }
+
+        // Update a list view item without rebuilding the entire list
+        function updateListViewItem(testEntry) {
+            if (!testEntry || !isListView) return;
+
+            const listElement = document.getElementById('test-cases-list');
+            if (!listElement) return;
+
+            // Find the existing list item by fullName
+            const existingItem = listElement.querySelector(`li[data-tc-full-name="${CSS.escape(testEntry.fullName)}"]`);
+            if (!existingItem) return;
+
+            // Update the badge
+            const badge = existingItem.querySelector('.badge');
+            if (badge) {
+                const badgeClass = getBadgeClass(testEntry.Status);
+                const hadHistory = badge.classList.contains('status-badge-with-history');
+                badge.className = 'badge ' + badgeClass + (hadHistory ? ' status-badge-with-history' : '');
+                badge.textContent = testEntry.Status;
+
+                // Add/remove spinner for running status
+                const existingSpinner = badge.querySelector('.spinner');
+                if (testEntry.Status && testEntry.Status.toLowerCase() === 'running') {
+                    if (!existingSpinner) {
+                        const spinner = document.createElement('span');
+                        spinner.className = 'spinner';
+                        badge.appendChild(document.createTextNode(' '));
+                        badge.appendChild(spinner);
+                    }
+                } else if (existingSpinner) {
+                    // Remove spinner and trailing space
+                    existingSpinner.remove();
+                }
+            }
+
+            // Update execution time if available
+            const timeElement = existingItem.querySelector('.execution-time');
+            if (timeElement && testEntry.executionTime) {
+                timeElement.textContent = `⏱️ ${testEntry.executionTime}`;
+            }
         }
 
         function updateTestCaseBadge(testEntry) {
@@ -2254,6 +2324,11 @@
                     // Reattach handlers (function handles removing old ones)
                     Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, runConfig.groupHash || null, runConfig.runId, tcId);
                 }
+            }
+
+            // Update execution time in tree view if available
+            if (testEntry.executionTimeElement && testEntry.executionTime) {
+                testEntry.executionTimeElement.text(`⏱️ ${testEntry.executionTime}`);
             }
         }
 
@@ -3986,10 +4061,13 @@
                     runningBadge.appendChild(spinner);
                     statusBadgeTop.appendChild(runningBadge);
                 } else if (runStatus === 'aborted') {
-                    // Show aborted badge
+                    // Show aborted badge with abort reason tooltip if available
                     const abortedBadge = document.createElement('span');
                     abortedBadge.className = 'status-badge status-aborted';
                     abortedBadge.textContent = 'ABORTED';
+                    if (run.abort_reason) {
+                        abortedBadge.title = run.abort_reason;
+                    }
                     statusBadgeTop.appendChild(abortedBadge);
                 } else if (runStatus === 'finished') {
                     // Show finished badge - use counts if available, otherwise calculate from testMap

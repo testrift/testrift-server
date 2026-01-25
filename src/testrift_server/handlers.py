@@ -231,6 +231,7 @@ async def test_run_index_handler(request):
         user_metadata = run.user_metadata
         retention_days = run.retention_days
         run_name = run.run_name
+        abort_reason = run.abort_reason
         if run.group or run.group_hash:
             group_info = {
                 "name": run.group.get("name") if run.group else None,
@@ -261,10 +262,12 @@ async def test_run_index_handler(request):
 
         # Convert test cases list to dict format expected by template
         storage_lookup = {}
+        abort_reason = None
         if files_exist:
             disk_run = TestRunData.load_from_disk(run_id)
             if disk_run:
                 storage_lookup = {tc.full_name: tc.tc_id for tc in disk_run.test_cases.values()}
+                abort_reason = disk_run.abort_reason
 
         test_cases_dict = {}
         for tc in test_cases_list:
@@ -311,6 +314,7 @@ async def test_run_index_handler(request):
         run_id=run_id,
         run_name=run_name,
         status=status,
+        abort_reason=abort_reason,
         start_time=start_time,
         end_time=end_time,
         user_metadata=user_metadata,

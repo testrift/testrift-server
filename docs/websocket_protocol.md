@@ -15,6 +15,91 @@ This endpoint is used by test runners (for example the NUnit plugin) to report r
 
 Unless otherwise noted, the message types below describe what **clients send to `/ws/nunit`**.
 
+## High-Performance Batching
+
+For high-throughput scenarios with many parallel test cases and heavy logging, clients should use the **`batch`** message type. This reduces WebSocket frame overhead by combining multiple events into a single message.
+
+### Batch Message
+
+**Type:** `batch`
+
+**Purpose:** Combines multiple events (test case starts, finishes, log batches, exceptions) into a single WebSocket message for optimal performance.
+
+**Fields:**
+- `type`: `"batch"`
+- `run_id`: `string` - The run ID all events belong to
+- `events`: `array` - Array of event objects, each with an `event_type` field
+
+**Event Types within a batch:**
+- `test_case_started` - Same fields as standalone message (minus `type` and `run_id`)
+- `test_case_finished` - Same fields as standalone message (minus `type` and `run_id`)
+- `log_batch` - Same fields as standalone message (minus `type` and `run_id`)
+- `exception` - Same fields as standalone message (minus `type` and `run_id`)
+
+**Example:**
+```json
+{
+  "type": "batch",
+  "run_id": "run-abc123",
+  "events": [
+    {
+      "event_type": "test_case_started",
+      "tc_full_name": "MyTests.Test1",
+      "tc_id": "0-1001",
+      "tc_meta": {"status": "running", "start_time": "2025-01-25T10:00:00.000Z"}
+    },
+    {
+      "event_type": "log_batch",
+      "tc_id": "0-1000",
+      "entries": [
+        {"timestamp": "2025-01-25T10:00:00.100Z", "message": "Log 1", "component": "Test"},
+        {"timestamp": "2025-01-25T10:00:00.200Z", "message": "Log 2", "component": "Test"}
+      ]
+    },
+    {
+      "event_type": "test_case_finished",
+      "tc_id": "0-1000",
+      "status": "passed"
+    },
+    {
+      "event_type": "exception",
+      "tc_id": "0-1002",
+      "timestamp": "2025-01-25T10:00:00.300Z",
+      "message": "Assertion failed",
+      "exception_type": "NUnit.Framework.AssertionException",
+      "stack_trace": ["at MyTests.Test3() in Test.cs:line 42"],
+      "is_error": false
+    }
+  ]
+}
+```
+
+**Batching Guidelines:**
+- Send batches every 200-300ms or when accumulated data exceeds ~128KB
+- Always flush remaining events before sending `test_case_finished` for a test case
+- The server processes events in array order, maintaining causality
+- Individual message types (`test_case_started`, `log_batch`, etc.) are still supported for simple use cases
+
+### Heartbeat Message
+
+**Type:** `heartbeat`
+
+**Purpose:** Keeps the WebSocket connection alive during periods of inactivity. The server has a 30-second timeout for idle connections, so clients should send heartbeats every 10 seconds if no other messages have been sent.
+
+**Fields:**
+- `type`: `"heartbeat"`
+- `run_id`: The current run ID
+
+**Example:**
+```json
+{
+  "type": "heartbeat",
+  "run_id": "abc123def456"
+}
+```
+
+The server acknowledges heartbeats by updating its activity timestamp. No response is sent to the client.
+
 ## Message Format
 
 All messages are JSON objects with the following structure:

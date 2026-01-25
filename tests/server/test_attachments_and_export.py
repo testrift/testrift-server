@@ -16,21 +16,23 @@ import pytest_asyncio
 from aiohttp import web, MultipartReader
 
 from testrift_server import database
-from testrift_server.tr_server import (
+from testrift_server.handlers import (
     upload_attachment_handler,
     download_attachment_handler,
     list_attachments_handler,
     zip_export_handler,
+)
+from testrift_server.utils import (
     get_run_path,
     get_case_log_path,
     get_case_storage_dir,
     get_attachments_dir,
     sanitize_filename,
-    parse_size_string,
-    TestRunData,
     generate_storage_id,
     TC_ID_FIELD,
 )
+from testrift_server.config import parse_size_string
+from testrift_server.models import TestRunData
 
 
 def register_test_case(run_id: str, test_case_id: str, status: str = "running") -> str:
@@ -156,7 +158,7 @@ class TestAttachmentHandlers:
         request = MagicMock()
         request.match_info = {"run_id": run_id, "test_case_id": test_case_id}
 
-        with patch("testrift_server.tr_server.ATTACHMENTS_ENABLED", False):
+        with patch("testrift_server.handlers.ATTACHMENTS_ENABLED", False):
             response = await upload_attachment_handler(request)
 
         assert response.status == 403
@@ -190,8 +192,8 @@ class TestAttachmentHandlers:
         request.app = {"ws_server": ws_server}
         request.multipart = AsyncMock(return_value=reader)
 
-        with patch("testrift_server.tr_server.ATTACHMENTS_ENABLED", True):
-            with patch("testrift_server.tr_server.ATTACHMENT_MAX_SIZE", 1024 * 1024):  # 1MB limit
+        with patch("testrift_server.handlers.ATTACHMENTS_ENABLED", True):
+            with patch("testrift_server.handlers.ATTACHMENT_MAX_SIZE", 1024 * 1024):  # 1MB limit
                 response = await upload_attachment_handler(request)
 
         assert response.status == 413

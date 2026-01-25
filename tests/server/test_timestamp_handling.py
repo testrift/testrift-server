@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from testrift_server.tr_server import now_utc_iso, parse_iso
+from testrift_server.utils import now_utc_iso, parse_iso
 
 
 class TestServerTimestampHandling:

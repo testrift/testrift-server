@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer, generate_storage_id, TC_ID_FIELD
+from testrift_server.models import TestCaseData, TestRunData
+from testrift_server.websocket import WebSocketServer
+from testrift_server.utils import generate_storage_id, TC_ID_FIELD
 
 
 class TestLiveLogStreaming:
@@ -112,7 +114,7 @@ class TestLiveLogStreaming:
         sample_run.test_cases["Test.TestMethod"] = sample_test_case
 
         # Test the validation functions that handle_log_stream uses
-        from testrift_server.tr_server import validate_run_id, validate_test_case_id
+        from testrift_server.utils import validate_run_id, validate_test_case_id
 
         # Test valid IDs (NUnit test ID format)
         assert validate_run_id("test-run-123") is True
@@ -138,7 +140,7 @@ class TestLiveLogStreaming:
         assert "non-existent-run" not in ws_server.test_runs
 
         # Test validation of invalid run IDs
-        from testrift_server.tr_server import validate_run_id, validate_test_case_id
+        from testrift_server.utils import validate_run_id, validate_test_case_id
         assert validate_run_id("") is False
         assert validate_run_id("../invalid") is False
         assert validate_test_case_id("") is False
@@ -155,7 +157,7 @@ class TestLiveLogStreaming:
         assert "NonExistent.Test" not in sample_run.test_cases
 
         # Test validation (NUnit test ID format)
-        from testrift_server.tr_server import validate_run_id, validate_test_case_id
+        from testrift_server.utils import validate_run_id, validate_test_case_id
         assert validate_run_id("test-run-123") is True
         assert validate_test_case_id("0-9999") is True  # Valid format, just doesn't exist
 

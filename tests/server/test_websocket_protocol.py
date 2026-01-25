@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from testrift_server.tr_server import TestCaseData, TestRunData, WebSocketServer, generate_storage_id, TC_ID_FIELD
+from testrift_server.models import TestCaseData, TestRunData
+from testrift_server.websocket import WebSocketServer
+from testrift_server.utils import generate_storage_id, TC_ID_FIELD
 
 
 class TestWebSocketProtocol:
@@ -203,7 +205,7 @@ class TestWebSocketProtocol:
         sample_run.test_cases_by_tc_id[test_case.tc_id] = test_case
 
         # Test the validation functions that handle_log_stream uses
-        from testrift_server.tr_server import validate_run_id, validate_test_case_id
+        from testrift_server.utils import validate_run_id, validate_test_case_id
 
         # Test valid IDs (NUnit test ID format)
         assert validate_run_id("test-run-123") is True

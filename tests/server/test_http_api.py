@@ -79,7 +79,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_health_handler_basic(self):
         """Test the health check endpoint basic functionality."""
-        from testrift_server.tr_server import health_handler
+        from testrift_server.handlers import health_handler
 
         # Create a mock request
         request = MagicMock()
@@ -95,7 +95,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_runs_handler_basic(self, initialized_db, sample_test_run):
         """Test the API test runs endpoint basic functionality."""
-        from testrift_server.tr_server import api_test_runs_handler
+        from testrift_server.api_handlers import api_test_runs_handler
 
         # Create a mock request with query parameters
         request = MagicMock()
@@ -115,7 +115,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_runs_handler_with_status_filter(self, initialized_db, sample_test_run):
         """Test the API test runs endpoint with status filter."""
-        from testrift_server.tr_server import api_test_runs_handler
+        from testrift_server.api_handlers import api_test_runs_handler
 
         # Create a mock request with status filter
         request = MagicMock()
@@ -136,7 +136,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_runs_handler_with_metadata_filters(self, initialized_db, sample_test_run):
         """Test the API test runs endpoint with metadata filters."""
-        from testrift_server.tr_server import api_test_runs_handler
+        from testrift_server.api_handlers import api_test_runs_handler
 
         # Create a mock request with metadata filter
         request = MagicMock()
@@ -157,7 +157,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_run_details_handler_basic(self, initialized_db, sample_test_run):
         """Test the API test run details endpoint basic functionality."""
-        from testrift_server.tr_server import api_test_run_details_handler
+        from testrift_server.api_handlers import api_test_run_details_handler
 
         # Create a mock request
         request = MagicMock()
@@ -174,7 +174,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_run_details_handler_not_found(self, initialized_db):
         """Test the API test run details endpoint with non-existent run."""
-        from testrift_server.tr_server import api_test_run_details_handler
+        from testrift_server.api_handlers import api_test_run_details_handler
 
         # Create a mock request
         request = MagicMock()
@@ -191,7 +191,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_group_details_handler(self, initialized_db):
         """Test group details endpoint."""
-        from testrift_server.tr_server import api_group_details_handler
+        from testrift_server.api_handlers import api_group_details_handler
 
         grouped_run = TestRunData(
             run_id="group-run-1",
@@ -222,7 +222,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_results_for_runs_handler_basic(self, initialized_db, sample_test_run):
         """Test the API test results for runs endpoint basic functionality."""
-        from testrift_server.tr_server import api_test_results_for_runs_handler
+        from testrift_server.api_handlers import api_test_results_for_runs_handler
 
         # Create a mock request
         request = MagicMock()
@@ -241,7 +241,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_results_over_time_handler_basic(self, initialized_db, sample_test_run):
         """Test the API test results over time endpoint basic functionality."""
-        from testrift_server.tr_server import api_test_results_over_time_handler
+        from testrift_server.api_handlers import api_test_results_over_time_handler
 
         # Create a mock request
         request = MagicMock()
@@ -260,7 +260,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_test_case_history_handler_basic(self, initialized_db, sample_test_run):
         """Test the API test case history endpoint basic functionality."""
-        from testrift_server.tr_server import api_test_case_history_handler
+        from testrift_server.api_handlers import api_test_case_history_handler
 
         # Create a mock request
         request = MagicMock()
@@ -280,7 +280,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_metadata_keys_handler_basic(self, initialized_db, sample_test_run):
         """Test the API metadata keys endpoint basic functionality."""
-        from testrift_server.tr_server import api_metadata_keys_handler
+        from testrift_server.api_handlers import api_metadata_keys_handler
 
         # Create a mock request
         request = MagicMock()
@@ -296,7 +296,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_metadata_values_handler_basic(self, initialized_db, sample_test_run):
         """Test the API metadata values endpoint basic functionality."""
-        from testrift_server.tr_server import api_metadata_values_handler
+        from testrift_server.api_handlers import api_metadata_values_handler
 
         # Create a mock request
         request = MagicMock()
@@ -315,7 +315,7 @@ class TestHTTPAPI:
     @pytest.mark.asyncio
     async def test_api_metadata_values_handler_invalid_key(self, initialized_db):
         """Test the API metadata values endpoint with invalid key."""
-        from testrift_server.tr_server import api_metadata_values_handler
+        from testrift_server.api_handlers import api_metadata_values_handler
 
         # Create a mock request
         request = MagicMock()
@@ -523,7 +523,7 @@ class TestStaticHandlers:
     @pytest.mark.asyncio
     async def test_static_file_handler_basic(self):
         """Test static file handler basic functionality."""
-        from testrift_server.tr_server import static_file_handler
+        from testrift_server.handlers import static_file_handler
 
         # Create a mock request
         request = MagicMock()
@@ -539,7 +539,7 @@ class TestStaticHandlers:
     @pytest.mark.asyncio
     async def test_zip_export_handler_basic(self, initialized_db):
         """Test ZIP export handler basic functionality."""
-        from testrift_server.tr_server import zip_export_handler
+        from testrift_server.handlers import zip_export_handler
 
         # Create a mock request
         request = MagicMock()
@@ -555,7 +555,7 @@ class TestStaticHandlers:
     @pytest.mark.asyncio
     async def test_analyzer_handler_basic(self, initialized_db):
         """Test analyzer page handler basic functionality."""
-        from testrift_server.tr_server import analyzer_handler
+        from testrift_server.handlers import analyzer_handler
 
         # Create a mock request
         request = MagicMock()
@@ -571,7 +571,7 @@ class TestStaticHandlers:
     @pytest.mark.asyncio
     async def test_matrix_handler_basic(self, initialized_db):
         """Test matrix page handler basic functionality."""
-        from testrift_server.tr_server import matrix_handler
+        from testrift_server.handlers import matrix_handler
 
         # Create a mock request
         request = MagicMock()
@@ -612,7 +612,7 @@ class TestAttachmentAPI:
     @pytest.mark.asyncio
     async def test_upload_attachment_handler_basic(self, initialized_db):
         """Test upload attachment handler basic functionality."""
-        from testrift_server.tr_server import upload_attachment_handler
+        from testrift_server.handlers import upload_attachment_handler
 
         # Create a mock request
         request = MagicMock()
@@ -637,7 +637,8 @@ class TestAttachmentAPI:
     @pytest.mark.asyncio
     async def test_list_attachments_handler_basic(self, initialized_db):
         """Test list attachments handler basic functionality."""
-        from testrift_server.tr_server import list_attachments_handler, generate_storage_id
+        from testrift_server.handlers import list_attachments_handler
+        from testrift_server.utils import generate_storage_id
         from types import SimpleNamespace
 
         # Generate tc_id
@@ -663,7 +664,8 @@ class TestAttachmentAPI:
     @pytest.mark.asyncio
     async def test_download_attachment_handler_basic(self, initialized_db):
         """Test download attachment handler basic functionality."""
-        from testrift_server.tr_server import download_attachment_handler, generate_storage_id
+        from testrift_server.handlers import download_attachment_handler
+        from testrift_server.utils import generate_storage_id
         from types import SimpleNamespace
 
         # Generate tc_id
@@ -693,7 +695,7 @@ class TestValidationFunctions:
     @pytest.mark.asyncio
     async def test_validate_run_id(self):
         """Test run ID validation function."""
-        from testrift_server.tr_server import validate_run_id
+        from testrift_server.utils import validate_run_id
 
         # Test valid run IDs
         assert validate_run_id("test-run-123") is True
@@ -710,7 +712,7 @@ class TestValidationFunctions:
     @pytest.mark.asyncio
     async def test_validate_test_case_id(self):
         """Test test case ID validation function."""
-        from testrift_server.tr_server import validate_test_case_id
+        from testrift_server.utils import validate_test_case_id
 
         # Test valid NUnit test IDs (alphanumeric and hyphens, e.g., "0-1009")
         assert validate_test_case_id("0-1009") is True
