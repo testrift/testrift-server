@@ -1,22 +1,48 @@
 #!/usr/bin/env python3
 """
-Tests for WebSocket protocol functionality.
+Tests for WebSocket protocol functionality using optimized binary format.
 """
 
 import asyncio
-import json
+import msgpack
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from testrift_server.models import TestCaseData, TestRunData
-from testrift_server.websocket import WebSocketServer
+from testrift_server.websocket import WebSocketServer, normalize_message
+from testrift_server.protocol import (
+    MSG_RUN_STARTED,
+    MSG_TEST_CASE_STARTED,
+    MSG_LOG_BATCH,
+    MSG_TEST_CASE_FINISHED,
+    MSG_RUN_FINISHED,
+    MSG_BATCH,
+    STATUS_RUNNING,
+    STATUS_PASSED,
+    STATUS_FAILED,
+    STATUS_SKIPPED,
+    STATUS_ABORTED,
+    STATUS_FINISHED,
+    F_TYPE,
+    F_RUN_ID,
+    F_TC_FULL_NAME,
+    F_TC_ID,
+    F_STATUS,
+    F_TIMESTAMP,
+    F_EVENT_TYPE,
+    F_EVENTS,
+    F_ENTRIES,
+    F_MESSAGE,
+    F_COMPONENT,
+    F_CHANNEL,
+)
 from testrift_server.utils import generate_storage_id, TC_ID_FIELD
 
 
 class TestWebSocketProtocol:
-    """Test WebSocket protocol message handling."""
+    """Test WebSocket protocol message handling with optimized binary format."""
 
     @pytest.fixture
     def ws_server(self):
@@ -43,90 +69,129 @@ class TestWebSocketProtocol:
         return run
 
     @pytest.mark.asyncio
-    async def test_test_case_finished_with_status_field(self, ws_server, mock_ws, sample_run):
-        """Test that test_case_finished messages work with status field."""
-        # Add run to server
+    async def test_normalize_message_converts_optimized_format(self):
+        """Test that normalize_message converts optimized format to internal format."""
+        string_table = {}
+
+        # Optimized format message
+        raw_data = {
+            F_TYPE: MSG_TEST_CASE_STARTED,
+            F_RUN_ID: "test-run-123",
+            F_TC_FULL_NAME: "Test.TestMethod",
+            F_TC_ID: "0-1009",
+            F_STATUS: STATUS_RUNNING,
+            F_TIMESTAMP: 1737820282736
+        }
+
+        normalized = normalize_message(raw_data, string_table)
+
+        assert normalized["type"] == "test_case_started"
+        assert normalized["run_id"] == "test-run-123"
+        assert normalized["tc_full_name"] == "Test.TestMethod"
+        assert normalized["tc_id"] == "0-1009"
+        assert normalized["status"] == "running"
+        assert "Z" in normalized["timestamp"]  # ISO format
+
+    @pytest.mark.asyncio
+    async def test_normalize_message_handles_log_batch_with_interning(self):
+        """Test log batch normalization with string interning."""
+        string_table = {}
+
+        # Log batch with interned strings
+        # Note: component and channel use separate ID spaces (1 for component, 2 for channel)
+        raw_data = {
+            F_TYPE: MSG_LOG_BATCH,
+            F_RUN_ID: "test-run-123",
+            F_TC_ID: "0-1009",
+            F_ENTRIES: [
+                {F_TIMESTAMP: 1737820282736, F_MESSAGE: "Hello", F_COMPONENT: [1, "Tester5"], F_CHANNEL: [2, "COM91"]},
+                {F_TIMESTAMP: 1737820282737, F_MESSAGE: "World", F_COMPONENT: 1, F_CHANNEL: 2},  # Interned references
+            ]
+        }
+
+        normalized = normalize_message(raw_data, string_table)
+
+        assert normalized["type"] == "log_batch"
+        assert len(normalized["entries"]) == 2
+
+        # First entry registers strings
+        assert normalized["entries"][0]["component"] == "Tester5"
+        assert normalized["entries"][0]["channel"] == "COM91"
+
+        # Second entry uses interned strings
+        assert normalized["entries"][1]["component"] == "Tester5"
+        assert normalized["entries"][1]["channel"] == "COM91"
+
+    @pytest.mark.asyncio
+    async def test_test_case_finished_with_status_code(self, ws_server, mock_ws, sample_run):
+        """Test that test_case_finished messages work with numeric status codes."""
         ws_server.test_runs["test-run-123"] = sample_run
 
-        # Create a test case
         tc_id_hash = generate_storage_id()
         test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
         sample_run.test_cases["Test.TestMethod"] = test_case
+        sample_run.test_cases_by_tc_id[test_case.tc_id] = test_case
 
-        # Mock the WebSocket message
+        # Optimized format message
         message_data = {
-            "type": "test_case_finished",
-            "run_id": "test-run-123",
-            "test_case_id": "Test.TestMethod",
-            "status": "passed"  # Using status instead of result
+            F_TYPE: MSG_TEST_CASE_FINISHED,
+            F_RUN_ID: "test-run-123",
+            F_TC_ID: test_case.tc_id,
+            F_STATUS: STATUS_PASSED,
+            F_TIMESTAMP: 1737820282736
         }
 
-        # Create a mock message
-        mock_msg = MagicMock()
-        mock_msg.type = 1  # WSMsgType.TEXT
-        mock_msg.data = json.dumps(message_data)
+        # Normalize and process
+        string_table = {}
+        data = normalize_message(message_data, string_table)
 
-        # Mock the WebSocket iteration
-        async def mock_iter():
-            yield mock_msg
+        assert data["type"] == "test_case_finished"
+        assert data["status"] == "passed"
 
-        mock_ws.__aiter__ = mock_iter
+        # Simulate handler logic
+        status = data.get("status", "").lower()
+        if status in ['passed', 'failed', 'skipped', 'aborted']:
+            test_case.status = status
+            test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
 
-        # Process the message (this would normally be done in handle_nunit_ws)
-        # We'll test the message processing logic directly
-
-        # Verify the test case status is updated
-        assert test_case.status == "running"  # Initially running
-
-        data = json.loads(mock_msg.data)
-        if data.get("type") == "test_case_finished":
-            run_id = data.get("run_id")
-            tc_id = data.get("test_case_id")
-            status = data.get("status", "").lower()
-
-            run = ws_server.test_runs.get(run_id)
-            if run and tc_id in run.test_cases:
-                test_case = run.test_cases[tc_id]
-                if status in ['passed', 'failed', 'skipped', 'aborted']:
-                    test_case.status = status
-                    test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
-
-        # Verify the status was updated
         assert test_case.status == "passed"
         assert test_case.end_time is not None
 
     @pytest.mark.asyncio
-    async def test_invalid_status_handling(self, ws_server, sample_run):
-        """Test that invalid status values are handled correctly."""
-        # Add run to server
+    async def test_test_case_finished_invalid_status(self, ws_server, mock_ws, sample_run):
+        """Test that invalid status values are rejected."""
         ws_server.test_runs["test-run-123"] = sample_run
 
-        # Create a test case
         tc_id_hash = generate_storage_id()
         test_case = TestCaseData(sample_run, "Test.TestMethod", {TC_ID_FIELD: tc_id_hash})
         sample_run.test_cases["Test.TestMethod"] = test_case
+        sample_run.test_cases_by_tc_id[test_case.tc_id] = test_case
 
-        # Test with invalid status
+        # Test with invalid status code (999)
         message_data = {
-            "type": "test_case_finished",
-            "run_id": "test-run-123",
-            "test_case_id": "Test.TestMethod",
-            "status": "invalid_status"
+            F_TYPE: MSG_TEST_CASE_FINISHED,
+            F_RUN_ID: "test-run-123",
+            F_TC_ID: test_case.tc_id,
+            F_STATUS: 999,  # Invalid status code
+            F_TIMESTAMP: 1737820282736
         }
 
-        data = message_data
-        run_id = data.get("run_id")
-        tc_id = data.get("test_case_id")
+        # Normalize message
+        string_table = {}
+        data = normalize_message(message_data, string_table)
+
+        # Status code 999 should normalize to "unknown"
         status = data.get("status", "").lower()
+        run = ws_server.test_runs.get(data["run_id"])
+        tc_id = data.get("tc_id")
 
-        run = ws_server.test_runs.get(run_id)
-        if run and tc_id in run.test_cases:
-            test_case = run.test_cases[tc_id]
+        if run and tc_id in run.test_cases_by_tc_id:
+            tc = run.test_cases_by_tc_id[tc_id]
             if status in ['passed', 'failed', 'skipped', 'aborted']:
-                test_case.status = status
-                test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+                tc.status = status
+                tc.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
 
-        # Verify the status was not updated
+        # Verify the status was not updated since "unknown" is not valid
         assert test_case.status == "running"  # Should remain running
         assert test_case.end_time is None
 

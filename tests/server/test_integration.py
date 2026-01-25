@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
 Integration tests for client-server communication and message processing.
+
+These tests simulate the internal message processing logic that happens
+after normalize_message converts the optimized binary protocol to the
+internal format with readable string field names.
 """
 
 import asyncio
-import json
+import msgpack
 import shutil
 import tempfile
 from datetime import UTC, datetime
@@ -21,8 +25,24 @@ from testrift_server.database import TestCaseData as DatabaseTestCaseData
 from testrift_server.database import TestRunData as DatabaseTestRunData
 from testrift_server.database import UserMetadata
 from testrift_server.models import TestCaseData, TestRunData
-from testrift_server.websocket import WebSocketServer
+from testrift_server.websocket import WebSocketServer, normalize_message
 from testrift_server.utils import generate_storage_id, TC_ID_FIELD
+from testrift_server.protocol import (
+    MSG_RUN_STARTED,
+    MSG_TEST_CASE_STARTED,
+    MSG_TEST_CASE_FINISHED,
+    STATUS_RUNNING,
+    STATUS_PASSED,
+    F_TYPE,
+    F_RUN_ID,
+    F_TC_FULL_NAME,
+    F_TC_ID,
+    F_STATUS,
+    F_TIMESTAMP,
+    F_USER_METADATA,
+    F_RETENTION_DAYS,
+    F_LOCAL_RUN,
+)
 
 
 class TestClientServerIntegration:
@@ -428,15 +448,14 @@ class TestWebSocketServerIntegration:
         mock_ws = AsyncMock()
         mock_ws.closed = False
 
-        # Create a mock message
+        # Create a mock message in optimized protocol format
         mock_msg = MagicMock()
-        mock_msg.type = WSMsgType.TEXT
-        mock_msg.data = json.dumps({
-            "type": "run_started",
-            "run_id": "server-integration-test",
-            "user_metadata": {"DUT": {"value": "TestDevice"}},
-            "retention_days": 7,
-            "local_run": False
+        mock_msg.type = WSMsgType.BINARY
+        mock_msg.data = msgpack.packb({
+            F_TYPE: MSG_RUN_STARTED,
+            F_USER_METADATA: {"DUT": {"value": "TestDevice"}},
+            F_RETENTION_DAYS: 7,
+            F_LOCAL_RUN: False
         })
 
         # Mock the WebSocket iteration
@@ -446,14 +465,18 @@ class TestWebSocketServerIntegration:
         mock_ws.__aiter__ = mock_iter
 
         try:
-            # Simulate the message processing
+            # Simulate the message processing with normalization
+            string_table = {}
             async for msg in mock_ws:
-                if msg.type == WSMsgType.TEXT:
-                    data = json.loads(msg.data)
+                if msg.type == WSMsgType.BINARY:
+                    raw_data = msgpack.unpackb(msg.data)
+                    # Normalize the message (this is what handle_nunit_ws does)
+                    data = normalize_message(raw_data, string_table)
                     msg_type = data.get("type")
 
                     if msg_type == "run_started":
-                        run_id = data.get("run_id")
+                        # Server generates run_id
+                        run_id = generate_storage_id()
                         retention_days = data.get("retention_days", 7)
                         local_run = data.get("local_run", False)
                         user_metadata = data.get("user_metadata", {})

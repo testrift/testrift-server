@@ -4,6 +4,7 @@ Tests for attachment handlers (upload, download, list) and ZIP export.
 """
 
 import json
+import msgpack
 import shutil
 import tempfile
 import zipfile
@@ -30,15 +31,18 @@ from testrift_server.utils import (
     sanitize_filename,
     generate_storage_id,
     TC_ID_FIELD,
+    TC_FULL_NAME_FIELD,
+    write_meta_msgpack,
+    read_meta_msgpack,
+    write_mplog_entry,
 )
 from testrift_server.config import parse_size_string
 from testrift_server.models import TestRunData
 
 
 def register_test_case(run_id: str, test_case_id: str, status: str = "running") -> str:
-    """Register a test case in meta.json and return its tc_id."""
-    meta_path = get_run_path(run_id) / "meta.json"
-    meta = json.loads(meta_path.read_text())
+    """Register a test case in meta.msgpack and return its tc_id."""
+    meta = read_meta_msgpack(run_id)
     test_cases = meta.setdefault("test_cases", {})
     if test_case_id in test_cases and test_cases[test_case_id].get(TC_ID_FIELD):
         return test_cases[test_case_id][TC_ID_FIELD]
@@ -52,7 +56,7 @@ def register_test_case(run_id: str, test_case_id: str, status: str = "running") 
         "stack_traces": [],
         TC_ID_FIELD: tc_id,
     }
-    meta_path.write_text(json.dumps(meta))
+    write_meta_msgpack(run_id, meta)
 
     case_dir = get_case_storage_dir(run_id, tc_id)
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -87,7 +91,7 @@ class TestAttachmentHandlers:
         run_path = get_run_path(run_id)
         run_path.mkdir(parents=True, exist_ok=True)
 
-        # Create meta.json
+        # Create meta.msgpack
         meta = {
             "run_id": run_id,
             "status": "finished",
@@ -98,7 +102,7 @@ class TestAttachmentHandlers:
             "user_metadata": {},
             "test_cases": {}
         }
-        (run_path / "meta.json").write_text(json.dumps(meta))
+        write_meta_msgpack(run_id, meta)
 
         yield run_id
 
@@ -320,11 +324,18 @@ class TestZipExport:
         data_dir = Path(temp_dir) / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
 
+        # Update config.DATA_DIR so utils.get_run_path uses the temp dir
+        from testrift_server import config
+        old_data_dir = config.DATA_DIR
+        config.DATA_DIR = data_dir
+
         database.initialize_database(data_dir)
         await database.db.initialize()
 
         yield data_dir
 
+        # Restore original DATA_DIR
+        config.DATA_DIR = old_data_dir
         shutil.rmtree(temp_dir)
 
     @pytest_asyncio.fixture
@@ -338,7 +349,7 @@ class TestZipExport:
 
         tc_id = generate_storage_id()
 
-        # Create meta.json
+        # Create meta.msgpack
         meta = {
             "run_id": run_id,
             "run_name": "Export Test Run",
@@ -354,19 +365,19 @@ class TestZipExport:
                     "start_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                     "end_time": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
                     TC_ID_FIELD: tc_id,
+                    TC_FULL_NAME_FIELD: test_case_id,
                     "logs": [],
                     "stack_traces": []
                 }
             }
         }
-        (run_path / "meta.json").write_text(json.dumps(meta))
+        write_meta_msgpack(run_id, meta)
 
         # Create test case log
         log_path = get_case_log_path(run_id, tc_id=tc_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text(
-            json.dumps({"timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", "message": "Test log"}) + "\n"
-        )
+        log_entry = {"timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", "message": "Test log"}
+        write_mplog_entry(log_path, log_entry)
 
         # Create attachment
         attachments_dir = get_attachments_dir(run_id, test_case_id, tc_id=tc_id)
@@ -400,7 +411,7 @@ class TestZipExport:
             # Check for attachments (should be present)
             attachment_files = [f for f in files if "attachments" in f.lower()]
             assert len(attachment_files) > 0, f"No attachment files found. Files: {files}"
-            # Log HTML files are only created if log.jsonl exists and has content
+            # Log HTML files are only created if log.mplog exists and has content
             # This is optional, so we don't assert on it
 
     @pytest.mark.asyncio

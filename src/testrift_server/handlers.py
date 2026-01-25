@@ -10,6 +10,7 @@ import zipfile
 from datetime import datetime, UTC
 
 import aiofiles
+import msgpack
 from aiohttp import web
 from jinja2 import Environment, FileSystemLoader
 
@@ -22,21 +23,22 @@ from .config import (
 )
 from .utils import (
     get_run_path,
-    get_case_log_path,
-    get_case_stack_path,
+    get_merged_log_path,
     get_attachments_dir,
     get_attachment_path,
-    read_jsonl,
+    read_meta_msgpack,
     sanitize_filename,
     validate_run_id,
     validate_test_case_id,
     validate_group_hash_value,
     find_test_case_by_tc_id,
     get_run_and_test_case_by_tc_id,
+    META_FILE,
     TC_ID_FIELD,
     TC_FULL_NAME_FIELD,
 )
 from .models import TestRunData, TestCaseData
+from .protocol_utils import decode_log_entries
 from . import database
 
 logger = logging.getLogger(__name__)
@@ -407,6 +409,15 @@ async def test_case_log_handler(request):
     elif 'group_hash' in run_dict:
         group_hash = run_dict.get('group_hash')
 
+    # For non-live runs, decode compact protocol entries for template embedding
+    # Live runs send raw entries via WebSocket where JS decodes them
+    if live_run:
+        decoded_logs = []
+    else:
+        # Use the run's string table for interned component/channel strings
+        string_table = getattr(run, 'string_table', None) or {}
+        decoded_logs = decode_log_entries(test_case.logs, string_table) if test_case.logs else []
+
     html = render_template(
         'test_case_log.html',
         run_id=run_id,
@@ -416,7 +427,7 @@ async def test_case_log_handler(request):
         run_meta=run_dict,
         test_case=test_case,
         tc_meta=test_case.to_dict(),
-        logs=[] if live_run else test_case.logs,  # Don't embed logs for live runs, WebSocket will send them
+        logs=decoded_logs,
         stack_traces=[] if live_run else test_case.stack_traces,
         live_run=live_run,
         server_mode=True,  # Always True when served from live server
@@ -456,11 +467,9 @@ async def zip_export_handler(request):
         # Create zip archive with all HTML pages and logs embedded
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             # Add test run index page (static mode via unified template)
-            meta_path = run_path / "meta.json"
-            if not meta_path.exists():
-                raise FileNotFoundError("meta.json not found")
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
+            meta = read_meta_msgpack(run_id)
+            if meta is None:
+                raise FileNotFoundError("meta.msgpack not found")
             run = TestRunData.from_dict(run_id, meta)
             test_cases_dict = {tc_id: tc.to_dict() for tc_id, tc in run.test_cases.items()}
             # Count test results for multiple badges
@@ -495,7 +504,10 @@ async def zip_export_handler(request):
                 passed_count=passed_count,
                 failed_count=failed_count,
                 skipped_count=skipped_count,
-                files_exist=True  # Files always exist for ZIP export
+                error_count=0,
+                abort_reason=None,
+                files_exist=True,  # Files always exist for ZIP export
+                group=None  # No group info needed for static ZIP export
             )
             zf.writestr("index.html", run_html)
 
@@ -541,42 +553,46 @@ async def zip_export_handler(request):
                 zf.writestr("static/test_case_log.js", tc_js_content)
 
             # Add each test case log page (static mode via unified template)
+            # Get the string table for decoding interned strings
+            string_table = getattr(run, 'string_table', None) or {}
+
             for tc_full_name, tc in run.test_cases.items():
                 case_slug = tc.tc_id
-                log_path = get_case_log_path(run_id, tc_id=tc.tc_id)
-                if log_path.exists():
-                    raw_logs = read_jsonl(log_path)
-                    logs = []
-                    for entry in raw_logs:
-                        log_entry = TestCaseData._sanitize_log_entry(entry)
-                        if log_entry:
-                            logs.append(log_entry)
 
-                    # Collect attachment information for this test case
-                    attachments = []
-                    attachments_dir = get_attachments_dir(run_id, tc_id=tc.tc_id)
-                    if attachments_dir.exists():
-                        for attachment_file in attachments_dir.iterdir():
-                            if attachment_file.is_file():
-                                attachments.append({
-                                    "filename": attachment_file.name,
-                                    "size": attachment_file.stat().st_size,
-                                    "modified_time": datetime.fromtimestamp(attachment_file.stat().st_mtime, UTC).isoformat() + "Z"
-                                })
+                # Load logs using the model's method (handles both individual and merged files)
+                tc.load_log_from_disk()
+                raw_logs = tc.logs
+                logs = decode_log_entries(raw_logs, string_table) if raw_logs else []
 
-                    log_html = render_template(
-                        'test_case_log.html',
-                        run_id=run_id,
-                        run_name=meta.get('run_name'),
-                        test_case_id=tc.tc_id,
-                        run_meta=meta,
-                        tc_meta=tc.to_dict(),
-                        logs=logs,
-                        attachments=attachments,  # Add attachments to template
-                        live_run=False,
-                        server_mode=False
-                    )
-                    zf.writestr(f"log/{case_slug}.html", log_html)
+                # Stack traces are loaded by load_log_from_disk when reading from merged file
+                stack_traces = tc.stack_traces or []
+
+                # Collect attachment information for this test case
+                attachments = []
+                attachments_dir = get_attachments_dir(run_id, tc_id=tc.tc_id)
+                if attachments_dir.exists():
+                    for attachment_file in attachments_dir.iterdir():
+                        if attachment_file.is_file():
+                            attachments.append({
+                                "filename": attachment_file.name,
+                                "size": attachment_file.stat().st_size,
+                                "modified_time": datetime.fromtimestamp(attachment_file.stat().st_mtime, UTC).isoformat() + "Z"
+                            })
+
+                log_html = render_template(
+                    'test_case_log.html',
+                    run_id=run_id,
+                    run_name=meta.get('run_name'),
+                    test_case_id=tc.tc_id,
+                    run_meta=meta,
+                    tc_meta=tc.to_dict(),
+                    logs=logs,
+                    stack_traces=stack_traces,
+                    attachments=attachments,
+                    live_run=False,
+                    server_mode=False
+                )
+                zf.writestr(f"log/{case_slug}.html", log_html)
 
                 # Add attachments for this test case
                 attachments_dir = get_attachments_dir(run_id, tc_id=tc.tc_id)

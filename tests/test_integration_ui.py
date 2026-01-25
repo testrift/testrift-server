@@ -5,7 +5,7 @@ WebSocket client -> Server -> UI rendering
 
 These tests:
 1. Start the server
-2. Send WebSocket messages (simulating NUnit client)
+2. Send WebSocket messages (simulating NUnit client) using optimized binary protocol
 3. Use Playwright to open browser and verify UI displays correctly
 
 Note: These are integration tests (WebSocket -> Server -> UI), not full E2E tests.
@@ -15,12 +15,10 @@ Full E2E tests would run actual NUnit tests (NUnit -> WebSocket -> Server -> UI)
 import pytest
 import pytest_asyncio
 import asyncio
-import json
 import tempfile
 import shutil
 import subprocess
 import time
-import signal
 import os
 import sys
 from pathlib import Path
@@ -30,6 +28,10 @@ from datetime import datetime, UTC
 repo_root = Path(__file__).resolve().parent.parent
 server_src_dir = repo_root / "src"
 sys.path.insert(0, str(server_src_dir))
+
+# Add tests directory to path for protocol_helpers
+tests_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(tests_dir))
 
 try:
     from playwright.async_api import async_playwright, Page, expect
@@ -41,6 +43,8 @@ except ImportError:
 
 from aiohttp import ClientSession, WSMsgType
 import aiohttp
+
+from protocol_helpers import ProtocolClient
 
 
 # Default timeout for integration tests (30 seconds)
@@ -192,76 +196,38 @@ data:
         port, server_proc = server_process
         page = browser_page
 
-        run_id = f"e2e-test-{int(time.time())}"
-        test_case_id = "E2ETest.DirectionBadge"
+        test_case_name = "E2ETest.DirectionBadge"
+        tc_id = "00000001"
 
-        # Step 1: Send WebSocket messages simulating NUnit client
+        # Step 1: Send WebSocket messages using optimized protocol
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                # Send run_started (server generates run_id)
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False
-                })
+                client = ProtocolClient(ws)
 
-                # Wait for server response with run_id
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                # Send run_started
+                response = await client.send_run_started()
+                assert response.get("type") == "run_started_response"
+                run_id = response.get("run_id")
 
-                # Send test_case_started with tc_id
-                tc_id = "00000001"  # Client-generated 8-char hex ID
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": run_id,
-                    "tc_full_name": test_case_id,
-                    "tc_id": tc_id
-                })
+                # Send test_case_started
+                await client.send_test_case_started(run_id, test_case_name, tc_id)
 
-                # Send log_batch with tc_id (not tc_full_name)
-                await ws.send_json({
-                    "type": "log_batch",
-                    "run_id": run_id,
-                    "tc_id": tc_id,
-                    "entries": [
-                        {
-                            "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
-                            "message": "AT+TEST=1",
-                            "dir": "tx",
-                            "component": "TestDevice",
-                            "channel": "COM1"
-                        },
-                        {
-                            "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
-                            "message": "OK",
-                            "dir": "rx",
-                            "component": "TestDevice",
-                            "channel": "COM1"
-                        }
-                    ]
-                })
+                # Send log_batch with direction
+                await client.send_log_batch(run_id, tc_id, [
+                    {"message": "AT+TEST=1", "dir": "tx", "component": "TestDevice", "channel": "COM1"},
+                    {"message": "OK", "dir": "rx", "component": "TestDevice", "channel": "COM1"},
+                ])
 
-                # Send test_case_finished with tc_id (not tc_full_name)
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": run_id,
-                    "tc_id": tc_id,
-                    "status": "passed"
-                })
+                # Send test_case_finished
+                await client.send_test_case_finished(run_id, tc_id, "passed")
 
-                # Wait a bit for server to process (reduced from 0.5s)
                 await asyncio.sleep(0.2)
 
-        # Step 2: Open the test case log page in browser using tc_id
+        # Step 2: Open the test case log page in browser
         url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{tc_id}.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=5000)
 
         # Step 3: Verify UI displays direction badges
-        # Wait for the log table to load
         await page.wait_for_selector("#msg_table tbody tr", timeout=5000)
 
         # Check for TX badge (Host ――► DUT)
@@ -276,12 +242,11 @@ data:
         await expect(page.locator("text=AT+TEST=1")).to_be_visible()
         await expect(page.locator("text=OK")).to_be_visible()
 
-        # Verify component/channel badges are displayed (scope to table; use .first to avoid strict-mode ambiguity)
+        # Verify component/channel badges are displayed
         await expect(page.locator("#msg_table").get_by_text("TestDevice").first).to_be_visible()
         await expect(page.locator("#msg_table").get_by_text("COM1").first).to_be_visible()
 
-        # Verify spacing between badge and message (should have a space)
-        # Check that the HTML contains the space between badge and message
+        # Verify spacing between badge and message
         table_html = await page.locator("#msg_table").inner_html()
         # The HTML should contain the badge followed by a space and the message
         assert "Host ――► DUT" in table_html
@@ -294,76 +259,41 @@ data:
         port, server_proc = server_process
         page = browser_page
 
-        run_id = f"e2e-exception-{int(time.time())}"
-        test_case_id = "E2ETest.ExceptionDisplay"
+        test_case_name = "E2ETest.ExceptionDisplay"
+        tc_id = "00000001"
 
         # Step 1: Send WebSocket messages with exception
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                # Send run_started (server generates run_id)
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False
-                })
+                client = ProtocolClient(ws)
 
-                # Wait for server response with run_id
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started()
+                run_id = response.get("run_id")
 
-                # Send test_case_started with tc_id
-                tc_id = "00000001"  # Client-generated 8-char hex ID
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": run_id,
-                    "tc_full_name": test_case_id,
-                    "tc_id": tc_id
-                })
+                await client.send_test_case_started(run_id, test_case_name, tc_id)
 
-                # Send exception message with tc_id
-                await ws.send_json({
-                    "type": "exception",
-                    "run_id": run_id,
-                    "tc_id": tc_id,
-                    "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
-                    "message": "Test assertion failed",
-                    "exception_type": "NUnit.Framework.AssertionException",
-                    "stack_trace": [
+                await client.send_exception(
+                    run_id, tc_id,
+                    message="Test assertion failed",
+                    exception_type="NUnit.Framework.AssertionException",
+                    stack_trace=[
                         "at E2ETest.ExceptionDisplay() in ExampleTests.cs:line 42",
                         "at NUnit.Framework.Internal.Commands.TestMethodCommand.Execute(TestExecutionContext context)"
                     ],
-                    "is_error": False
-                })
+                    is_error=False
+                )
 
-                # Send test_case_finished with tc_id
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": run_id,
-                    "tc_id": tc_id,
-                    "status": "failed"
-                })
-
+                await client.send_test_case_finished(run_id, tc_id, "failed")
                 await asyncio.sleep(0.5)
 
-        # Open test case log page using tc_id
+        # Open test case log page
         url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{tc_id}.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
-        # Step 3: Verify exception is displayed
-        # Wait for stack trace section (note: ID is stackTraceList, not stack_trace_list)
+        # Verify exception is displayed
         await page.wait_for_selector("#stackTraceList", timeout=5000)
-
-        # Check that exception message is visible (scope to stack trace panel to avoid strict-mode ambiguity)
         await expect(page.locator("#stackTraceList").get_by_text("Test assertion failed")).to_be_visible()
-
-        # Check that exception type is visible (scope to stack trace panel)
         await expect(page.locator("#stackTraceList").get_by_text("NUnit.Framework.AssertionException")).to_be_visible()
-
-        # Check that stack trace lines are visible
         await expect(page.locator("#stackTraceList").get_by_text("at E2ETest.ExceptionDisplay")).to_be_visible()
 
     @pytest.mark.asyncio
@@ -373,62 +303,31 @@ data:
         port, server_proc = server_process
         page = browser_page
 
-        run_id = f"e2e-is-error-{int(time.time())}"
         tc_full_name = "E2ETest.IsErrorFlag"
+        tc_id = "00000001"
 
         # Step 1: Send exception with is_error=true
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                # Send run_started (server generates run_id)
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False
-                })
+                client = ProtocolClient(ws)
 
-                # Wait for server response with run_id
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started()
+                run_id = response.get("run_id")
 
-                # Send test_case_started with tc_id
-                tc_id = "00000001"  # Client-generated 8-char hex ID
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": run_id,
-                    "tc_full_name": tc_full_name,
-                    "tc_id": tc_id
-                })
+                await client.send_test_case_started(run_id, tc_full_name, tc_id)
 
-                # Note: NUnit clients don't receive broadcast echoes, only UI clients do
-                # We need to generate tc_id ourselves or fetch it from the API
-                # For now, send messages and then fetch tc_id from the server
+                await client.send_exception(
+                    run_id, tc_id,
+                    message="Unexpected runtime error",
+                    exception_type="System.Exception",
+                    stack_trace=["at E2ETest.IsErrorFlag() in ExampleTests.cs:line 42"],
+                    is_error=True
+                )
 
-                # Send exception with is_error=true (runtime error) using tc_id
-                await ws.send_json({
-                    "type": "exception",
-                    "run_id": run_id,
-                    "tc_id": tc_id,
-                    "timestamp": datetime.now(UTC).isoformat().replace('+00:00', '') + "Z",
-                    "message": "Unexpected runtime error",
-                    "exception_type": "System.Exception",
-                    "stack_trace": ["at E2ETest.IsErrorFlag() in ExampleTests.cs:line 42"],
-                    "is_error": True
-                })
-
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": run_id,
-                    "tc_id": tc_id,
-                    "status": "failed"
-                })
-
+                await client.send_test_case_finished(run_id, tc_id, "failed")
                 await asyncio.sleep(0.5)
 
-        # Step 2: Open the page using tc_id
+        # Step 2: Open the page
         url = f"http://127.0.0.1:{port}/testRun/{run_id}/log/{tc_id}.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
@@ -461,162 +360,77 @@ data:
         port, server_proc = server_process
         page = browser_page
 
-        # Create a group hash for this test
         group_hash = f"test-group-{int(time.time())}"
 
         # Step 1: Create first run with one test case
-        first_run_id = None
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False,
-                    "group": {"hash": group_hash, "name": "Classification Test Group"}
-                })
+                client = ProtocolClient(ws)
 
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    first_run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started(
+                    group={"hash": group_hash, "name": "Classification Test Group"}
+                )
+                first_run_id = response.get("run_id")
 
-                # Add first test case
                 tc_id_1 = "00000001"
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": first_run_id,
-                    "tc_full_name": "MyNamespace.MyTests.ExistingTest",
-                    "tc_id": tc_id_1
-                })
-
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": first_run_id,
-                    "tc_id": tc_id_1,
-                    "status": "passed"
-                })
-
-                await ws.send_json({
-                    "type": "run_finished",
-                    "run_id": first_run_id
-                })
-
+                await client.send_test_case_started(first_run_id, "MyNamespace.MyTests.ExistingTest", tc_id_1)
+                await client.send_test_case_finished(first_run_id, tc_id_1, "passed")
+                await client.send_run_finished(first_run_id)
                 await asyncio.sleep(0.3)
 
         # Step 2: Create second run with two test cases (one existing, one new)
-        second_run_id = None
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False,
-                    "group": {"hash": group_hash, "name": "Classification Test Group"}
-                })
+                client = ProtocolClient(ws)
 
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    second_run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started(
+                    group={"hash": group_hash, "name": "Classification Test Group"}
+                )
+                second_run_id = response.get("run_id")
 
-                # Add existing test case
+                # Existing test case
                 tc_id_1 = "00000001"
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": second_run_id,
-                    "tc_full_name": "MyNamespace.MyTests.ExistingTest",
-                    "tc_id": tc_id_1
-                })
+                await client.send_test_case_started(second_run_id, "MyNamespace.MyTests.ExistingTest", tc_id_1)
+                await client.send_test_case_finished(second_run_id, tc_id_1, "passed")
 
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": second_run_id,
-                    "tc_id": tc_id_1,
-                    "status": "passed"
-                })
-
-                # Add NEW test case (not in first run)
+                # NEW test case
                 tc_id_2 = "00000002"
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": second_run_id,
-                    "tc_full_name": "MyNamespace.MyTests.NewTest",
-                    "tc_id": tc_id_2
-                })
+                await client.send_test_case_started(second_run_id, "MyNamespace.MyTests.NewTest", tc_id_2)
+                await client.send_test_case_finished(second_run_id, tc_id_2, "passed")
 
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": second_run_id,
-                    "tc_id": tc_id_2,
-                    "status": "passed"
-                })
-
-                await ws.send_json({
-                    "type": "run_finished",
-                    "run_id": second_run_id
-                })
-
+                await client.send_run_finished(second_run_id)
                 await asyncio.sleep(0.3)
 
         # Step 3: Open the second run's test run page
         url = f"http://127.0.0.1:{port}/testRun/{second_run_id}/index.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
-        # Wait for the tree to be built
         await page.wait_for_selector("#test-cases-list", timeout=5000)
-
-        # Wait for classifications to load (they load asynchronously)
         await asyncio.sleep(1.0)
 
-        # Step 4: Find and verify the "new" indicator exists on the NewTest node
-        # The new-tc-indicator should be present on the new test case
         new_indicator = page.locator(".new-tc-indicator")
         await expect(new_indicator).to_be_visible()
 
-        # Step 5: Click the collapse button to collapse all nodes
         collapse_btn = page.locator("#collapse-all-btn")
         await collapse_btn.click()
-
-        # Wait for collapse animation
         await asyncio.sleep(0.3)
 
-        # Step 6: Verify that the collapsed parent node shows the classification indicator
-        # When collapsed, the parent node should show the "new" indicator in its
-        # collapsed-classification-container
-        # Use .first to handle case where there may be multiple collapsed containers
         collapsed_classification = page.locator(".collapsed-classification-container .new-tc-indicator").first
         await expect(collapsed_classification).to_be_visible()
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
     async def test_status_badges_are_horizontally_aligned_in_tree_view(self, server_process, browser_page):
-        """Test that status badges are horizontally aligned in tree view.
-
-        When test case names have different lengths, all status badges should
-        still be aligned at the same X position (like a table column).
-        """
+        """Test that status badges are horizontally aligned in tree view."""
         port, server_proc = server_process
         page = browser_page
 
-        run_id = None
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False
-                })
+                client = ProtocolClient(ws)
 
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started()
+                run_id = response.get("run_id")
 
                 # Add test cases with varying name lengths
                 test_cases = [
@@ -626,48 +440,28 @@ data:
                 ]
 
                 for tc_name, tc_id in test_cases:
-                    await ws.send_json({
-                        "type": "test_case_started",
-                        "run_id": run_id,
-                        "tc_full_name": tc_name,
-                        "tc_id": tc_id
-                    })
+                    await client.send_test_case_started(run_id, tc_name, tc_id)
+                    await client.send_test_case_finished(run_id, tc_id, "passed")
 
-                    await ws.send_json({
-                        "type": "test_case_finished",
-                        "run_id": run_id,
-                        "tc_id": tc_id,
-                        "status": "passed"
-                    })
-
-                await ws.send_json({
-                    "type": "run_finished",
-                    "run_id": run_id
-                })
-
+                await client.send_run_finished(run_id)
                 await asyncio.sleep(0.3)
 
         # Open the test run page
         url = f"http://127.0.0.1:{port}/testRun/{run_id}/index.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
-        # Wait for the tree to be built
         await page.wait_for_selector("#test-cases-list", timeout=5000)
-        await asyncio.sleep(0.5)  # Wait for alignment calculation
+        await asyncio.sleep(0.5)
 
-        # Get all .tc-right elements and check their X positions
         tc_right_elements = await page.locator(".tc-right").all()
-
         assert len(tc_right_elements) >= 3, "Expected at least 3 test case badges"
 
-        # Get the left position of each .tc-right element
         left_positions = []
         for element in tc_right_elements:
             box = await element.bounding_box()
             if box:
                 left_positions.append(box['x'])
 
-        # All left positions should be the same (within a small tolerance)
         if left_positions:
             first_left = left_positions[0]
             for pos in left_positions:
@@ -676,30 +470,17 @@ data:
     @pytest.mark.asyncio
     @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
     async def test_status_badges_visible_in_list_view(self, server_process, browser_page):
-        """Test that status badges are visible and within viewport in list view.
-
-        Badges should be visible on screen (not pushed off to the right).
-        """
+        """Test that status badges are visible and within viewport in list view."""
         port, server_proc = server_process
         page = browser_page
 
-        run_id = None
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False
-                })
+                client = ProtocolClient(ws)
 
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started()
+                run_id = response.get("run_id")
 
-                # Add test cases with varying name lengths
                 test_cases = [
                     ("MyNamespace.Tests.Short", "00000001"),
                     ("MyNamespace.Tests.AVeryLongTestCaseNameThatShouldPushTheBadge", "00000002"),
@@ -707,113 +488,59 @@ data:
                 ]
 
                 for tc_name, tc_id in test_cases:
-                    await ws.send_json({
-                        "type": "test_case_started",
-                        "run_id": run_id,
-                        "tc_full_name": tc_name,
-                        "tc_id": tc_id
-                    })
+                    await client.send_test_case_started(run_id, tc_name, tc_id)
+                    await client.send_test_case_finished(run_id, tc_id, "passed")
 
-                    await ws.send_json({
-                        "type": "test_case_finished",
-                        "run_id": run_id,
-                        "tc_id": tc_id,
-                        "status": "passed"
-                    })
-
-                await ws.send_json({
-                    "type": "run_finished",
-                    "run_id": run_id
-                })
-
+                await client.send_run_finished(run_id)
                 await asyncio.sleep(0.3)
 
         # Open the test run page
         url = f"http://127.0.0.1:{port}/testRun/{run_id}/index.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
-        # Wait for the tree to be built, then switch to list view
         await page.wait_for_selector("#test-cases-list", timeout=5000)
         await asyncio.sleep(0.3)
 
-        # Click the view toggle button to switch to list view
         view_toggle = page.locator("#view-toggle-btn")
         await view_toggle.click()
+        await asyncio.sleep(0.3)
 
-        await asyncio.sleep(0.3)  # Wait for list view render
-
-        # Get viewport size
         viewport = page.viewport_size
         viewport_width = viewport['width'] if viewport else 1280
 
-        # Get all list items and check their badges are visible
         list_items = await page.locator(".list-view > li").all()
-
         assert len(list_items) >= 3, "Expected at least 3 test case items in list view"
 
-        # Check that each badge is within the viewport
         for item in list_items:
             badge = item.locator(".badge")
             box = await badge.bounding_box()
             assert box is not None, "Badge should have a bounding box"
-            # Badge should be within viewport (not off-screen to the right)
             assert box['x'] < viewport_width, f"Badge is off-screen: x={box['x']}, viewport_width={viewport_width}"
             assert box['x'] >= 0, f"Badge is off-screen to the left: x={box['x']}"
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
     async def test_tree_hover_does_not_shift_tc_right(self, server_process, browser_page):
-        """Test that hovering over a test case doesn't move the status badge.
-
-        The .tc-right element (containing badge, time, classification) should
-        stay at the same X position when hovering - no horizontal shift.
-        """
+        """Test that hovering over a test case doesn't move the status badge."""
         port, server_proc = server_process
         page = browser_page
 
-        run_id = None
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
-                await ws.send_json({
-                    "type": "run_started",
-                    "user_metadata": {},
-                    "retention_days": 1,
-                    "local_run": False
-                })
+                client = ProtocolClient(ws)
 
-                response = await ws.receive_json()
-                if response.get("type") == "run_started_response":
-                    run_id = response.get("run_id")
-                else:
-                    pytest.fail(f"Unexpected response: {response}")
+                response = await client.send_run_started()
+                run_id = response.get("run_id")
 
-                # Add a test case
-                await ws.send_json({
-                    "type": "test_case_started",
-                    "run_id": run_id,
-                    "tc_full_name": "MyNamespace.Tests.TestCase1",
-                    "tc_id": "00000001"
-                })
-
-                await ws.send_json({
-                    "type": "test_case_finished",
-                    "run_id": run_id,
-                    "tc_id": "00000001",
-                    "status": "passed"
-                })
-
-                await ws.send_json({
-                    "type": "run_finished",
-                    "run_id": run_id
-                })
-
+                await client.send_test_case_started(run_id, "MyNamespace.Tests.TestCase1", "00000001")
+                await client.send_test_case_finished(run_id, "00000001", "passed")
+                await client.send_run_finished(run_id)
                 await asyncio.sleep(0.3)
 
         # Open the test run page
         url = f"http://127.0.0.1:{port}/testRun/{run_id}/index.html"
         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
-        # Wait for tree to be built
         await page.wait_for_selector("#test-cases-list", timeout=5000)
         await asyncio.sleep(0.3)
 

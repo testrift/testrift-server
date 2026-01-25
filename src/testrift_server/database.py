@@ -897,8 +897,16 @@ class TestResultsDatabase:
                 # Calculate classification based on previous runs only
                 classification = self._calculate_classification(current_status, history)
 
-                # Determine if TC is new
-                is_new = group_hash and tc_id not in previous_tc_ids and len(previous_tc_ids) > 0
+                # Determine if TC is new (wasn't in previous run)
+                # Returns True if:
+                # - We have a group_hash (so we can compare runs)
+                # - There were test cases in the previous run
+                # - This TC was not in the previous run
+                is_new = bool(
+                    group_hash
+                    and len(previous_tc_ids) > 0
+                    and tc_id not in previous_tc_ids
+                )
 
                 result[tc_id] = {
                     'classification': classification,

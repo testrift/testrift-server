@@ -5,17 +5,20 @@ TestRunData and TestCaseData classes for managing test run state.
 """
 
 import asyncio
-import json
 import logging
 from datetime import datetime, UTC
 
 import aiofiles
+import msgpack
 
 from .utils import (
     get_run_meta_path,
     get_case_log_path,
     get_case_stack_path,
-    read_jsonl,
+    get_merged_log_path,
+    read_mplog,
+    read_meta_msgpack,
+    write_mplog_entries_async,
     normalize_group_payload,
     compute_group_hash,
     TC_ID_FIELD,
@@ -46,6 +49,8 @@ class TestRunData:
         self.test_cases_by_tc_id: dict[str, 'TestCaseData'] = {}  # tc_id (hash) -> TestCaseData
         self.logs = {}  # tc_full_name -> list of logs entries
         self.last_update = datetime.now(UTC)
+        # String table for interned component/channel strings (id -> string)
+        self.string_table: dict[int, str] = {}
 
     def update_last(self):
         """Update the last activity timestamp."""
@@ -68,6 +73,10 @@ class TestRunData:
         }
         if self.abort_reason:
             result["abort_reason"] = self.abort_reason
+        # Include string table for interned component/channel strings
+        if self.string_table:
+            # Convert int keys to strings for JSON compatibility
+            result["string_table"] = {str(k): v for k, v in self.string_table.items()}
         return result
 
     @classmethod
@@ -91,26 +100,23 @@ class TestRunData:
         run.end_time = meta.get("end_time", "")
         run.test_cases = {tc_full_name: TestCaseData.from_dict(run, tc_full_name, tc_meta) for tc_full_name, tc_meta in meta.get("test_cases", {}).items()}
         run.test_cases_by_tc_id = {tc.tc_id: tc for tc in run.test_cases.values() if getattr(tc, "tc_id", None)}
+        # Load string table for interned component/channel strings
+        string_table_raw = meta.get("string_table", {})
+        run.string_table = {int(k): v for k, v in string_table_raw.items()}
         return run
 
     @staticmethod
     def load_from_disk(run_id):
         """Load a test run from disk by its run_id."""
-        meta_path = get_run_meta_path(run_id)
-        if not meta_path.exists():
+        meta = read_meta_msgpack(run_id)
+        if meta is None:
             return None
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
         return TestRunData.from_dict(run_id, meta)
 
 
 class TestCaseData:
     """Represents a test case within a test run."""
     __test__ = False  # Tell pytest to ignore this class
-
-    _ALLOWED_LOG_FIELDS = {"timestamp", "message", "component", "channel", "dir", "phase"}
-    _ALLOWED_PHASE_VALUES = {"teardown"}
-    _ALLOWED_DIR_VALUES = {"tx", "rx"}
 
     def __init__(self, run, tc_full_name, meta={}):
         self.run = run
@@ -123,111 +129,87 @@ class TestCaseData:
         self.stack_traces = meta.get("stack_traces", [])
         self.subscribers = []
 
+        # Offset and count for merged log file (set after run finishes)
+        self.log_offset = meta.get("log_offset")
+        self.log_count = meta.get("log_count", 0)
+        self.stack_count = meta.get("stack_count", 0)
+
         # tc_id MUST be in meta - it should have been generated once when test case started
-        # and stored in meta.json. If it's missing, that's a bug.
+        # and stored in meta. If it's missing, that's a bug.
         if TC_ID_FIELD not in meta:
             raise ValueError(f"tc_id missing in meta for test case {tc_full_name}. tc_id must be generated once and stored.")
         self.tc_id = meta[TC_ID_FIELD]
 
-        # Ensure persisted stack traces are loaded even if meta.json lacked them
-        stack_path = get_case_stack_path(self.run.id, tc_id=self.tc_id)
-        if stack_path.exists():
-            try:
-                file_traces = read_jsonl(stack_path)
-                if file_traces:
-                    self.stack_traces = file_traces
-            except Exception as e:
-                logger.error(f"Failed to load stack traces for {self.id}: {e}")
-
-    @classmethod
-    def _sanitize_log_entry(cls, entry: dict) -> dict | None:
-        """
-        Whitelist filter for log entries so random extra keys don't leak into persisted JSONL or UI.
-        Allowed keys: timestamp, message, component, channel, dir, phase
-        """
-        if not isinstance(entry, dict):
-            return None
-
-        timestamp = entry.get("timestamp")
-        message = entry.get("message")
-        # Require timestamp, but allow empty/whitespace messages (they'll be filtered by JS if needed)
-        if not timestamp:
-            return None
-        # Allow None/empty message - convert to empty string
-        if message is None:
-            message = ""
-
-        out = {
-            "timestamp": timestamp,
-            "message": message,
-            "component": entry.get("component", ""),
-            "channel": entry.get("channel", ""),
-        }
-
-        direction = entry.get("dir")
-        if isinstance(direction, str):
-            d = direction.lower()
-            if d in cls._ALLOWED_DIR_VALUES:
-                out["dir"] = d
-
-        phase = entry.get("phase")
-        if isinstance(phase, str):
-            p = phase.strip().lower()
-            if p in cls._ALLOWED_PHASE_VALUES:
-                out["phase"] = p
-
-        return out
+        # Load stack traces from individual file if run is still in progress
+        # After run finishes, data is in merged file and accessed via offset
+        if self.log_offset is None:
+            stack_path = get_case_stack_path(self.run.id, tc_id=self.tc_id)
+            if stack_path.exists():
+                try:
+                    file_traces = read_mplog(stack_path)
+                    if file_traces:
+                        self.stack_traces = file_traces
+                except Exception as e:
+                    logger.error(f"Failed to load stack traces for {self.id}: {e}")
 
     def to_dict(self):
         """Serialize the test case to a dictionary."""
-        return {
+        result = {
             TC_ID_FIELD: self.tc_id,
             TC_FULL_NAME_FIELD: self.id,
             "status": self.status,
             "start_time": self.start_time,
             "end_time": self.end_time,
-            "logs": self.logs,
-            "stack_traces": self.stack_traces,
+            # Note: logs and stack_traces are stored in merged file, not in meta
             # Note: subscribers are not serialized
         }
+        # Include offset info if available (after run finishes)
+        if self.log_offset is not None:
+            result["log_offset"] = self.log_offset
+            result["log_count"] = self.log_count
+            result["stack_count"] = self.stack_count
+        return result
 
     @classmethod
     def from_dict(cls, run, tc_full_name, meta):
         """Create a TestCaseData instance from a dictionary."""
         return cls(run, tc_full_name, meta)
 
-    async def add_log_entries(self, entries):
-        """Add log entries to this test case using async file I/O."""
+    async def add_log_entries(self, raw_entries):
+        """Add log entries to this test case using async file I/O.
+
+        raw_entries contains compact protocol entries as received (short keys, ms timestamps).
+        These are stored as-is and sent to UI which decodes them.
+        """
+        if not raw_entries:
+            return
+
         log_path = get_case_log_path(self.run.id, tc_id=self.tc_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Sanitize all entries first
-        sanitized_entries = []
+        # Validate entries have required fields (compact keys: 'ts' for timestamp)
+        valid_entries = []
         skipped_count = 0
-        for entry in entries:
-            log_entry = self._sanitize_log_entry(entry)
-            if not log_entry:
+        for entry in raw_entries:
+            if not isinstance(entry, dict) or 'ts' not in entry:
                 skipped_count += 1
                 continue
-            sanitized_entries.append(log_entry)
+            valid_entries.append(entry)
 
         if skipped_count > 0:
-            logger.warning(f"Skipped {skipped_count} log entries for {self.tc_id} (missing timestamp or message)")
+            logger.warning(f"Skipped {skipped_count} log entries for {self.tc_id} (missing timestamp)")
 
-        if not sanitized_entries:
+        if not valid_entries:
             return
 
-        # Write all entries in one async operation
-        lines = [json.dumps(entry) + "\n" for entry in sanitized_entries]
-        async with aiofiles.open(log_path, "a", encoding="utf-8") as f:
-            await f.writelines(lines)
+        await write_mplog_entries_async(log_path, valid_entries)
 
-        # Update in-memory logs and notify subscribers
-        self.logs.extend(sanitized_entries)
+        # Update in-memory logs (keep compact format) and notify subscribers
+        self.logs.extend(valid_entries)
 
-        # Batch notify subscribers
+        # Batch notify subscribers (send raw compact entries)
         if self.subscribers:
-            for entry in sanitized_entries:
+            for entry in valid_entries:
                 for subscriber in self.subscribers:
                     await subscriber.put(entry)
 
@@ -262,16 +244,15 @@ class TestCaseData:
         stack_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Append to disk file using async I/O
-            async with aiofiles.open(stack_path, "a", encoding="utf-8") as f:
-                await f.write(json.dumps(entry) + "\n")
+            # Append to disk file using async I/O with MessagePack
+            await write_mplog_entries_async(stack_path, [entry])
             logger.info(f"Persisted stack trace to {stack_path}")
         except Exception as persist_error:
             logger.error(f"Failed to persist stack trace for {self.id}: {persist_error}")
 
         try:
             # Keep authoritative list synced by re-reading from disk
-            self.stack_traces = read_jsonl(stack_path)
+            self.stack_traces = read_mplog(stack_path)
         except Exception as reload_error:
             logger.error(f"Failed to reload stack traces for {self.id}: {reload_error}")
             self.stack_traces.append(entry)
@@ -282,16 +263,67 @@ class TestCaseData:
             await subscriber.put(payload)
 
     def load_log_from_disk(self) -> bool:
-        """Load log entries from disk into memory."""
+        """Load log entries from disk into memory.
+
+        For finished runs, reads from merged log file using offset.
+        For running test cases, reads from individual log file.
+        Entries are kept in compact protocol format (short keys, ms timestamps).
+        """
         self.logs = []
+        self.stack_traces = []
+
+        # Check if we should read from merged file (run finished)
+        if self.log_offset is not None:
+            merged_path = get_merged_log_path(self.run.id)
+            if merged_path.exists():
+                return self._load_from_merged_file(merged_path)
+
+        # Otherwise read from individual log file (run in progress)
         log_path = get_case_log_path(self.run.id, tc_id=self.tc_id)
         if not log_path.exists():
             return False
 
-        raw_logs = read_jsonl(log_path)
-        for entry in raw_logs:
-            log_entry = self._sanitize_log_entry(entry)
-            if not log_entry:
-                continue
-            self.logs.append(log_entry)
+        # Keep entries in compact format - UI will decode them
+        raw_logs = read_mplog(log_path)
+        self.logs.extend(raw_logs)
         return True
+
+    def _load_from_merged_file(self, merged_path) -> bool:
+        """Load logs and stack traces from merged .mplog file using stored offsets.
+
+        Entries are kept in compact protocol format.
+        """
+        import struct
+
+        try:
+            with open(merged_path, "rb") as f:
+                f.seek(self.log_offset)
+
+                # Read log entries (keep compact format)
+                for _ in range(self.log_count):
+                    length_bytes = f.read(4)
+                    if len(length_bytes) < 4:
+                        break
+                    length = struct.unpack(">I", length_bytes)[0]
+                    data = f.read(length)
+                    if len(data) < length:
+                        break
+                    entry = msgpack.unpackb(data, raw=False)
+                    self.logs.append(entry)
+
+                # Read stack trace entries
+                for _ in range(self.stack_count):
+                    length_bytes = f.read(4)
+                    if len(length_bytes) < 4:
+                        break
+                    length = struct.unpack(">I", length_bytes)[0]
+                    data = f.read(length)
+                    if len(data) < length:
+                        break
+                    entry = msgpack.unpackb(data, raw=False)
+                    self.stack_traces.append(entry)
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load from merged file for {self.id}: {e}")
+            return False

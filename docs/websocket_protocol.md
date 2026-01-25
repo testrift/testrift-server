@@ -1,6 +1,6 @@
 # WebSocket Protocol Documentation
 
-This document describes the WebSocket protocol used for communication between NUnit test clients and the server.
+This document describes the optimized WebSocket protocol used for communication between NUnit test clients and the server.
 
 ## Connection
 
@@ -11,575 +11,366 @@ This endpoint is used by test runners (for example the NUnit plugin) to report r
 **UI/Web log endpoints (server → browser only):**
 
 - `ws://localhost:8080/ws/ui` – pushes run and test-case status updates to the web UI
-- `ws://localhost:8080/ws/logs/{run_id}/{test_case_id}` – streams individual log entries (and related events) for a single test case to the test case log page
+- `ws://localhost:8080/ws/logs/{run_id}/{tc_id}` – streams individual log entries for a single test case
 
-Unless otherwise noted, the message types below describe what **clients send to `/ws/nunit`**.
+## Message Encoding
 
-## High-Performance Batching
+All WebSocket messages use **MessagePack** binary encoding with optimizations:
 
-For high-throughput scenarios with many parallel test cases and heavy logging, clients should use the **`batch`** message type. This reduces WebSocket frame overhead by combining multiple events into a single message.
+1. **Numeric message types** instead of string type names
+2. **Millisecond timestamps** (int64) instead of ISO 8601 strings
+3. **Numeric status/direction/phase codes** instead of strings
+4. **Short field keys** (1-2 characters) instead of full names
+5. **String interning** for repeated component/channel names
 
-### Batch Message
+Messages are sent as binary WebSocket frames (not text frames).
 
-**Type:** `batch`
+## Protocol Constants
 
-**Purpose:** Combines multiple events (test case starts, finishes, log batches, exceptions) into a single WebSocket message for optimal performance.
+### Message Types (`t` field)
 
-**Fields:**
-- `type`: `"batch"`
-- `run_id`: `string` - The run ID all events belong to
-- `events`: `array` - Array of event objects, each with an `event_type` field
+| Code | Name | Description |
+|------|------|-------------|
+| 1 | run_started | Initiates a new test run |
+| 2 | run_started_response | Server response with run_id |
+| 3 | test_case_started | Test case begins execution |
+| 4 | log_batch | Batch of log entries |
+| 5 | exception | Exception/stack trace report |
+| 6 | test_case_finished | Test case completed |
+| 7 | run_finished | Test run completed |
+| 8 | batch | Container for multiple events |
+| 9 | heartbeat | Keep-alive message |
 
-**Event Types within a batch:**
-- `test_case_started` - Same fields as standalone message (minus `type` and `run_id`)
-- `test_case_finished` - Same fields as standalone message (minus `type` and `run_id`)
-- `log_batch` - Same fields as standalone message (minus `type` and `run_id`)
-- `exception` - Same fields as standalone message (minus `type` and `run_id`)
+### Status Codes (`s` field)
 
-**Example:**
-```json
-{
-  "type": "batch",
-  "run_id": "run-abc123",
-  "events": [
-    {
-      "event_type": "test_case_started",
-      "tc_full_name": "MyTests.Test1",
-      "tc_id": "0-1001",
-      "tc_meta": {"status": "running", "start_time": "2025-01-25T10:00:00.000Z"}
-    },
-    {
-      "event_type": "log_batch",
-      "tc_id": "0-1000",
-      "entries": [
-        {"timestamp": "2025-01-25T10:00:00.100Z", "message": "Log 1", "component": "Test"},
-        {"timestamp": "2025-01-25T10:00:00.200Z", "message": "Log 2", "component": "Test"}
-      ]
-    },
-    {
-      "event_type": "test_case_finished",
-      "tc_id": "0-1000",
-      "status": "passed"
-    },
-    {
-      "event_type": "exception",
-      "tc_id": "0-1002",
-      "timestamp": "2025-01-25T10:00:00.300Z",
-      "message": "Assertion failed",
-      "exception_type": "NUnit.Framework.AssertionException",
-      "stack_trace": ["at MyTests.Test3() in Test.cs:line 42"],
-      "is_error": false
-    }
-  ]
-}
+| Code | Name |
+|------|------|
+| 1 | running |
+| 2 | passed |
+| 3 | failed |
+| 4 | skipped |
+| 5 | aborted |
+| 6 | finished |
+
+### Direction Codes (`d` field)
+
+| Code | Name | Description |
+|------|------|-------------|
+| 1 | tx | Transmit (host → device) |
+| 2 | rx | Receive (device → host) |
+
+### Phase Codes (`p` field)
+
+| Code | Name |
+|------|------|
+| 1 | teardown |
+
+### Field Key Reference
+
+| Key | Full Name | Type | Description |
+|-----|-----------|------|-------------|
+| `t` | type | int | Message type code |
+| `r` | run_id | string | Run identifier |
+| `n` | run_name | string | Human-readable run name |
+| `s` | status | int | Status code |
+| `ts` | timestamp | int64 | Milliseconds since Unix epoch |
+| `f` | tc_full_name | string | Test case full name |
+| `i` | tc_id | string | Test case ID |
+| `m` | message | string | Log message |
+| `c` | component | int/array | Component (ID or [ID, name]) |
+| `ch` | channel | int/array | Channel (ID or [ID, name]) |
+| `d` | dir | int | Direction code |
+| `p` | phase | int | Phase code |
+| `e` | entries | array | Log entries |
+| `ev` | events | array | Batch events |
+| `et` | event_type | int | Event type in batch |
+| `xt` | exception_type | string | Exception type name |
+| `st` | stack_trace | array | Stack trace lines |
+| `ie` | is_error | bool | Is infrastructure error |
+| `md` | user_metadata | object | User metadata |
+| `g` | group | object | Group info |
+| `rd` | retention_days | int | Days to retain data |
+| `lr` | local_run | bool | Local run flag |
+| `err` | error | string | Error message |
+| `ru` | run_url | string | Run page URL |
+| `gu` | group_url | string | Group page URL |
+| `gh` | group_hash | string | Group hash |
+
+## String Interning
+
+Component and channel names are **interned** to avoid sending the same string repeatedly:
+
+- **First occurrence:** `[id, "string_value"]` - registers the string with an ID
+- **Subsequent uses:** `id` - just the integer ID
+
+Example:
+```
+Entry 1: {"c": [1, "Tester5"], "ch": [1, "COM91"], ...}  // First occurrence
+Entry 2: {"c": 1, "ch": 1, ...}                          // ID reference
+Entry 3: {"c": 1, "ch": [2, "COM92"], ...}               // Same component, new channel
 ```
 
-**Batching Guidelines:**
-- Send batches every 200-300ms or when accumulated data exceeds ~128KB
-- Always flush remaining events before sending `test_case_finished` for a test case
-- The server processes events in array order, maintaining causality
-- Individual message types (`test_case_started`, `log_batch`, etc.) are still supported for simple use cases
-
-### Heartbeat Message
-
-**Type:** `heartbeat`
-
-**Purpose:** Keeps the WebSocket connection alive during periods of inactivity. The server has a 30-second timeout for idle connections, so clients should send heartbeats every 10 seconds if no other messages have been sent.
-
-**Fields:**
-- `type`: `"heartbeat"`
-- `run_id`: The current run ID
-
-**Example:**
-```json
-{
-  "type": "heartbeat",
-  "run_id": "abc123def456"
-}
-```
-
-The server acknowledges heartbeats by updating its activity timestamp. No response is sent to the client.
-
-## Message Format
-
-All messages are JSON objects with the following structure:
-
-```json
-{
-  "type": "message_type",
-  "run_id": "unique-run-identifier",
-  // ... other fields specific to message type
-}
-```
+The string table is per-connection and managed by the client. The server tracks received mappings to decode messages.
 
 ## Message Types
 
 ### 1. Run Started
 
-**Type:** `run_started`
+**Type:** `1` (run_started)
 
-**Purpose:** Initiates a new test run. The server generates the `run_id` and sends it back in a `run_started_response` message.
-
-**Fields:**
-- `type`: `"run_started"`
-- `run_id`: `string` (optional) - Custom run ID for this test run. If provided, the server will validate that:
-  - The run ID is URL-safe (can use percent encoding like `%2F` for special characters)
-  - The run ID does not contain a raw slash character (`/`)
-  - The run ID is not already in use (not in database or active runs)
-  - If validation fails, the server returns an error in `run_started_response`
-  - If omitted, the server generates a unique run ID automatically
-- `run_name`: `string` (optional) - Human-readable name for the test run, displayed in the UI instead of `run_id`
-- `user_metadata`: `object` - Optional metadata about the test run
-- `group`: `object` (optional) - Information used to group runs together
-  - `name`: `string` - Display name for the group (for example a product or pipeline)
-  - `metadata`: `object` - Key/value map describing the group. Each key maps to an object with `value` and optional `url`, identical to `user_metadata`.
-- `retention_days`: `number` - Optional number of days to retain the test data. If omitted, the server uses its configured default (`default_retention_days`).
-- `local_run`: `boolean` - Optional flag indicating if this is a local run
-- `start_time`: `string` - Optional ISO 8601 timestamp for when the run started. If omitted, the server uses the time it receives the message.
-
-**Example (with custom run_id):**
-```json
-{
-  "type": "run_started",
-  "run_id": "nightly-build-1234",
-  "run_name": "Nightly Build #1234",
-  "user_metadata": {
-    "DUT": {"value": "TestDevice-001", "url": "https://device-manager.example.com/devices/TestDevice-001"},
-    "Firmware": {"value": "release/v2.1.0", "url": null},
-    "TestSystem": {"value": "nuts-v2", "url": "https://nuts.example.com/dashboard"}
-  },
-  "group": {
-    "name": "Product Phoenix",
-    "metadata": {
-      "Branch": {"value": "release/v2.1.0", "url": "https://git.example.com/repos/phoenix/tree/release/v2.1.0"},
-      "Environment": {"value": "staging"}
-    }
-  },
-  "retention_days": 2,
-  "local_run": false
-}
-```
-
-**Example (server-generated run_id):**
-```json
-{
-  "type": "run_started",
-  "run_name": "Nightly Build #1234",
-  "user_metadata": {
-    "DUT": {"value": "TestDevice-001", "url": "https://device-manager.example.com/devices/TestDevice-001"}
-  },
-  "retention_days": 2,
-  "local_run": false
-}
-```
-
-**Notes:**
-- If `run_id` is provided, the server validates it and returns an error in `run_started_response` if invalid
-- If `run_id` is omitted, the server generates a unique `run_id` and sends it back in `run_started_response`
-- If `run_name` is omitted, the server generates one from the current timestamp
-- If `run_name` already exists, the server appends a counter (e.g., "My Run" → "My Run 1")
-
-When a `group` is provided the server computes a deterministic hash from the group name plus each metadata name/value pair. That hash appears in group-specific URLs (`/groups/<hash>`, `/analyzer?group=<hash>`, `/matrix?group=<hash>`) so the UI and APIs can focus on that subset of runs.
-
-### 1a. Run Started Response (Server → Client)
-
-**Type:** `run_started_response`
-
-**Purpose:** Server response to `run_started`, providing the server-generated `run_id`, final `run_name`, and URLs. The client must use this `run_id` for all subsequent messages.
+Initiates a new test run.
 
 **Fields:**
-- `type`: `"run_started_response"`
-- `run_id`: `string` - Unique identifier for the test run (server-generated if not provided by client, or the validated client-provided run_id)
-- `run_name`: `string` - Final run name (may have counter appended if duplicate)
-- `run_url`: `string` - Relative URL path to the test run page (e.g., `/testRun/{run_id}/index.html`)
-- `group_hash`: `string` (optional) - Hash of the group, present only if the run belongs to a group
-- `group_url`: `string` (optional) - Relative URL path to the group runs page (e.g., `/groups/{group_hash}`)
-- `error`: `string` (optional) - Error message if the run_id validation failed. If present, the run was not started and the client should not proceed with sending test case messages.
+- `t`: `1`
+- `r`: (optional) Custom run ID
+- `n`: (optional) Human-readable run name
+- `md`: (optional) User metadata object
+- `g`: (optional) Group object with `n` (name) and `md` (metadata)
+- `rd`: (optional) Retention days
+- `lr`: (optional) Local run flag
+- `ts`: (optional) Start timestamp in ms
 
-**Notes:**
-- If `run_name` was not provided in `run_started`, the server generates one from the current timestamp (e.g., "Run 2025-01-15 14:30:00")
-- If a `run_name` already exists, the server appends a counter (e.g., "My Run" → "My Run 1" → "My Run 2")
-
-**Example (success):**
+**Example (MessagePack structure shown as JSON for readability):**
 ```json
 {
-  "type": "run_started_response",
-  "run_id": "a1b2c3d4",
-  "run_name": "Nightly Build #1234",
-  "run_url": "/testRun/a1b2c3d4/index.html",
-  "group_hash": "abc123def456",
-  "group_url": "/groups/abc123def456"
+  "t": 1,
+  "n": "Nightly Build #1234",
+  "md": {
+    "DUT": {"value": "TestDevice-001", "url": "https://example.com/device/1"}
+  },
+  "g": {
+    "n": "Product Phoenix",
+    "md": {"Branch": {"value": "main"}}
+  },
+  "rd": 7,
+  "lr": false
 }
 ```
 
-**Example (error - invalid run_id):**
-```json
-{
-  "type": "run_started_response",
-  "error": "Run ID 'nightly/build-1234' cannot contain raw slash character (use percent encoding %2F if needed)"
-}
-```
+### 2. Run Started Response (Server → Client)
 
-### 2. Test Case Started
-
-**Type:** `test_case_started`
-
-**Purpose:** Indicates that a test case has begun execution
+**Type:** `2` (run_started_response)
 
 **Fields:**
-- `type`: `"test_case_started"`
-- `run_id`: `string` - The run ID this test case belongs to
-- `tc_full_name`: `string` - Full name/identifier for the test case (e.g., namespace.class.method)
-- `tc_id`: `string` - Test case ID (typically NUnit test ID, e.g., "0-1009"). The client should use a unique identifier for each test case instance. The server validates that tc_id contains only alphanumeric characters and hyphens (a-z, A-Z, 0-9, -).
-- `tc_meta`: `object` (optional) - Additional metadata about the test case. Common fields:
-  - `status`: `string` - Typically `"running"` when a test case starts
-  - `start_time`: `string` - ISO 8601 timestamp when the test case started
-
-**Note:** The `tc_id` should be a unique identifier for the test case (e.g., NUnit test ID like "0-1009"). The server uses this `tc_id` for URL routing and file storage. All subsequent messages for this test case (log_batch, exception, test_case_finished) must use the same `tc_id` value.
+- `t`: `2`
+- `r`: Run ID (server-assigned or validated)
+- `n`: Final run name
+- `ru`: Run URL path
+- `gh`: (optional) Group hash
+- `gu`: (optional) Group URL
+- `err`: (optional) Error message if validation failed
 
 **Example:**
 ```json
 {
-  "type": "test_case_started",
-  "run_id": "run-tree-test-174600",
-  "tc_full_name": "AuthenticationTest.LoginSuccess",
-  "tc_id": "0-1009",
-  "tc_meta": {
-    "status": "running",
-    "start_time": "2025-09-20T15:46:05.800000Z"
-  }
+  "t": 2,
+  "r": "a1b2c3d4",
+  "n": "Nightly Build #1234",
+  "ru": "/testRun/a1b2c3d4/index.html"
 }
 ```
 
-### 3. Log Batch
+### 3. Test Case Started
 
-**Type:** `log_batch`
-
-**Purpose:** Sends log entries for a test case
+**Type:** `3` (test_case_started)
 
 **Fields:**
-- `type`: `"log_batch"`
-- `run_id`: `string` - The run ID this log batch belongs to
-- `tc_id`: `string` - The test case ID (e.g., "0-1009")
-- `entries`: `array` - Array of log entries
-- `count`: `number` (optional) - Number of log entries in this batch. If omitted, the server derives the count from the length of `entries`.
+- `t`: `3`
+- `r`: Run ID
+- `f`: Test case full name
+- `i`: Test case ID
+- `s`: Status code (typically `1` for running)
+- `ts`: Start timestamp in ms
+
+**Example:**
+```json
+{
+  "t": 3,
+  "r": "a1b2c3d4",
+  "f": "MyTests.AuthTest.LoginSuccess",
+  "i": "0-1009",
+  "s": 1,
+  "ts": 1737820282736
+}
+```
+
+### 4. Log Batch
+
+**Type:** `4` (log_batch)
+
+**Fields:**
+- `t`: `4`
+- `r`: Run ID
+- `i`: Test case ID
+- `e`: Array of log entries
 
 **Log Entry Structure:**
-- `timestamp`: `string` - ISO 8601 timestamp
-- `message`: `string` - The log message
-- `component`: `string` - Optional component name (first-level grouping)
-- `channel`: `string` - Optional channel identifier (second-level grouping, child of component)
-- `dir`: `string` (optional) - Logical direction of the underlying communication (only included if not null):
-  - `"tx"` – message sent from the local side (host → component)
-  - `"rx"` – message received by the local side (component → host)
-- `phase`: `string` (optional) - Execution phase marker (e.g., `"teardown"`). Only included if not null.
-
-**Note:** Optional fields (`dir`, `phase`) are omitted from the JSON if they are null, reducing message size.
+- `ts`: Timestamp in ms (int64)
+- `m`: Message (string)
+- `c`: Component (int ID or [ID, name])
+- `ch`: Channel (int ID or [ID, name])
+- `d`: Direction (int: 1=tx, 2=rx)
+- `p`: Phase (int: 1=teardown)
 
 **Example:**
 ```json
 {
-  "type": "log_batch",
-  "run_id": "run-tree-test-174600",
-  "tc_id": "0-1009",
-  "count": 2,
-  "entries": [
-    {
-      "timestamp": "2025-09-20T15:46:05.858941Z",
-      "message": "AT+USYCI?",
-      "component": "Tester5",
-      "channel": "COM91",
-      "dir": "tx"
-    },
-    {
-      "timestamp": "2025-09-20T15:46:05.859941Z",
-      "message": "AT+USYCI?",
-      "component": "Tester5",
-      "channel": "COM91",
-      "dir": "rx"
-    }
+  "t": 4,
+  "r": "a1b2c3d4",
+  "i": "0-1009",
+  "e": [
+    {"ts": 1737820282736, "m": "AT+USYCI?", "c": [1, "Tester5"], "ch": [1, "COM91"], "d": 1},
+    {"ts": 1737820282737, "m": "+USYCI: 1", "c": 1, "ch": 1, "d": 2}
   ]
 }
 ```
 
-### 4. Exception
+### 5. Exception
 
-**Type:** `exception`
-
-**Purpose:** Reports an exception for a specific test case. Exceptions are typically sent when a test fails, but the API can also be used explicitly from test code to record diagnostic information.
+**Type:** `5` (exception)
 
 **Fields:**
-- `type`: `"exception"`
-- `run_id`: `string` - The run ID this exception belongs to
-- `tc_id`: `string` - The test case ID (e.g., "0-1009")
-- `timestamp`: `string` - ISO 8601 timestamp indicating when the exception was captured
-- `message`: `string` - Optional exception or failure message
-- `exception_type`: `string` - Optional exception type (e.g., `System.InvalidOperationException`)
-- `stack_trace`: `array` - List of strings representing the full multiline stack trace (one line per entry)
-- `is_error`: `boolean` (optional) - `true` for unexpected/unhandled errors (infrastructure/runtime issues), `false` for normal assertion/test failures
+- `t`: `5`
+- `r`: Run ID
+- `i`: Test case ID
+- `ts`: Timestamp in ms
+- `m`: Exception message
+- `xt`: Exception type
+- `st`: Stack trace (array of strings)
+- `ie`: Is error (true for infrastructure errors)
 
 **Example:**
 ```json
 {
-  "type": "exception",
-  "run_id": "run-tree-test-174600",
-  "tc_id": "0-1010",
-  "timestamp": "2025-09-20T15:46:05.912Z",
-  "message": "Expected true but was false",
-  "exception_type": "NUnit.Framework.AssertionException",
-  "stack_trace": [
-    "at AuthenticationTest.LoginFailure() in ExampleTests.cs:line 42"
-  ],
-  "is_error": false
+  "t": 5,
+  "r": "a1b2c3d4",
+  "i": "0-1010",
+  "ts": 1737820282800,
+  "m": "Expected true but was false",
+  "xt": "NUnit.Framework.AssertionException",
+  "st": ["at MyTests.LoginTest() in Test.cs:line 42"],
+  "ie": false
 }
 ```
 
-### 5. Test Case Finished
+### 6. Test Case Finished
 
-**Type:** `test_case_finished`
-
-**Purpose:** Indicates that a test case has completed execution
+**Type:** `6` (test_case_finished)
 
 **Fields:**
-- `type`: `"test_case_finished"`
-- `run_id`: `string` - The run ID this test case belongs to
-- `tc_id`: `string` - The test case ID (e.g., "0-1009")
-- `status`: `string` - Test status (see Valid Status Values below)
-
-**Valid Status Values for `test_case_finished`:**
-- `"passed"` - Test passed successfully
-- `"failed"` - Test failed
-- `"skipped"` - Test was skipped
-- `"aborted"` - Test was aborted (e.g., due to timeout or connection loss)
+- `t`: `6`
+- `r`: Run ID
+- `i`: Test case ID
+- `s`: Status code (2=passed, 3=failed, 4=skipped, 5=aborted)
+- `ts`: End timestamp in ms
 
 **Example:**
 ```json
 {
-  "type": "test_case_finished",
-  "run_id": "run-tree-test-174600",
-  "tc_id": "0-1009",
-  "status": "passed"
+  "t": 6,
+  "r": "a1b2c3d4",
+  "i": "0-1009",
+  "s": 2,
+  "ts": 1737820283000
 }
 ```
 
-### 6. Run Finished
+### 7. Run Finished
 
-**Type:** `run_finished`
-
-**Purpose:** Indicates that the entire test run has completed
+**Type:** `7` (run_finished)
 
 **Fields:**
-- `type`: `"run_finished"`
-- `run_id`: `string` - The run ID
-- `status`: `string` - Run status (typically `"finished"`)
+- `t`: `7`
+- `r`: Run ID
+- `s`: Status code (typically `6` for finished)
+- `ts`: End timestamp in ms
 
 **Example:**
 ```json
 {
-  "type": "run_finished",
-  "run_id": "run-tree-test-174600",
-  "status": "finished"
+  "t": 7,
+  "r": "a1b2c3d4",
+  "s": 6,
+  "ts": 1737820290000
 }
 ```
 
-## UI and Log Streaming Channels (Server → Browser)
+### 8. Batch
 
-These channels are used only between the server and the browser-based UI. Test clients do **not** connect to them.
+**Type:** `8` (batch)
 
-### 1. Log Stream (`/ws/logs/{run_id}/{tc_id}`)
+Container for multiple events to reduce WebSocket frame overhead.
 
-When the test case log page connects to:
+**Fields:**
+- `t`: `8`
+- `r`: Run ID
+- `ev`: Array of events (each with `et` for event type)
 
-- `ws://<host>:<port>/ws/logs/{run_id}/{tc_id}`
+**Event Types in Batch (`et` field):**
+- 3 = test_case_started
+- 4 = log_batch
+- 5 = exception
+- 6 = test_case_finished
 
-**Note:** The `{tc_id}` in the URL is the test case ID provided by the client (e.g., NUnit test ID like "0-1009").
-
-the server sends:
-
-- **Existing log entries first**, one WebSocket message per entry
-- **New log entries** as they arrive, again one entry per message
-
-**Normal log entry format (no `type` field):**
-
+**Example:**
 ```json
 {
-  "timestamp": "2025-09-20T15:46:05.858941Z",
-  "message": "AT+USYCI?",
-  "dir": "tx",
-  "component": "Tester5",
-  "channel": "COM91"
+  "t": 8,
+  "r": "a1b2c3d4",
+  "ev": [
+    {"et": 3, "f": "MyTests.Test1", "i": "0-1001", "s": 1, "ts": 1737820282736},
+    {"et": 4, "i": "0-1000", "e": [{"ts": 1737820282740, "m": "Log 1", "c": 1}]},
+    {"et": 6, "i": "0-1000", "s": 2, "ts": 1737820282800}
+  ]
 }
 ```
 
-Log entries may also include:
+### 9. Heartbeat
 
-- `phase`: `string` (optional) - For example `"teardown"` when the entry occurred during teardown.
+**Type:** `9` (heartbeat)
 
-**Special messages on this channel:**
+**Fields:**
+- `t`: `9`
+- `r`: Run ID
 
-- Error:
-
-  ```json
-  {
-    "type": "error",
-    "message": "Test run not found"
-  }
-  ```
-
-- Exception push (fields correspond to the `exception` message described above):
-
-  ```json
-  {
-    "type": "exception",
-    "timestamp": "2025-09-20T15:46:05.912Z",
-    "message": "Expected true but was false",
-    "exception_type": "NUnit.Framework.AssertionException",
-    "stack_trace": [
-      "at AuthenticationTest.LoginFailure() in ExampleTests.cs:line 42"
-    ]
-  }
-  ```
-
-### 2. UI Updates (`/ws/ui`)
-
-The test run index and test case log pages connect to:
-
-- `ws://<host>:<port>/ws/ui`
-
-The server broadcasts JSON messages with a `type` field. Common message types include:
-
-- `run_started` – `{ "type": "run_started", "run": { ...run metadata... } }`
-- `run_finished` – `{ "type": "run_finished", "run": { ...run metadata... } }`
-- `test_case_started` – `{ "type": "test_case_started", "run_id": "...", "tc_full_name": "...", "tc_id": "...", "tc_meta": { ... }, "counts": { "passed": 0, "failed": 0, "skipped": 0, "aborted": 0 } }`
-- `test_case_updated` – same shape as `test_case_started`, used when a test case status changes
-- `test_case_finished` – same shape as `test_case_updated`, sent when a test case completes
-- `exception` – `{ "type": "exception", "run_id": "...", "tc_id": "...", "stack_trace": { ...fields as in the exception message type above... } }`
-
-**Note:** The UI messages include both `tc_full_name` (for display) and `tc_id` (for routing/links).
-
-## Server Response Format
-
-The server logs all received messages in the following format:
-
-```
-{"event": "message_type", "run_id": "run-id", "tc_full_name": "test-case-full-name", "ts": "2025-09-20T15:46:02.868227Z"}
+**Example:**
+```json
+{
+  "t": 9,
+  "r": "a1b2c3d4"
+}
 ```
 
-The server adds a `ts` (timestamp) field to all logged events.
+## Batching Guidelines
 
-## Error Handling
-
-### Invalid Test Status
-
-If a test case finishes with an invalid status, the server will log an error and ignore the test case:
-
-```
-Error: Invalid test status 'pass' for test case AuthenticationTest.Logout, ignoring test case
-```
-
-**Valid status values for `test_case_finished`:** `passed`, `failed`, `skipped`, `aborted`
-
-### Missing Fields
-
-If required fields are missing, the server will log an error:
-
-```
-Error: run_id missing from test_case_finished message
-Error: Run 'run-id' not found for test_case_finished message
-```
+- Send batches every 200-300ms or when accumulated data exceeds ~128KB
+- Always flush remaining events before sending `test_case_finished`
+- The server processes events in array order
+- Individual message types are still supported for simple use cases
 
 ## Connection Lifecycle
 
 1. **Connect** to `ws://localhost:8080/ws/nunit`
-2. **Send** `run_started` message
-3. **Send** multiple `test_case_started` messages
-4. **Send** multiple `log_batch` messages for each test case
-5. **Send** `test_case_finished` messages for each test case
-6. **Send** `run_finished` message
-7. **Close** the WebSocket connection
+2. **Send** run_started message (type `1`)
+3. **Receive** run_started_response (type `2`) with run_id
+4. **Send** test_case_started (type `3`) for each test
+5. **Send** log_batch (type `4`) or batch (type `8`) with log entries
+6. **Send** exception (type `5`) if test fails
+7. **Send** test_case_finished (type `6`) for each test
+8. **Send** run_finished (type `7`)
+9. **Close** the WebSocket connection
 
-## Best Practices
+## UI and Log Streaming Channels
 
-1. **Use unique run IDs** - Generate unique identifiers for each test run
-2. **Send messages in order** - Start test cases before finishing them
-3. **Use valid status values** - Only use the accepted status strings
-4. **Include timestamps** - Use ISO 8601 format for all timestamps
-5. **Handle connection errors** - Implement proper error handling for connection issues
-6. **Send log batches regularly** - Don't wait too long between log batches for long-running tests
+These channels broadcast to browser clients using the same optimized format.
 
-## Example Client Implementation
+### Log Stream (`/ws/logs/{run_id}/{tc_id}`)
 
-```python
-import asyncio
-import aiohttp
-import json
-from datetime import datetime, UTC
+Streams log entries and events:
+- Log entries with optimized field keys
+- Error: `{"t": "error", "m": "..."}`
+- Exception: type `5` message
 
-async def send_test_run():
-    async with aiohttp.ClientSession() as session:
-        async with session.ws_connect("ws://localhost:8080/ws/nunit") as ws:
-            run_id = f"test-run-{datetime.now().strftime('%H%M%S')}"
-            
-            # Start run
-            await ws.send_json({
-                "type": "run_started",
-                "run_id": run_id,
-                "user_metadata": {},
-                "retention_days": 2,
-                "local_run": False
-            })
-            
-            # Use NUnit test ID or generate unique tc_id
-            # Example: NUnit test ID "0-1009" or generate your own unique identifier
-            tc_id = "0-1009"  # Use your test framework's unique test identifier
+### UI Updates (`/ws/ui`)
 
-            # Start test case
-            await ws.send_json({
-                "type": "test_case_started",
-                "run_id": run_id,
-                "tc_full_name": "MyTest.TestMethod",
-                "tc_id": tc_id
-            })
-            
-            # Send log batch
-            await ws.send_json({
-                "type": "log_batch",
-                "run_id": run_id,
-                "tc_id": tc_id,
-                "count": 1,
-                "entries": [{
-                    "timestamp": datetime.now(UTC).isoformat() + "Z",
-                    "message": "Test log message",
-                    "component": "TestDevice",
-                    "channel": "COM1"
-                }]
-            })
-            
-            # Finish test case
-            await ws.send_json({
-                "type": "test_case_finished",
-                "run_id": run_id,
-                "tc_id": tc_id,
-                "status": "passed"
-            })
-            
-            # Finish run
-            await ws.send_json({
-                "type": "run_finished",
-                "run_id": run_id,
-                "status": "finished"
-            })
-
-# Run the example
-asyncio.run(send_test_run())
-```
-
-## Notes
-
-- The server expects the `type` field, not `event`
-- Test case full names (`tc_full_name`) can contain special characters like quotes (handled by the server)
-- The server automatically handles HTML entity decoding for test case full names
-- **Client tc_id generation**: Clients should use a unique identifier for each test case (e.g., NUnit test ID like "0-1009"). The client sends both `tc_full_name` and `tc_id` in the `test_case_started` message, then uses only `tc_id` in all subsequent messages (`log_batch`, `exception`, `test_case_finished`).
-- The server validates that `tc_id` contains only alphanumeric characters and hyphens (a-z, A-Z, 0-9, -) and has a maximum length of 20 characters.
-- Connection monitoring includes automatic cleanup of aborted runs
-- All timestamps should be in UTC format with 'Z' suffix
+Broadcasts run/test status updates using the same message type codes.

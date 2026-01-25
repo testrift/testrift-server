@@ -3,6 +3,9 @@
 // CONFIGURATION AND CONSTANTS
 // ============================================================================
 
+// Protocol decoder for compact binary protocol
+const protocolDecoder = typeof ProtocolDecoder !== 'undefined' ? new ProtocolDecoder() : null;
+
 // Color and styling constants
 const GOLDEN_ANGLE = 137.508;
 
@@ -1093,6 +1096,8 @@ function initializeTestCaseLog() {
 
 
     if (templateConfig.liveRun && ws) {
+        ws.binaryType = 'arraybuffer';
+
         ws.onopen = () => {
             // Add live indicator if test case is still running
             if (testCaseStatus === 'running' || testCaseStatus === 'unknown') {
@@ -1106,7 +1111,8 @@ function initializeTestCaseLog() {
 
         ws.onmessage = (event) => {
             try {
-                const msg = JSON.parse(event.data);
+                // Decode MessagePack binary data
+                const msg = msgpack.decode(new Uint8Array(event.data));
                 // Stack traces are delivered via the per-test-case /ws/logs socket (not /ws/ui).
                 if ((msg.type === 'test_case_started' || msg.type === 'test_case_finished' || msg.type === 'test_case_updated') && msg.run_id === runId && msg.test_case_id === testCaseId) {
                     if (msg.tc_meta) {
@@ -1238,6 +1244,7 @@ function initializeTestCaseLog() {
         const wsUrl = `${scheme}//${location.host}/ws/logs/${runId}/${testCaseId}`;
         console.log('WebSocket URL:', wsUrl);
         const wsLogs = new WebSocket(wsUrl);
+        wsLogs.binaryType = 'arraybuffer';
 
         wsLogs.onopen = () => {
             console.log('Live log WebSocket connected successfully');
@@ -1253,7 +1260,12 @@ function initializeTestCaseLog() {
 
         wsLogs.onmessage = (e) => {
             try {
-                const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+                // Decode MessagePack binary data
+                const raw = msgpack.decode(new Uint8Array(e.data));
+
+                // Use protocol decoder if available for compact protocol
+                const d = protocolDecoder ? protocolDecoder.decodeMessage(raw) : raw;
+
                 if (d.type === 'error') { console.warn('Log WS error:', d.message); return; }
 
                 if (d.type === 'exception') {
@@ -1266,19 +1278,22 @@ function initializeTestCaseLog() {
                     return;
                 }
 
-                // Process individual log entries (not batches)
-                if (d.timestamp && d.message) {
-                    const processedLog = {
-                        timestamp: d.timestamp,
-                        message: d.message,
-                        component: d.component || '',
-                        channel: d.channel || '',
-                        dir: d.dir || null, // Include direction field if present
-                        phase: d.phase || null // Optional phase marker from server
-                    };
-                    processLogMessage(processedLog, compMap, chanList, atLookupTable);
+                // Handle log batch (multiple entries)
+                if (d.type === 'log_batch' && Array.isArray(d.entries)) {
+                    d.entries.forEach(entry => {
+                        if (entry && entry.timestamp) {
+                            processLogMessage(entry, compMap, chanList, atLookupTable);
+                        }
+                    });
+                    chanList.empty();
+                    updateChannelList(compMap, chanList);
+                    return;
+                }
 
-                    // Update channel list after processing new messages
+                // Handle individual log entry (compact format - decode it)
+                const entry = protocolDecoder ? protocolDecoder.decodeLogEntry(raw) : d;
+                if (entry && entry.timestamp) {
+                    processLogMessage(entry, compMap, chanList, atLookupTable);
                     chanList.empty();
                     updateChannelList(compMap, chanList);
                 }

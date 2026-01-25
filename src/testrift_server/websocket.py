@@ -11,9 +11,57 @@ import re
 import uuid
 from datetime import datetime, timedelta, UTC
 
+import msgpack
 from aiohttp import web
 
 from .config import DEFAULT_RETENTION_DAYS
+from .protocol import (
+    MSG_RUN_STARTED,
+    MSG_RUN_STARTED_RESPONSE,
+    MSG_TEST_CASE_STARTED,
+    MSG_LOG_BATCH,
+    MSG_EXCEPTION,
+    MSG_TEST_CASE_FINISHED,
+    MSG_RUN_FINISHED,
+    MSG_BATCH,
+    MSG_HEARTBEAT,
+    STATUS_RUNNING,
+    STATUS_PASSED,
+    STATUS_FAILED,
+    STATUS_SKIPPED,
+    STATUS_ABORTED,
+    STATUS_FINISHED,
+    DIR_TX,
+    DIR_RX,
+    PHASE_TEARDOWN,
+    F_TYPE,
+    F_RUN_ID,
+    F_RUN_NAME,
+    F_STATUS,
+    F_TIMESTAMP,
+    F_TC_FULL_NAME,
+    F_TC_ID,
+    F_MESSAGE,
+    F_COMPONENT,
+    F_CHANNEL,
+    F_DIR,
+    F_PHASE,
+    F_ENTRIES,
+    F_EVENTS,
+    F_EVENT_TYPE,
+    F_EXCEPTION_TYPE,
+    F_STACK_TRACE,
+    F_IS_ERROR,
+    F_USER_METADATA,
+    F_GROUP,
+    F_RETENTION_DAYS,
+    F_LOCAL_RUN,
+    F_ERROR,
+    F_RUN_URL,
+    F_GROUP_URL,
+    F_GROUP_HASH,
+)
+from .protocol_utils import normalize_message
 from .utils import (
     get_run_path,
     get_case_log_path,
@@ -23,6 +71,9 @@ from .utils import (
     normalize_group_payload,
     compute_group_hash,
     find_test_case_by_tc_id,
+    write_meta_msgpack,
+    read_meta_msgpack,
+    get_merged_log_path,
     TC_ID_FIELD,
     TC_FULL_NAME_FIELD,
 )
@@ -32,10 +83,17 @@ from . import database
 logger = logging.getLogger(__name__)
 
 
+
 def log_event(event: str, **fields):
     """Log an event with timestamp."""
     record = {"event": event, **fields, "ts": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"}
     logger.info(json.dumps(record))
+
+
+async def send_msgpack(ws, data):
+    """Send MessagePack-encoded data over WebSocket."""
+    packed = msgpack.packb(data, use_bin_type=True)
+    await ws.send_bytes(packed)
 
 
 class WebSocketServer:
@@ -129,18 +187,11 @@ class WebSocketServer:
                     aborted_test_cases.append(tc_id)
 
             # Save to disk
-            run_path = get_run_path(run.id)
-            meta_path = run_path / "meta.json"
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    current_meta = json.load(f)
-            else:
-                current_meta = {}
+            current_meta = read_meta_msgpack(run.id) or {}
             run_data = run.to_dict()
             if "deletes_at" in current_meta:
                 run_data["deletes_at"] = current_meta["deletes_at"]
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(run_data, f)
+            write_meta_msgpack(run.id, run_data)
 
             # Calculate updated counts after aborting test cases
             passed_count = 0
@@ -249,6 +300,9 @@ class WebSocketServer:
 
         monitor_task = asyncio.create_task(monitor_connection())
 
+        # Per-connection string table for interned strings
+        string_table = {}
+
         try:
             logger.info(f"Starting NUnit WebSocket connection monitoring")
             async for msg in ws:
@@ -266,19 +320,20 @@ class WebSocketServer:
                         await mark_run_aborted("WebSocket error before run_finished was sent")
                     break
 
-                if msg.type == web.WSMsgType.TEXT:
+                if msg.type == web.WSMsgType.BINARY:
                     try:
-                        data = json.loads(msg.data)
+                        raw_message = msgpack.unpackb(msg.data, raw=False)
+                        data = normalize_message(raw_message, string_table)
                         msg_type = data.get("type")
                     except Exception as e:
-                        logger.error(f"Error parsing JSON message: {e}")
+                        logger.error(f"Error parsing MessagePack message: {e}")
                         continue
 
                     if msg_type == "run_started":
-                        run = await self._handle_run_started(ws, data)
+                        run = await self._handle_run_started(ws, data, string_table)
 
                     elif msg_type == "batch":
-                        await self._handle_batch(data, run)
+                        await self._handle_batch(data, run, raw_message)
 
                     elif msg_type == "heartbeat":
                         # Client heartbeat - just acknowledge receipt, activity is tracked by message receipt
@@ -288,7 +343,7 @@ class WebSocketServer:
                         await self._handle_test_case_started(data, run)
 
                     elif msg_type == "log_batch":
-                        await self._handle_log_batch(data, run)
+                        await self._handle_log_batch(data, run, raw_message)
 
                     elif msg_type == "exception":
                         await self._handle_exception(data, run)
@@ -323,7 +378,7 @@ class WebSocketServer:
             except asyncio.CancelledError:
                 pass
 
-    async def _handle_run_started(self, ws, data):
+    async def _handle_run_started(self, ws, data, string_table):
         """Handle run_started message from NUnit client."""
         try:
             # Check if client provided a custom run_id
@@ -350,10 +405,10 @@ class WebSocketServer:
 
                 if validation_error:
                     error_response = {
-                        "type": "run_started_response",
-                        "error": validation_error
+                        F_TYPE: MSG_RUN_STARTED_RESPONSE,
+                        F_ERROR: validation_error
                     }
-                    await ws.send_json(error_response)
+                    await send_msgpack(ws, error_response)
                     return None
 
                 run_id = client_run_id
@@ -394,15 +449,16 @@ class WebSocketServer:
 
             self.test_runs[run_id] = run
 
+            # Store reference to the string table so it gets updated as messages arrive
+            run.string_table = string_table
+
             # Create folder and save meta
             run_path = get_run_path(run_id)
             run_path.mkdir(parents=True, exist_ok=True)
-            meta_path = run_path / "meta.json"
             meta_dict = run.to_dict()
             if deletes_at:
                 meta_dict["deletes_at"] = deletes_at
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta_dict, f)
+            write_meta_msgpack(run_id, meta_dict)
 
             log_event("run_started", run_id=run_id, run_name=run_name, retention_days=retention_days, deletes_at=deletes_at, user_metadata=user_metadata)
 
@@ -424,17 +480,17 @@ class WebSocketServer:
             # Broadcast to UI clients
             await self.broadcast_ui({"type": "run_started", "run": meta_dict})
 
-            # Send response to NUnit client
+            # Send response to NUnit client (using optimized protocol)
             response = {
-                "type": "run_started_response",
-                "run_id": run_id,
-                "run_name": run_name,
-                "run_url": f"/testRun/{run_id}/index.html"
+                F_TYPE: MSG_RUN_STARTED_RESPONSE,
+                F_RUN_ID: run_id,
+                F_RUN_NAME: run_name,
+                F_RUN_URL: f"/testRun/{run_id}/index.html"
             }
             if group_hash:
-                response["group_hash"] = group_hash
-                response["group_url"] = f"/groups/{group_hash}"
-            await ws.send_json(response)
+                response[F_GROUP_HASH] = group_hash
+                response[F_GROUP_URL] = f"/groups/{group_hash}"
+            await send_msgpack(ws, response)
 
             return run
 
@@ -444,11 +500,12 @@ class WebSocketServer:
             traceback.print_exc()
             return None
 
-    async def _handle_batch(self, data, run):
+    async def _handle_batch(self, data, run, raw_message):
         """Handle batch message containing multiple events for high-throughput scenarios."""
         try:
             run_id = data.get("run_id")
             events = data.get("events", [])
+            raw_events = raw_message.get(F_EVENTS, []) if isinstance(raw_message, dict) else []
 
             if not run_id:
                 logger.info("Error: run_id missing from batch message")
@@ -461,8 +518,13 @@ class WebSocketServer:
                 logger.info(f"Error: Run '{run_id}' not found for batch message")
                 return
 
+            if len(raw_events) != len(events):
+                raise ValueError("Batch event count mismatch between raw and decoded payloads")
+
             # Process events in order
-            for event in events:
+            for event, raw_event in zip(events, raw_events):
+                if raw_event is None:
+                    raise ValueError("Missing raw event payload for compact log storage")
                 event_type = event.get("event_type")
                 # Inject run_id into event for handler compatibility
                 event["run_id"] = run_id
@@ -470,7 +532,7 @@ class WebSocketServer:
                 if event_type == "test_case_started":
                     await self._handle_test_case_started(event, run)
                 elif event_type == "log_batch":
-                    await self._handle_log_batch(event, run)
+                    await self._handle_log_batch(event, run, raw_event)
                 elif event_type == "exception":
                     await self._handle_exception(event, run)
                 elif event_type == "test_case_finished":
@@ -540,18 +602,12 @@ class WebSocketServer:
             except Exception as db_error:
                 logger.error(f"Database logging error for test_case_started: {db_error}")
 
-            # Update meta.json on disk
-            run_path = get_run_path(run.id)
-            meta_path = run_path / "meta.json"
-            current_meta = {}
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    current_meta = json.load(f)
+            # Update meta on disk
+            current_meta = read_meta_msgpack(run.id) or {}
             run_data = run.to_dict()
             if "deletes_at" in current_meta:
                 run_data["deletes_at"] = current_meta["deletes_at"]
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(run_data, f)
+            write_meta_msgpack(run.id, run_data)
 
             # Calculate counts
             passed_count, failed_count, skipped_count, aborted_count = self._count_test_statuses(run)
@@ -576,7 +632,7 @@ class WebSocketServer:
             import traceback
             traceback.print_exc()
 
-    async def _handle_log_batch(self, data, run):
+    async def _handle_log_batch(self, data, run, raw_message=None):
         """Handle log_batch message."""
         try:
             run_id = data.get("run_id")
@@ -600,10 +656,15 @@ class WebSocketServer:
                 logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
                 return
 
-            entries = data.get("entries", [])
+            if raw_message is None or not isinstance(raw_message, dict):
+                raise ValueError("Missing raw log_batch payload for compact storage")
+
+            # Get raw entries directly - no decoding needed on server
+            raw_entries = raw_message.get(F_ENTRIES, []) or []
+
             run.update_last()
-            await test_case.add_log_entries(entries)
-            log_event("log_batch", run_id=run.id, tc_id=tc_id, count=len(entries))
+            await test_case.add_log_entries(raw_entries)
+            log_event("log_batch", run_id=run.id, tc_id=tc_id, count=len(raw_entries))
 
         except Exception as e:
             logger.error(f"Error in log_batch: {e}")
@@ -648,17 +709,11 @@ class WebSocketServer:
             run.update_last()
 
             # Persist updated metadata to disk
-            run_path = get_run_path(run.id)
-            meta_path = run_path / "meta.json"
-            current_meta = {}
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    current_meta = json.load(f)
+            current_meta = read_meta_msgpack(run.id) or {}
             run_data = run.to_dict()
             if "deletes_at" in current_meta:
                 run_data["deletes_at"] = current_meta["deletes_at"]
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(run_data, f)
+            write_meta_msgpack(run.id, run_data)
 
             log_event("exception", run_id=run.id, test_case_id=test_case.full_name)
 
@@ -720,18 +775,12 @@ class WebSocketServer:
 
             run.update_last()
 
-            # Update meta.json on disk
-            run_path = get_run_path(run.id)
-            meta_path = run_path / "meta.json"
-            current_meta = {}
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    current_meta = json.load(f)
+            # Update meta on disk
+            current_meta = read_meta_msgpack(run.id) or {}
             run_data = run.to_dict()
             if "deletes_at" in current_meta:
                 run_data["deletes_at"] = current_meta["deletes_at"]
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(run_data, f)
+            write_meta_msgpack(run.id, run_data)
 
             log_event("test_case_finished", run_id=run.id, tc_id=tc_id, status=test_case.status)
 
@@ -814,18 +863,15 @@ class WebSocketServer:
             run.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
             run.update_last()
 
-            # Update meta.json on disk
-            run_path = get_run_path(run.id)
-            meta_path = run_path / "meta.json"
-            current_meta = {}
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    current_meta = json.load(f)
+            # Merge all test case logs into a single .mplog file
+            await self._merge_logs_for_run(run)
+
+            # Update meta on disk with offsets
+            current_meta = read_meta_msgpack(run.id) or {}
             run_data = run.to_dict()
             if "deletes_at" in current_meta:
                 run_data["deletes_at"] = current_meta["deletes_at"]
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(run_data, f)
+            write_meta_msgpack(run.id, run_data)
 
             log_event("run_finished", run_id=run.id, status=run.status)
 
@@ -845,6 +891,96 @@ class WebSocketServer:
 
         except Exception:
             logger.exception("Error in run_finished")
+
+    async def _merge_logs_for_run(self, run):
+        """Merge all individual test case .mplog files into a single logs.mplog file.
+
+        Updates each test case in run.test_cases with log_offset and log_count
+        for efficient retrieval from the merged file.
+        """
+        import struct
+        from .utils import (
+            get_case_log_path,
+            get_case_stack_path,
+            read_mplog_raw,
+            CASE_STORAGE_DIR_NAME,
+        )
+
+        run_path = get_run_path(run.id)
+        merged_path = get_merged_log_path(run.id)
+        cases_dir = run_path / CASE_STORAGE_DIR_NAME
+
+        try:
+            with open(merged_path, "wb") as merged_file:
+                for tc_full_name, test_case in run.test_cases.items():
+                    tc_id = test_case.tc_id
+
+                    # Record starting offset for this test case
+                    log_start_offset = merged_file.tell()
+
+                    # Merge log entries
+                    log_path = get_case_log_path(run.id, tc_id=tc_id)
+                    log_entry_count = 0
+                    if log_path.exists():
+                        raw_entries = read_mplog_raw(log_path)
+                        for _, raw_data in raw_entries:
+                            merged_file.write(raw_data)
+                            log_entry_count += 1
+
+                    # Merge stack traces (exceptions)
+                    stack_path = get_case_stack_path(run.id, tc_id=tc_id)
+                    stack_entry_count = 0
+                    if stack_path.exists():
+                        raw_entries = read_mplog_raw(stack_path)
+                        for _, raw_data in raw_entries:
+                            merged_file.write(raw_data)
+                            stack_entry_count += 1
+
+                    # Store offsets in test case for meta
+                    test_case.log_offset = log_start_offset
+                    test_case.log_count = log_entry_count
+                    test_case.stack_count = stack_entry_count
+
+            # Clean up individual log files after successful merge (preserve attachments)
+            if cases_dir.exists():
+                self._cleanup_case_log_files(cases_dir, run.id)
+
+            logger.info(f"Merged logs for run {run.id} into {merged_path}")
+
+        except Exception as e:
+            logger.error(f"Error merging logs for run {run.id}: {e}")
+
+    def _cleanup_case_log_files(self, cases_dir, run_id):
+        """Clean up individual log files while preserving attachments.
+
+        Deletes _log.mplog and _stack.mplog files from cases directory,
+        and removes the cases directory if completely empty.
+        Preserves tc_id subdirectories that contain attachments.
+        """
+        # Delete all log/stack files in cases_dir (they're flat files, not in subdirs)
+        for log_file in list(cases_dir.glob("*_log.mplog")):
+            try:
+                log_file.unlink()
+                logger.debug(f"Deleted log file {log_file}")
+            except Exception as e:
+                logger.warning(f"Failed to delete log file {log_file}: {e}")
+
+        for stack_file in list(cases_dir.glob("*_stack.mplog")):
+            try:
+                stack_file.unlink()
+                logger.debug(f"Deleted stack file {stack_file}")
+            except Exception as e:
+                logger.warning(f"Failed to delete stack file {stack_file}: {e}")
+
+        # Remove cases_dir if completely empty (no attachment subdirectories)
+        try:
+            if cases_dir.exists() and not any(cases_dir.iterdir()):
+                cases_dir.rmdir()
+                logger.info(f"Cleaned up cases directory for run {run_id}")
+            else:
+                logger.info(f"Cleaned up log files for run {run_id}, preserved attachments")
+        except Exception as e:
+            logger.warning(f"Failed to remove cases directory: {e}")
 
     def _count_test_statuses(self, run):
         """Count test case statuses for a run."""
@@ -886,25 +1022,35 @@ class WebSocketServer:
 
         if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
             logger.info(f"Invalid run_id or test_case_id: {run_id}, {test_case_id}")
-            await ws.send_json({"type": "error", "message": "Invalid run ID or test case ID"})
+            await send_msgpack(ws, {"type": "error", "message": "Invalid run ID or test case ID"})
             await ws.close()
             return
 
         test_run = self.test_runs.get(run_id)
         if not test_run:
             logger.info(f"Test run not found in memory: {run_id}")
-            await ws.send_json({"type": "error", "message": "Test run not found"})
+            await send_msgpack(ws, {"type": "error", "message": "Test run not found"})
             await ws.close()
             return
 
         test_case = find_test_case_by_tc_id(test_run, test_case_id)
         if not test_case:
             logger.info(f"Couldn't find test case {test_case_id} in test run {run_id}")
-            await ws.send_json({"type": "error", "message": "Test case not found"})
+            await send_msgpack(ws, {"type": "error", "message": "Test case not found"})
             await ws.close()
             return
 
         logger.info(f"WebSocket log stream established for {run_id}/{test_case_id}")
+
+        # Send the string table first so UI can decode interned strings
+        try:
+            if test_run.string_table:
+                await send_msgpack(ws, {
+                    "type": "string_table",
+                    "strings": test_run.string_table
+                })
+        except Exception as e:
+            logger.error(f"Error sending string table: {e}")
 
         # Send all existing logs + exceptions first, then subscribe to new ones
         try:
@@ -926,12 +1072,12 @@ class WebSocketServer:
 
             logger.info(f"Replaying {len(initial_items)} log entries for {run_id}/{test_case_id}")
             for _, item in initial_items:
-                await ws.send_json(item)
+                await send_msgpack(ws, item)
             logger.info(f"Finished replaying log entries for {run_id}/{test_case_id}")
 
         except Exception as e:
             logger.error(f"Error sending existing logs: {e}")
-            await ws.send_json({"type": "error", "message": "Error sending existing logs"})
+            await send_msgpack(ws, {"type": "error", "message": "Error sending existing logs"})
             await ws.close()
             return
 
@@ -942,7 +1088,7 @@ class WebSocketServer:
         try:
             while True:
                 entry = await queue.get()
-                await ws.send_json(entry)
+                await send_msgpack(ws, entry)
         except Exception:
             pass
         finally:
@@ -950,10 +1096,11 @@ class WebSocketServer:
 
     async def broadcast_ui(self, message):
         """Broadcast a message to all connected UI clients."""
+        packed = msgpack.packb(message, use_bin_type=True)
         dead = []
         for ws in self.ui_clients:
             try:
-                await ws.send_json(message)
+                await ws.send_bytes(packed)
             except Exception:
                 dead.append(ws)
         for ws in dead:

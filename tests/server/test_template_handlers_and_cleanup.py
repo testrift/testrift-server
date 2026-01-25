@@ -4,7 +4,7 @@ Tests for template rendering handlers (index, group_runs, test_run_index, test_c
 and cleanup functions.
 """
 
-import json
+import msgpack
 import shutil
 import tempfile
 from pathlib import Path
@@ -22,7 +22,7 @@ from testrift_server.handlers import (
     test_case_log_handler as handle_test_case_log,
 )
 from testrift_server.cleanup import cleanup_runs_sweep
-from testrift_server.utils import get_run_path, get_case_log_path, generate_storage_id
+from testrift_server.utils import get_run_path, get_case_log_path, generate_storage_id, write_meta_msgpack, write_mplog_entry
 from testrift_server.models import TestRunData, TestCaseData
 
 
@@ -192,7 +192,7 @@ class TestTemplateHandlers:
         run_path = get_run_path(run_id)
         run_path.mkdir(parents=True, exist_ok=True)
 
-        # Create meta.json
+        # Create meta.msgpack
         meta = {
             "run_id": run_id,
             "status": "finished",
@@ -216,14 +216,13 @@ class TestTemplateHandlers:
         storage_id = generate_storage_id()
         meta["test_cases"][test_case_id][TC_ID_FIELD] = storage_id
 
-        (run_path / "meta.json").write_text(json.dumps(meta))
+        write_meta_msgpack(run_id, meta)
 
         # Create log file
         log_path = get_case_log_path(run_id, tc_id=storage_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text(
-            json.dumps({"timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", "message": "Test log"}) + "\n"
-        )
+        log_entry = {"timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z", "message": "Test log"}
+        write_mplog_entry(log_path, log_entry)
 
         request = MagicMock()
         request.app = mock_app
@@ -287,7 +286,7 @@ class TestCleanupFunctions:
         # Create run directory
         run_path = get_run_path(run_id)
         run_path.mkdir(parents=True, exist_ok=True)
-        (run_path / "meta.json").write_text(json.dumps({"run_id": run_id}))
+        write_meta_msgpack(run_id, {"run_id": run_id})
 
         # Run cleanup sweep
         await cleanup_runs_sweep()
@@ -322,7 +321,7 @@ class TestCleanupFunctions:
         # Create run directory
         run_path = get_run_path(run_id)
         run_path.mkdir(parents=True, exist_ok=True)
-        (run_path / "meta.json").write_text(json.dumps({"run_id": run_id}))
+        write_meta_msgpack(run_id, {"run_id": run_id})
 
         # Run cleanup sweep
         await cleanup_runs_sweep()
@@ -353,7 +352,7 @@ class TestCleanupFunctions:
         # Create run directory
         run_path = get_run_path(run_id)
         run_path.mkdir(parents=True, exist_ok=True)
-        (run_path / "meta.json").write_text(json.dumps({"run_id": run_id}))
+        write_meta_msgpack(run_id, {"run_id": run_id})
 
         # Run cleanup sweep
         await cleanup_runs_sweep()

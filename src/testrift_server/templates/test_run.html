@@ -11,10 +11,12 @@
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.0/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.0/js/bootstrap.min.js"></script>
     {% if server_mode %}
+    <script src="/static/msgpack.min.js"></script>
     <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
     <script src="/static/classifications.js"></script>
     {% else %}
+    <script src="static/msgpack.min.js"></script>
     <link href="static/status-badges.css" rel="stylesheet">
     <link href="static/classifications.css" rel="stylesheet">
     <script src="static/classifications.js"></script>
@@ -3858,9 +3860,10 @@
             {% if live_run %}
             const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
             const ws = new WebSocket(`${scheme}://${location.host}/ws/ui`);
+            ws.binaryType = 'arraybuffer';
             ws.onmessage = (event) => {
                 try {
-                    const msg = JSON.parse(event.data);
+                    const msg = msgpack.decode(new Uint8Array(event.data));
                     if (msg.type === 'test_case_started' && msg.run_id === '{{ run_id }}') {
                         addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta, true); // Force running status
                         // Add live indicator when tests are running

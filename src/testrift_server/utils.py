@@ -7,16 +7,21 @@ Path helpers, validators, sanitizers, and file operations.
 import hashlib
 import json
 import re
+import struct
 import uuid
 from datetime import datetime, UTC
 from pathlib import Path
 
-from .config import DATA_DIR
+import msgpack
+
+from . import config
 
 GROUP_HASH_LENGTH = 16
 CASE_STORAGE_DIR_NAME = "cases"
-CASE_LOG_FILE_SUFFIX = "_log.jsonl"
-CASE_STACK_FILE_SUFFIX = "_stack.jsonl"
+CASE_LOG_FILE_SUFFIX = "_log.mplog"
+CASE_STACK_FILE_SUFFIX = "_stack.mplog"
+MERGED_LOG_FILE = "logs.mplog"
+META_FILE = "meta.msgpack"
 TC_ID_FIELD = "tc_id"
 TC_FULL_NAME_FIELD = "tc_full_name"
 
@@ -37,12 +42,17 @@ def parse_iso(dtstr):
 
 def get_run_path(run_id):
     """Get the path for a test run's data directory."""
-    return DATA_DIR / run_id
+    return config.DATA_DIR / run_id
 
 
 def get_run_meta_path(run_id):
-    """Get the path for a test run's meta.json file."""
-    return get_run_path(run_id) / "meta.json"
+    """Get the path for a test run's meta.msgpack file."""
+    return get_run_path(run_id) / META_FILE
+
+
+def get_merged_log_path(run_id):
+    """Get the path for a test run's merged log file."""
+    return get_run_path(run_id) / MERGED_LOG_FILE
 
 
 def generate_storage_id():
@@ -98,6 +108,94 @@ def read_jsonl(file_path):
     """Read a JSONL file and return a list of parsed JSON objects."""
     with open(file_path, "r", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+def write_mplog_entry(file_path, entry):
+    """Write a single MessagePack entry to an .mplog file with length prefix.
+
+    Format: [4-byte big-endian length][msgpack data]
+    """
+    data = msgpack.packb(entry, use_bin_type=True)
+    length_prefix = struct.pack(">I", len(data))
+    with open(file_path, "ab") as f:
+        f.write(length_prefix + data)
+
+
+async def write_mplog_entry_async(file_path, entry):
+    """Async version of write_mplog_entry."""
+    import aiofiles
+    data = msgpack.packb(entry, use_bin_type=True)
+    length_prefix = struct.pack(">I", len(data))
+    async with aiofiles.open(file_path, "ab") as f:
+        await f.write(length_prefix + data)
+
+
+async def write_mplog_entries_async(file_path, entries):
+    """Async version to write multiple MessagePack entries."""
+    import aiofiles
+    buffer = bytearray()
+    for entry in entries:
+        data = msgpack.packb(entry, use_bin_type=True)
+        buffer.extend(struct.pack(">I", len(data)))
+        buffer.extend(data)
+    async with aiofiles.open(file_path, "ab") as f:
+        await f.write(bytes(buffer))
+
+
+def read_mplog(file_path):
+    """Read all entries from an .mplog file.
+
+    Returns a list of unpacked objects.
+    """
+    entries = []
+    with open(file_path, "rb") as f:
+        while True:
+            length_bytes = f.read(4)
+            if len(length_bytes) < 4:
+                break
+            length = struct.unpack(">I", length_bytes)[0]
+            data = f.read(length)
+            if len(data) < length:
+                break
+            entries.append(msgpack.unpackb(data, raw=False))
+    return entries
+
+
+def read_mplog_raw(file_path):
+    """Read all raw entries from an .mplog file.
+
+    Returns a list of (offset, raw_bytes) tuples for each entry.
+    """
+    entries = []
+    with open(file_path, "rb") as f:
+        while True:
+            offset = f.tell()
+            length_bytes = f.read(4)
+            if len(length_bytes) < 4:
+                break
+            length = struct.unpack(">I", length_bytes)[0]
+            data = f.read(length)
+            if len(data) < length:
+                break
+            # Include the length prefix in raw_bytes
+            entries.append((offset, length_bytes + data))
+    return entries
+
+
+def write_meta_msgpack(run_id, meta_dict):
+    """Write meta dictionary as MessagePack file."""
+    meta_path = get_run_meta_path(run_id)
+    with open(meta_path, "wb") as f:
+        msgpack.pack(meta_dict, f, use_bin_type=True)
+
+
+def read_meta_msgpack(run_id):
+    """Read meta dictionary from MessagePack file."""
+    meta_path = get_run_meta_path(run_id)
+    if not meta_path.exists():
+        return None
+    with open(meta_path, "rb") as f:
+        return msgpack.unpack(f, raw=False)
 
 
 # --- Validation functions ---

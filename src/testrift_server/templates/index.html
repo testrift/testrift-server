@@ -10,6 +10,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/static/status-badges.css" rel="stylesheet">
+    <script src="/static/msgpack.min.js"></script>
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
         :root {
@@ -1387,7 +1388,7 @@
 
   function handleMessage(event) {
     try {
-      const msg = JSON.parse(event.data);
+      const msg = msgpack.decode(new Uint8Array(event.data));
       if (msg.type === 'run_started' || msg.type === 'run_updated' || msg.type === 'run_finished' || msg.type === 'run_timeout') {
         addOrUpdateRun(msg.run);
       } else if (msg.type === 'test_case_started' || msg.type === 'test_case_updated' || msg.type === 'test_case_finished') {
@@ -1469,6 +1470,7 @@
     try {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
       ws = new WebSocket(`${scheme}://${location.host}/ws/ui`);
+      ws.binaryType = 'arraybuffer';
       ws.onopen = () => { reconnectDelayMs = 500; };
       ws.onmessage = handleMessage;
       ws.onerror = () => {};
