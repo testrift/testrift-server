@@ -40,6 +40,7 @@ Messages are sent as binary WebSocket frames (not text frames).
 | 7 | run_finished | Test run completed |
 | 8 | batch | Container for multiple events |
 | 9 | heartbeat | Keep-alive message |
+| 11 | metrics | System metrics (CPU, memory) |
 
 ### Status Codes (`s` field)
 
@@ -95,6 +96,11 @@ Messages are sent as binary WebSocket frames (not text frames).
 | `ru` | run_url | string | Run page URL |
 | `gu` | group_url | string | Group page URL |
 | `gh` | group_hash | string | Group hash |
+| `mt` | metrics | array | Metrics samples |
+| `cpu` | cpu | float | CPU usage percentage (0-100) |
+| `mem` | memory | float | Memory usage percentage (0-100) |
+| `net` | net | float | Network utilization percentage (0-100) |
+| `ni` | net_interfaces | array | Per-interface network details |
 
 ## String Interning
 
@@ -338,6 +344,41 @@ Container for multiple events to reduce WebSocket frame overhead.
 {
   "t": 9,
   "r": "a1b2c3d4"
+}
+```
+
+### 11. Metrics
+
+**Type:** `11` (metrics)
+
+Reports system metrics (CPU and memory usage) collected during test execution.
+The NUnit client collects samples every 1 second and batches them for sending every 5 seconds.
+
+**Fields:**
+- `t`: `11`
+- `r`: Run ID
+- `mt`: Array of metric samples
+
+**Metric Sample Structure:**
+- `ts`: Timestamp in ms (int64)
+- `cpu`: CPU usage percentage (float, 0-100)
+- `mem`: Memory usage percentage (float, 0-100)
+- `net`: Network utilization percentage (float, 0-100) - max of all interface TX/RX
+- `ni`: (optional) Array of per-interface details:
+  - `n`: Interface name (string, max 12 chars)
+  - `tx`: Transmit utilization percentage (float, 0-100)
+  - `rx`: Receive utilization percentage (float, 0-100)
+
+**Example:**
+```json
+{
+  "t": 11,
+  "r": "a1b2c3d4",
+  "mt": [
+    {"ts": 1737820282736, "cpu": 25.5, "mem": 42.3, "net": 5.2, "ni": [{"n": "Ethernet", "tx": 2.1, "rx": 5.2}]},
+    {"ts": 1737820283736, "cpu": 30.2, "mem": 42.5, "net": 8.1, "ni": [{"n": "Ethernet", "tx": 8.1, "rx": 3.4}]},
+    {"ts": 1737820284736, "cpu": 22.1, "mem": 42.4, "net": 1.5, "ni": [{"n": "Ethernet", "tx": 0.8, "rx": 1.5}]}
+  ]
 }
 ```
 

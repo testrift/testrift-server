@@ -1710,11 +1710,293 @@ function initializeStackTraceSection() {
     initializeStackTraces(traces);
 }
 
+function initializeMetricsSummary() {
+    const metrics = templateConfig.metrics || [];
+    const tcStartTime = templateConfig.tcStartTime;
+    const tcEndTime = templateConfig.tcEndTime;
+
+    if (!metrics || metrics.length === 0) {
+        return; // No metrics to show
+    }
+
+    // Filter metrics to only those during the test case execution
+    let filteredMetrics = metrics;
+    if (tcStartTime && tcEndTime) {
+        const startMs = new Date(tcStartTime).getTime();
+        const endMs = new Date(tcEndTime).getTime();
+        filteredMetrics = metrics.filter(m => {
+            const ts = m.ts || 0;
+            return ts >= startMs && ts <= endMs;
+        });
+    }
+
+    if (filteredMetrics.length === 0) {
+        return; // No metrics during this test case
+    }
+
+    // Calculate statistics
+    const cpuValues = filteredMetrics.map(m => m.cpu || 0);
+    const memValues = filteredMetrics.map(m => m.mem || 0);
+    const netValues = filteredMetrics.map(m => m.net || 0);
+
+    const cpuMin = Math.min(...cpuValues);
+    const cpuMax = Math.max(...cpuValues);
+    const cpuAvg = cpuValues.reduce((a, b) => a + b, 0) / cpuValues.length;
+
+    const memMin = Math.min(...memValues);
+    const memMax = Math.max(...memValues);
+    const memAvg = memValues.reduce((a, b) => a + b, 0) / memValues.length;
+
+    const netMin = Math.min(...netValues);
+    const netMax = Math.max(...netValues);
+    const netAvg = netValues.reduce((a, b) => a + b, 0) / netValues.length;
+
+    // Update the stats text
+    document.getElementById('tc-cpu-min').textContent = cpuMin.toFixed(1) + '%';
+    document.getElementById('tc-cpu-avg').textContent = cpuAvg.toFixed(1) + '%';
+    document.getElementById('tc-cpu-max').textContent = cpuMax.toFixed(1) + '%';
+    document.getElementById('tc-mem-min').textContent = memMin.toFixed(1) + '%';
+    document.getElementById('tc-mem-avg').textContent = memAvg.toFixed(1) + '%';
+    document.getElementById('tc-mem-max').textContent = memMax.toFixed(1) + '%';
+    document.getElementById('tc-net-min').textContent = netMin.toFixed(1) + '%';
+    document.getElementById('tc-net-avg').textContent = netAvg.toFixed(1) + '%';
+    document.getElementById('tc-net-max').textContent = netMax.toFixed(1) + '%';
+
+    // Render the chart
+    renderTcMetricsChart(filteredMetrics);
+
+    // Show the section
+    document.getElementById('metricsSummarySection').style.display = 'block';
+}
+
+function renderTcMetricsChart(metricsData) {
+    const canvas = document.getElementById('tc-metrics-chart');
+    if (!canvas || !metricsData || metricsData.length === 0) return;
+
+    const section = document.getElementById('metricsSummarySection');
+    section.style.display = 'block';
+
+    const ctx = canvas.getContext('2d');
+    let width = canvas.offsetWidth;
+    if (width === 0) {
+        const container = canvas.closest('.metrics-chart-container');
+        width = container ? container.offsetWidth : 400;
+        if (width === 0) width = 400;
+    }
+    const height = 100;
+
+    // Set canvas size with device pixel ratio for sharpness
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.scale(dpr, dpr);
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Chart drawing parameters
+    const padding = { top: 5, right: 5, bottom: 5, left: 5 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+
+    // Y axis: 0-100%
+    const yScale = (v) => padding.top + chartHeight - (v / 100) * chartHeight;
+    const xScale = (i) => padding.left + (i / (metricsData.length - 1 || 1)) * chartWidth;
+
+    // Draw background grid lines
+    ctx.strokeStyle = '#c5ccd4';
+    ctx.lineWidth = 0.5;
+    for (let p = 0; p <= 100; p += 25) {
+        const y = yScale(p);
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+    }
+
+    // Draw System CPU line
+    ctx.strokeStyle = '#667eea';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    metricsData.forEach((m, i) => {
+        const x = xScale(i);
+        const y = yScale(m.cpu || 0);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw Memory line
+    ctx.strokeStyle = '#28a745';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    metricsData.forEach((m, i) => {
+        const x = xScale(i);
+        const y = yScale(m.mem || 0);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw Network line
+    ctx.strokeStyle = '#e67e22';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    metricsData.forEach((m, i) => {
+        const x = xScale(i);
+        const y = yScale(m.net || 0);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Initialize hover tooltip for this chart
+    initializeTcMetricsChartHover(metricsData);
+}
+
+// TC metrics chart hover tooltip
+let tcMetricsTooltipInitialized = false;
+let tcMetricsDataRef = null;
+
+function initializeTcMetricsChartHover(metricsData) {
+    tcMetricsDataRef = metricsData;
+    if (tcMetricsTooltipInitialized) return;
+    tcMetricsTooltipInitialized = true;
+
+    const canvas = document.getElementById('tc-metrics-chart');
+    const tooltip = document.getElementById('tc-metrics-tooltip');
+    if (!canvas || !tooltip) return;
+
+    const padding = { top: 5, right: 5, bottom: 5, left: 5 };
+
+    canvas.addEventListener('mousemove', function(e) {
+        if (!tcMetricsDataRef || tcMetricsDataRef.length === 0) {
+            tooltip.style.display = 'none';
+            return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const chartWidth = rect.width - padding.left - padding.right;
+
+        // Determine which sample index we're hovering over
+        const ratio = (x - padding.left) / chartWidth;
+        const sampleIndex = Math.round(ratio * (tcMetricsDataRef.length - 1));
+        if (sampleIndex < 0 || sampleIndex >= tcMetricsDataRef.length) {
+            tooltip.style.display = 'none';
+            return;
+        }
+
+        const sample = tcMetricsDataRef[sampleIndex];
+        const sampleTs = sample.ts;
+
+        // Build tooltip content
+        const time = new Date(sampleTs).toLocaleTimeString();
+        let html = `<div style="margin-bottom: 4px;"><strong>${time}</strong></div>`;
+        html += `<div>CPU: <span style="color: #a3b3f4">${(sample.cpu || 0).toFixed(1)}%</span></div>`;
+        html += `<div>Memory: <span style="color: #68d391">${(sample.mem || 0).toFixed(1)}%</span></div>`;
+        html += `<div>Network: <span style="color: #f5a860">${(sample.net || 0).toFixed(1)}%</span>`;
+        // Show per-interface details if available
+        if (sample.ni && sample.ni.length > 0) {
+            html += ` <span style="color: #888; font-size: 11px;">(`;
+            html += sample.ni.map(iface => `${iface.n}: ↑${(iface.tx || 0).toFixed(1)}% ↓${(iface.rx || 0).toFixed(1)}%`).join(', ');
+            html += `)</span>`;
+        }
+        html += `</div>`;
+
+        tooltip.innerHTML = html;
+        tooltip.style.display = 'block';
+
+        // Position tooltip
+        const containerRect = canvas.closest('.metrics-chart-container').getBoundingClientRect();
+        let tooltipX = e.clientX - containerRect.left + 12;
+        let tooltipY = 5;
+
+        // Keep tooltip within container bounds
+        if (tooltipX + tooltip.offsetWidth > containerRect.width - 5) {
+            tooltipX = e.clientX - containerRect.left - tooltip.offsetWidth - 12;
+        }
+        if (tooltipX < 5) tooltipX = 5;
+
+        tooltip.style.left = tooltipX + 'px';
+        tooltip.style.top = tooltipY + 'px';
+    });
+
+    canvas.addEventListener('mouseleave', function() {
+        tooltip.style.display = 'none';
+    });
+
+    // Click to scroll to closest log entry
+    canvas.style.cursor = 'pointer';
+    canvas.addEventListener('click', function(e) {
+        if (!tcMetricsDataRef || tcMetricsDataRef.length === 0) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const chartWidth = rect.width - padding.left - padding.right;
+
+        // Determine which sample index we clicked on
+        const ratio = (x - padding.left) / chartWidth;
+        const sampleIndex = Math.round(ratio * (tcMetricsDataRef.length - 1));
+        if (sampleIndex < 0 || sampleIndex >= tcMetricsDataRef.length) return;
+
+        const targetTs = tcMetricsDataRef[sampleIndex].ts;
+        scrollToClosestLogEntry(targetTs);
+    });
+}
+
+/**
+ * Scroll to the log entry closest to the given timestamp.
+ */
+function scrollToClosestLogEntry(targetTs) {
+    const rows = document.querySelectorAll('#msg_table tbody tr:not(.live-indicator):not(.teardown-header-row)');
+    if (rows.length === 0) return;
+
+    let closestRow = null;
+    let closestDiff = Infinity;
+
+    rows.forEach(row => {
+        const timeCell = row.querySelector('td:first-child');
+        if (!timeCell) return;
+
+        const originalTime = timeCell.getAttribute('data-original-time');
+        if (!originalTime) return;
+
+        const rowTs = new Date(originalTime).getTime();
+        const diff = Math.abs(rowTs - targetTs);
+        if (diff < closestDiff) {
+            closestDiff = diff;
+            closestRow = row;
+        }
+    });
+
+    if (closestRow) {
+        // Remove any existing highlight
+        document.querySelectorAll('#msg_table tbody tr.timestamp-highlight').forEach(r => {
+            r.classList.remove('timestamp-highlight');
+        });
+
+        // Add highlight to target row
+        closestRow.classList.add('timestamp-highlight');
+
+        // Scroll into view with some offset from top
+        closestRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Remove highlight after animation
+        setTimeout(() => {
+            closestRow.classList.remove('timestamp-highlight');
+        }, 2000);
+    }
+}
+
 // Initialize when DOM is ready and templateConfig is available
 if (typeof templateConfig !== 'undefined') {
     initializeTestCaseLog();
     initializeAttachments();
     initializeStackTraceSection();
+    initializeMetricsSummary();
 } else {
     // Wait for templateConfig to be defined
     document.addEventListener('DOMContentLoaded', function() {
@@ -1722,6 +2004,7 @@ if (typeof templateConfig !== 'undefined') {
             initializeTestCaseLog();
             initializeAttachments();
             initializeStackTraceSection();
+            initializeMetricsSummary();
         }
     });
 }

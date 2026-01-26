@@ -1430,3 +1430,177 @@ span {
 .dark-theme .stack-trace-empty {
     color: #adb5bd;
 }
+
+/* Metrics Chart Section */
+.metrics-chart-section {
+    margin: 20px 0;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.metrics-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.metrics-chart-header h5 {
+    margin: 0;
+    color: #495057;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.metrics-chart-section .metrics-legend {
+    display: flex;
+    gap: 15px;
+    font-size: 0.85em;
+}
+
+.metrics-chart-section .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #6c757d;
+}
+
+.metrics-chart-section .legend-color {
+    width: 12px;
+    height: 3px;
+    border-radius: 2px;
+}
+
+.metrics-chart-section .legend-color.cpu-color {
+    background-color: #667eea;
+}
+
+.metrics-chart-section .legend-color.mem-color {
+    background-color: #28a745;
+}
+
+.metrics-chart-section .legend-color.net-color {
+    background-color: #e67e22;
+}
+
+.metrics-chart-section .metrics-chart-container {
+    margin-bottom: 10px;
+}
+
+.metrics-chart-section .metrics-chart-container canvas {
+    width: 100%;
+    height: 100px;
+    border-radius: 4px;
+    background: white;
+}
+
+.metrics-stats {
+    display: flex;
+    gap: 30px;
+    font-size: 0.85em;
+}
+
+.metrics-stats .metric-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #6c757d;
+}
+
+.metrics-stats .metric-label {
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.metrics-stats .metric-label.cpu-label {
+    background-color: rgba(102, 126, 234, 0.15);
+    color: #667eea;
+}
+
+.metrics-stats .metric-label.mem-label {
+    background-color: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+}
+
+.metrics-stats .metric-label.net-label {
+    background-color: rgba(230, 126, 34, 0.15);
+    color: #e67e22;
+}
+
+.metrics-stats .metric-stat span:not(.metric-label) {
+    font-family: 'Courier New', monospace;
+    font-weight: 500;
+    color: #495057;
+}
+
+/* Dark theme for metrics chart */
+.dark-theme .metrics-chart-section {
+    background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+    border-color: #495057;
+}
+
+.dark-theme .metrics-chart-header {
+    border-bottom-color: #495057;
+}
+
+.dark-theme .metrics-chart-header h5 {
+    color: #e2e8f0;
+}
+
+.dark-theme .metrics-chart-section .legend-item {
+    color: #a0aec0;
+}
+
+.dark-theme .metrics-chart-section .metrics-chart-container canvas {
+    background: #1a202c;
+}
+
+.dark-theme .metrics-stats .metric-stat {
+    color: #a0aec0;
+}
+
+.dark-theme .metrics-stats .metric-label.cpu-label {
+    background-color: rgba(102, 126, 234, 0.25);
+    color: #a3b3f4;
+}
+
+.dark-theme .metrics-stats .metric-label.mem-label {
+    background-color: rgba(40, 167, 69, 0.25);
+    color: #68d391;
+}
+
+.dark-theme .metrics-stats .metric-label.net-label {
+    background-color: rgba(230, 126, 34, 0.25);
+    color: #f5a860;
+}
+
+.dark-theme .metrics-stats .metric-stat span:not(.metric-label) {
+    color: #e2e8f0;
+}
+
+/* Timestamp highlight for chart click-to-scroll */
+.timestamp-highlight > td {
+    background-color: rgba(255, 193, 7, 0.4) !important;
+    animation: highlight-fade 2s ease-out forwards;
+}
+
+@keyframes highlight-fade {
+    0% { background-color: rgba(255, 193, 7, 0.4); }
+    100% { background-color: transparent; }
+}
+
+.dark-theme .timestamp-highlight > td {
+    background-color: rgba(255, 193, 7, 0.3) !important;
+    animation: highlight-fade-dark 2s ease-out forwards;
+}
+
+@keyframes highlight-fade-dark {
+    0% { background-color: rgba(255, 193, 7, 0.3); }
+    100% { background-color: transparent; }
+}

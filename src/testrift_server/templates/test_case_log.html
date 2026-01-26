@@ -141,6 +141,42 @@
                             <!-- Attachments will be loaded here -->
                         </div>
 
+                        <!-- Metrics Chart -->
+                        <div class="metrics-chart-section" id="metricsSummarySection" style="display: none;">
+                            <div class="metrics-chart-header">
+                                <h5>System Metrics During Test</h5>
+                                <div class="metrics-legend">
+                                    <span class="legend-item"><span class="legend-color cpu-color"></span> CPU</span>
+                                    <span class="legend-item"><span class="legend-color mem-color"></span> Memory</span>
+                                    <span class="legend-item"><span class="legend-color net-color"></span> Network</span>
+                                </div>
+                            </div>
+                            <div class="metrics-chart-container" style="position: relative;">
+                                <canvas id="tc-metrics-chart" height="100"></canvas>
+                                <div id="tc-metrics-tooltip" style="display: none; position: absolute; background: rgba(0,0,0,0.92); color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 1000;"></div>
+                            </div>
+                            <div class="metrics-stats">
+                                <div class="metric-stat">
+                                    <span class="metric-label cpu-label">CPU:</span>
+                                    <span id="tc-cpu-min">-</span> min /
+                                    <span id="tc-cpu-avg">-</span> avg /
+                                    <span id="tc-cpu-max">-</span> max
+                                </div>
+                                <div class="metric-stat">
+                                    <span class="metric-label mem-label">Memory:</span>
+                                    <span id="tc-mem-min">-</span> min /
+                                    <span id="tc-mem-avg">-</span> avg /
+                                    <span id="tc-mem-max">-</span> max
+                                </div>
+                                <div class="metric-stat">
+                                    <span class="metric-label net-label">Network:</span>
+                                    <span id="tc-net-min">-</span> min /
+                                    <span id="tc-net-avg">-</span> avg /
+                                    <span id="tc-net-max">-</span> max
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="stack-trace-section" id="stackTraceSection">
                             <div class="stack-trace-header">
                                 <h5>Stack Traces</h5>
@@ -206,6 +242,8 @@
       testCaseStatus: {{ (test_case.status if test_case else (tc_meta.status if tc_meta else '')) | tojson }},
       testCaseStartTime: {{ (test_case.start_time if test_case else (tc_meta.start_time if tc_meta else '')) | tojson }},
       testCaseEndTime: {{ (test_case.end_time if test_case else (tc_meta.end_time if tc_meta else '')) | tojson }},
+      tcStartTime: {{ (test_case.start_time if test_case else (tc_meta.start_time if tc_meta else '')) | tojson }},
+      tcEndTime: {{ (test_case.end_time if test_case else (tc_meta.end_time if tc_meta else '')) | tojson }},
       runStartTime: {{ (run.start_time if run else (run_meta.start_time if run_meta else '')) | tojson }},
       retentionDays: {{ (run.retention_days if run else (run_meta.retention_days if run_meta else 0)) | tojson }},
       initialLogs: {{ logs | tojson }},
@@ -213,7 +251,8 @@
       serverMode: {{ server_mode | tojson }},
       attachments: {{ attachments | tojson if attachments else '[]' }},
       stackTraces: {{ (stack_traces if stack_traces is defined else (test_case.stack_traces if test_case else (tc_meta.stack_traces if tc_meta else []))) | tojson }},
-      groupHash: {{ group_hash | tojson if group_hash else 'null' }}
+      groupHash: {{ group_hash | tojson if group_hash else 'null' }},
+      metrics: {{ metrics | tojson if metrics is defined else '[]' }}
     };
 </script>
 

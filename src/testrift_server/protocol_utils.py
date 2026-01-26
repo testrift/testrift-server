@@ -13,6 +13,7 @@ from .protocol import (
     MSG_RUN_FINISHED,
     MSG_BATCH,
     MSG_HEARTBEAT,
+    MSG_METRICS,
     STATUS_RUNNING,
     STATUS_PASSED,
     STATUS_FAILED,
@@ -50,6 +51,11 @@ from .protocol import (
     F_RUN_URL,
     F_GROUP_URL,
     F_GROUP_HASH,
+    F_METRICS,
+    F_CPU,
+    F_MEMORY,
+    F_NET,
+    F_NET_INTERFACES,
     status_code_to_name,
     ms_to_timestamp,
     decode_interned_string,
@@ -65,6 +71,7 @@ MSG_TYPE_NAMES = {
     MSG_RUN_FINISHED: "run_finished",
     MSG_BATCH: "batch",
     MSG_HEARTBEAT: "heartbeat",
+    MSG_METRICS: "metrics",
 }
 
 
@@ -99,6 +106,7 @@ def normalize_message(data: Dict[str, Any], string_table: Dict[int, str]) -> Dic
         F_RUN_URL: "run_url",
         F_GROUP_URL: "group_url",
         F_GROUP_HASH: "group_hash",
+        F_METRICS: "metrics",
     }
 
     for short_key, long_key in key_mappings.items():
@@ -148,6 +156,27 @@ def normalize_message(data: Dict[str, Any], string_table: Dict[int, str]) -> Dic
             normalize_event(e, string_table) for e in result["events"]
         ]
 
+    # Normalize metrics array (convert short field names to long names)
+    if "metrics" in result and isinstance(result["metrics"], list):
+        result["metrics"] = [
+            normalize_metric_sample(m) for m in result["metrics"]
+        ]
+
+    return result
+
+
+def normalize_metric_sample(sample: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a metrics sample from short keys to long keys."""
+    result = {
+        "ts": sample.get(F_TIMESTAMP) or sample.get("ts"),
+        "cpu": sample.get(F_CPU) or sample.get("cpu", 0),
+        "mem": sample.get(F_MEMORY) or sample.get("mem", 0),
+        "net": sample.get(F_NET) or sample.get("net", 0),
+    }
+    # Include network interface details if present
+    ni = sample.get(F_NET_INTERFACES) or sample.get("ni")
+    if ni:
+        result["ni"] = ni
     return result
 
 

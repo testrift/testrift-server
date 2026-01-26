@@ -234,6 +234,7 @@ async def test_run_index_handler(request):
         retention_days = run.retention_days
         run_name = run.run_name
         abort_reason = run.abort_reason
+        metrics = run.metrics or []
         if run.group or run.group_hash:
             group_info = {
                 "name": run.group.get("name") if run.group else None,
@@ -265,11 +266,13 @@ async def test_run_index_handler(request):
         # Convert test cases list to dict format expected by template
         storage_lookup = {}
         abort_reason = None
+        metrics = []
         if files_exist:
             disk_run = TestRunData.load_from_disk(run_id)
             if disk_run:
                 storage_lookup = {tc.full_name: tc.tc_id for tc in disk_run.test_cases.values()}
                 abort_reason = disk_run.abort_reason
+                metrics = disk_run.metrics or []
 
         test_cases_dict = {}
         for tc in test_cases_list:
@@ -329,6 +332,7 @@ async def test_run_index_handler(request):
         skipped_count=skipped_count,
         error_count=error_count,
         files_exist=files_exist,
+        metrics=metrics,
         server_mode=True
     )
 
@@ -418,6 +422,9 @@ async def test_case_log_handler(request):
         string_table = getattr(run, 'string_table', None) or {}
         decoded_logs = decode_log_entries(test_case.logs, string_table) if test_case.logs else []
 
+    # Get metrics from the run (for showing stats during this test case's execution)
+    metrics = getattr(run, 'metrics', None) or []
+
     html = render_template(
         'test_case_log.html',
         run_id=run_id,
@@ -432,7 +439,8 @@ async def test_case_log_handler(request):
         live_run=live_run,
         server_mode=True,  # Always True when served from live server
         attachments=None,  # Attachments loaded via API in server mode
-        group_hash=group_hash
+        group_hash=group_hash,
+        metrics=metrics
     )
 
     # Add cache control headers to prevent caching of live test case logs

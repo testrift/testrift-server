@@ -304,16 +304,9 @@ async def api_test_case_history_with_links_handler(request):
             if current_run_id and run_id == current_run_id:
                 continue
 
-            # tc_id comes directly from database
+            # Check if run directory exists (logs may be merged after run finishes)
             tc_id = item.get('tc_id')
-            if tc_id:
-                try:
-                    log_path = get_case_log_path(run_id, tc_id=tc_id)
-                    item['has_log'] = log_path.exists()
-                except Exception:
-                    item['has_log'] = False
-            else:
-                item['has_log'] = False
+            item['has_log'] = tc_id and get_run_path(run_id).exists()
 
             result.append(item)
 
@@ -518,14 +511,8 @@ async def api_failures_toplist_handler(request):
                     run_id = info['run_id']
                     tc_id = info.get('tc_id', '')
                     count = info.get('count', 1)
-                    try:
-                        if tc_id:
-                            log_path = get_case_log_path(run_id, tc_id=tc_id)
-                        else:
-                            log_path = get_case_log_path(run_id, tc_full_name)
-                        has_log = log_path.exists()
-                    except Exception:
-                        has_log = False
+                    # Check if run directory exists (logs may be merged after run finishes)
+                    has_log = tc_id and get_run_path(run_id).exists()
                     affected_list.append({
                         TC_ID_FIELD: tc_id,
                         TC_FULL_NAME_FIELD: tc_full_name,
@@ -539,14 +526,8 @@ async def api_failures_toplist_handler(request):
                 # Also check if the overall last failure log exists
                 if r['last_failure_run_id'] and r['last_failure_test_case']:
                     last_tc_id = r.get('last_failure_tc_id', '')
-                    try:
-                        if last_tc_id:
-                            last_log_path = get_case_log_path(r['last_failure_run_id'], tc_id=last_tc_id)
-                        else:
-                            last_log_path = get_case_log_path(r['last_failure_run_id'], r['last_failure_test_case'])
-                        has_last_log = last_log_path.exists()
-                    except Exception:
-                        has_last_log = False
+                    # Check if run directory exists (logs may be merged after run finishes)
+                    has_last_log = last_tc_id and get_run_path(r['last_failure_run_id']).exists()
                     if has_last_log:
                         r['last_failure_test_case'] = {
                             TC_ID_FIELD: last_tc_id,
@@ -584,12 +565,8 @@ async def api_failures_toplist_handler(request):
                     r[TC_ID_FIELD] = ""
 
                 if r.get('last_failure_run_id') and tc_id:
-                    try:
-                        log_path = get_case_log_path(r['last_failure_run_id'], tc_id=tc_id)
-                        has_log = log_path.exists()
-                    except Exception:
-                        has_log = False
-                    if not has_log:
+                    # Check if run directory exists (logs may be merged after run finishes)
+                    if not get_run_path(r['last_failure_run_id']).exists():
                         r['last_failure_run_id'] = None
 
             return web.json_response({
@@ -641,12 +618,8 @@ async def api_classifications_for_run_handler(request):
             if 'history' in class_data:
                 for hist_item in class_data['history']:
                     hist_run_id = hist_item.get('run_id')
-                    if hist_run_id:
-                        try:
-                            log_path = get_case_log_path(hist_run_id, tc_id)
-                            hist_item['has_log'] = log_path.exists()
-                        except Exception:
-                            hist_item['has_log'] = False
+                    # Check if run directory exists (logs may be merged after run finishes)
+                    hist_item['has_log'] = bool(hist_run_id) and get_run_path(hist_run_id).exists()
 
         return web.json_response({
             "success": True,
@@ -716,14 +689,8 @@ async def api_tc_hover_history_handler(request):
             for item in history_items:
                 run_id = item.get('run_id')
                 tc_id = item.get('tc_id')
-                try:
-                    if tc_id:
-                        log_path = get_case_log_path(run_id, tc_id=tc_id)
-                    else:
-                        log_path = get_case_log_path(run_id, tc_full_name)
-                    has_log = log_path.exists()
-                except Exception:
-                    has_log = False
+                # Check if run directory exists (logs may be merged after run finishes)
+                has_log = tc_id and get_run_path(run_id).exists()
                 result.append({
                     'status': item['status'],
                     'run_id': run_id,

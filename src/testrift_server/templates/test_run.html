@@ -693,6 +693,87 @@
             opacity: 1;
             }
         }
+
+    /* Metrics Section Styles */
+    .metrics-section {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-radius: 12px;
+        padding: 15px 20px;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+    }
+
+    .metrics-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .metrics-legend {
+        display: flex;
+        gap: 15px;
+        font-size: 0.85em;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: #6c757d;
+    }
+
+    .legend-color {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+    }
+
+    .cpu-color {
+        background-color: #667eea;
+    }
+
+    .mem-color {
+        background-color: #28a745;
+    }
+
+    .net-color {
+        background-color: #e67e22;
+    }
+
+    .metrics-chart-container {
+        background: white;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+
+    #metrics-chart {
+        width: 100% !important;
+        height: 80px !important;
+    }
+
+    .metrics-summary {
+        display: flex;
+        gap: 30px;
+        font-size: 0.85em;
+        color: #6c757d;
+    }
+
+    .metric-stat {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .metric-label {
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .metric-value {
+        font-family: 'Courier New', monospace;
+    }
     </style>
 </head>
 <body>
@@ -799,6 +880,42 @@
                 </div>
             </div>
 
+            <!-- System Metrics Chart -->
+            <div class="metrics-section" id="metrics-section" style="display: none;">
+                <div class="metrics-header">
+                    <h4 style="margin: 0; color: #495057; font-weight: 600;">System Metrics</h4>
+                    <div class="metrics-legend">
+                        <span class="legend-item"><span class="legend-color cpu-color"></span> CPU</span>
+                        <span class="legend-item"><span class="legend-color mem-color"></span> Memory</span>
+                        <span class="legend-item"><span class="legend-color net-color"></span> Network</span>
+                    </div>
+                </div>
+                <div class="metrics-chart-container" style="position: relative;">
+                    <canvas id="metrics-chart" height="80"></canvas>
+                    <div id="metrics-tooltip" style="display: none; position: absolute; background: rgba(0,0,0,0.92); color: white; padding: 10px 14px; border-radius: 6px; font-size: 12px; z-index: 1000; max-width: 500px;"></div>
+                </div>
+                <div class="metrics-summary" id="metrics-summary">
+                    <div class="metric-stat">
+                        <span class="metric-label">CPU:</span>
+                        <span class="metric-value" id="cpu-min">-</span> min /
+                        <span class="metric-value" id="cpu-avg">-</span> avg /
+                        <span class="metric-value" id="cpu-max">-</span> max
+                    </div>
+                    <div class="metric-stat">
+                        <span class="metric-label">Memory:</span>
+                        <span class="metric-value" id="mem-min">-</span> min /
+                        <span class="metric-value" id="mem-avg">-</span> avg /
+                        <span class="metric-value" id="mem-max">-</span> max
+                    </div>
+                    <div class="metric-stat">
+                        <span class="metric-label">Network:</span>
+                        <span class="metric-value" id="net-min">-</span> min /
+                        <span class="metric-value" id="net-avg">-</span> avg /
+                        <span class="metric-value" id="net-max">-</span> max
+                    </div>
+                </div>
+            </div>
+
             <div class="test-cases-header">
                 <h2>Test Cases</h2>
                 <div style="display: flex; align-items: center; gap: 15px;">
@@ -846,6 +963,33 @@
             serverMode: {{ server_mode | tojson if server_mode is defined else 'true' }},
             liveRun: {{ live_run | tojson }}
         };
+
+        // Metrics data from server (initial load)
+        let metricsData = {{ metrics | tojson if metrics is defined else '[]' }};
+
+        // Downsample initial metrics if too many
+        function downsampleMetricsInitial() {
+            const maxSamples = 2000;
+            while (metricsData.length > maxSamples) {
+                const result = [];
+                for (let i = 0; i < metricsData.length - 1; i += 2) {
+                    const m1 = metricsData[i];
+                    const m2 = metricsData[i + 1];
+                    result.push({
+                        ts: Math.round((m1.ts + m2.ts) / 2),
+                        cpu: Math.round(((m1.cpu + m2.cpu) / 2) * 10) / 10,
+                        mem: Math.round(((m1.mem + m2.mem) / 2) * 10) / 10,
+                        net: Math.round(((m1.net || 0) + (m2.net || 0)) / 2 * 10) / 10,
+                        ni: m1.ni || m2.ni
+                    });
+                }
+                if (metricsData.length % 2 === 1) {
+                    result.push(metricsData[metricsData.length - 1]);
+                }
+                metricsData = result;
+            }
+        }
+        downsampleMetricsInitial();
 
         // Classification data storage
         let classificationsData = {};
@@ -3826,10 +3970,377 @@
             }
         }
 
+        // =====================
+        // Metrics Chart Rendering
+        // =====================
+        let metricsChartCtx = null;
+
+        function initializeMetricsChart() {
+            const canvas = document.getElementById('metrics-chart');
+            if (!canvas) return;
+            metricsChartCtx = canvas.getContext('2d');
+
+            // Initial render if we have data
+            if (metricsData && metricsData.length > 0) {
+                renderMetricsChart();
+            }
+        }
+
+        function renderMetricsChart() {
+            if (!metricsData || metricsData.length === 0) {
+                document.getElementById('metrics-section').style.display = 'none';
+                return;
+            }
+
+            // Ensure context is initialized
+            if (!metricsChartCtx) {
+                const canvas = document.getElementById('metrics-chart');
+                if (!canvas) return;
+                metricsChartCtx = canvas.getContext('2d');
+            }
+
+            document.getElementById('metrics-section').style.display = 'block';
+
+            const canvas = document.getElementById('metrics-chart');
+            const ctx = metricsChartCtx;
+            // Use container width or fallback to a reasonable default
+            let width = canvas.offsetWidth;
+            if (width === 0) {
+                // Section was just shown, get parent width or use default
+                const container = canvas.closest('.metrics-chart-container');
+                width = container ? container.offsetWidth : 800;
+                if (width === 0) width = 800;
+            }
+            const height = 80;
+
+            // Set actual canvas size (accounting for device pixel ratio for sharpness)
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+            ctx.scale(dpr, dpr);
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Calculate statistics
+            const cpuValues = metricsData.map(m => m.cpu || 0);
+            const memValues = metricsData.map(m => m.mem || 0);
+            const netValues = metricsData.map(m => m.net || 0);
+
+            const cpuMin = Math.min(...cpuValues);
+            const cpuMax = Math.max(...cpuValues);
+            const cpuAvg = cpuValues.reduce((a, b) => a + b, 0) / cpuValues.length;
+
+            const memMin = Math.min(...memValues);
+            const memMax = Math.max(...memValues);
+            const memAvg = memValues.reduce((a, b) => a + b, 0) / memValues.length;
+
+            const netMin = Math.min(...netValues);
+            const netMax = Math.max(...netValues);
+            const netAvg = netValues.reduce((a, b) => a + b, 0) / netValues.length;
+
+            // Update summary stats
+            document.getElementById('cpu-min').textContent = cpuMin.toFixed(1) + '%';
+            document.getElementById('cpu-avg').textContent = cpuAvg.toFixed(1) + '%';
+            document.getElementById('cpu-max').textContent = cpuMax.toFixed(1) + '%';
+            document.getElementById('mem-min').textContent = memMin.toFixed(1) + '%';
+            document.getElementById('mem-avg').textContent = memAvg.toFixed(1) + '%';
+            document.getElementById('mem-max').textContent = memMax.toFixed(1) + '%';
+            document.getElementById('net-min').textContent = netMin.toFixed(1) + '%';
+            document.getElementById('net-avg').textContent = netAvg.toFixed(1) + '%';
+            document.getElementById('net-max').textContent = netMax.toFixed(1) + '%';
+
+            // Chart drawing parameters
+            const padding = { top: 5, right: 10, bottom: 5, left: 10 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            // Y axis: 0-100%
+            const yScale = (v) => padding.top + chartHeight - (v / 100) * chartHeight;
+            const xScale = (i) => padding.left + (i / (metricsData.length - 1 || 1)) * chartWidth;
+
+            // Draw background grid lines
+            ctx.strokeStyle = '#c5ccd4';
+            ctx.lineWidth = 1;
+            for (let p = 0; p <= 100; p += 25) {
+                const y = yScale(p);
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(width - padding.right, y);
+                ctx.stroke();
+            }
+
+            // Draw System CPU line
+            ctx.strokeStyle = '#667eea';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            metricsData.forEach((m, i) => {
+                const x = xScale(i);
+                const y = yScale(m.cpu || 0);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Draw Memory line
+            ctx.strokeStyle = '#28a745';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            metricsData.forEach((m, i) => {
+                const x = xScale(i);
+                const y = yScale(m.mem || 0);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Draw Network line
+            ctx.strokeStyle = '#e67e22';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            metricsData.forEach((m, i) => {
+                const x = xScale(i);
+                const y = yScale(m.net || 0);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
+
+        function handleMetricsUpdate(metrics) {
+            if (!metrics || !Array.isArray(metrics)) return;
+
+            // Append new metrics
+            metrics.forEach(m => {
+                metricsData.push({
+                    ts: m.ts || m.timestamp,
+                    cpu: m.cpu || 0,
+                    mem: m.mem || m.memory || 0,
+                    net: m.net || 0,
+                    ni: m.ni || null
+                });
+            });
+
+            // Downsample if too many samples (keep max ~2000 for chart rendering)
+            const maxSamples = 2000;
+            while (metricsData.length > maxSamples) {
+                metricsData = downsampleMetrics(metricsData);
+            }
+
+            // Re-render chart
+            renderMetricsChart();
+        }
+
+        function downsampleMetrics(data) {
+            // Average consecutive pairs to halve the sample count
+            const result = [];
+            for (let i = 0; i < data.length - 1; i += 2) {
+                const m1 = data[i];
+                const m2 = data[i + 1];
+                result.push({
+                    ts: Math.round((m1.ts + m2.ts) / 2),
+                    cpu: Math.round(((m1.cpu + m2.cpu) / 2) * 10) / 10,
+                    mem: Math.round(((m1.mem + m2.mem) / 2) * 10) / 10,
+                    net: Math.round(((m1.net + m2.net) / 2) * 10) / 10,
+                    ni: m1.ni || m2.ni  // Keep interface details from either sample
+                });
+            }
+            // Handle odd count - keep last sample
+            if (data.length % 2 === 1) {
+                result.push(data[data.length - 1]);
+            }
+            return result;
+        }
+
+        // Metrics chart hover tooltip for showing running test cases
+        let metricsTooltipPinned = false;
+        let lastTooltipSampleIndex = -1;
+
+        function initializeMetricsChartHover() {
+            const canvas = document.getElementById('metrics-chart');
+            const tooltip = document.getElementById('metrics-tooltip');
+            if (!canvas || !tooltip) return;
+
+            const padding = { top: 5, right: 10, bottom: 5, left: 10 };
+            const filesExist = {{ files_exist | tojson if files_exist is defined else 'true' }};
+
+            function updateTooltip(e) {
+                if (!metricsData || metricsData.length === 0) {
+                    if (!metricsTooltipPinned) tooltip.style.display = 'none';
+                    return;
+                }
+
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const chartWidth = rect.width - padding.left - padding.right;
+
+                // Determine which sample index we're hovering over
+                const ratio = (x - padding.left) / chartWidth;
+                const sampleIndex = Math.round(ratio * (metricsData.length - 1));
+                if (sampleIndex < 0 || sampleIndex >= metricsData.length) {
+                    if (!metricsTooltipPinned) tooltip.style.display = 'none';
+                    return;
+                }
+
+                lastTooltipSampleIndex = sampleIndex;
+                renderTooltipContent(sampleIndex, e, rect, filesExist);
+            }
+
+            function renderTooltipContent(sampleIndex, e, rect, filesExist) {
+                const sample = metricsData[sampleIndex];
+                const sampleTs = sample.ts;
+
+                // Find test cases running at this timestamp
+                const runningTests = [];
+                testMap.forEach((testEntry, testId) => {
+                    if (!testEntry.startTime) return;
+                    const testStart = new Date(testEntry.startTime).getTime();
+                    let testEnd = testEntry.endTime ? new Date(testEntry.endTime).getTime() : Date.now();
+                    // If still running, use current time
+                    if (testEntry.Status && testEntry.Status.toLowerCase() === 'running') {
+                        testEnd = Date.now();
+                    }
+                    if (sampleTs >= testStart && sampleTs <= testEnd) {
+                        runningTests.push({ name: testEntry.name || testId, url: testEntry.traceHtmlFile });
+                    }
+                });
+
+                // Build tooltip content
+                const time = new Date(sampleTs).toLocaleTimeString();
+                let html = `<div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">`;
+                html += `<strong>${time}</strong>`;
+                if (metricsTooltipPinned) {
+                    html += `<span id="close-metrics-tooltip" style="cursor: pointer; margin-left: 15px; color: #888; font-size: 14px;">&times;</span>`;
+                } else {
+                    html += `<span style="font-size: 10px; color: #888; margin-left: 10px;">click to pin</span>`;
+                }
+                html += `</div>`;
+                html += `<div>CPU: <span style="color: #a3b3f4">${(sample.cpu || 0).toFixed(1)}%</span></div>`;
+                html += `<div>Memory: <span style="color: #68d391">${(sample.mem || 0).toFixed(1)}%</span></div>`;
+                html += `<div>Network: <span style="color: #f5a860">${(sample.net || 0).toFixed(1)}%</span>`;
+                // Show per-interface details if available
+                if (sample.ni && sample.ni.length > 0) {
+                    html += ` <span style="color: #888; font-size: 11px;">(`;
+                    html += sample.ni.map(iface => `${iface.n}: ↑${(iface.tx || 0).toFixed(1)}% ↓${(iface.rx || 0).toFixed(1)}%`).join(', ');
+                    html += `)</span>`;
+                }
+                html += `</div>`;
+
+                if (runningTests.length > 0) {
+                    html += `<div style="margin-top: 8px; border-top: 1px solid #555; padding-top: 6px;">`;
+                    html += `<strong>Running (${runningTests.length}):</strong>`;
+                    const displayTests = runningTests.slice(0, 10);
+                    displayTests.forEach(tc => {
+                        const shortName = tc.name.length > 60 ? '...' + tc.name.slice(-57) : tc.name;
+                        if (filesExist && tc.url && metricsTooltipPinned) {
+                            // Clickable link when pinned and files exist
+                            html += `<div style="font-size: 11px; margin: 2px 0;"><a href="${tc.url}" style="color: #7dd3fc; text-decoration: none;" target="_blank">${shortName}</a></div>`;
+                        } else {
+                            html += `<div style="font-size: 11px; color: #ccc; margin: 2px 0;">${shortName}</div>`;
+                        }
+                    });
+                    if (runningTests.length > 10) {
+                        html += `<div style="font-size: 11px; color: #888;">...and ${runningTests.length - 10} more</div>`;
+                    }
+                    html += `</div>`;
+                }
+
+                tooltip.innerHTML = html;
+                tooltip.style.display = 'block';
+
+                // Add close button handler if pinned
+                if (metricsTooltipPinned) {
+                    const closeBtn = document.getElementById('close-metrics-tooltip');
+                    if (closeBtn) {
+                        closeBtn.addEventListener('click', function(ev) {
+                            ev.stopPropagation();
+                            metricsTooltipPinned = false;
+                            tooltip.style.display = 'none';
+                        });
+                    }
+                }
+
+                // Position tooltip (only when not pinned or on initial pin)
+                if (!metricsTooltipPinned || !tooltip.dataset.positioned) {
+                    const containerRect = canvas.closest('.metrics-chart-container').getBoundingClientRect();
+                    // First, show tooltip to measure its size
+                    tooltip.style.visibility = 'hidden';
+                    tooltip.style.display = 'block';
+                    const tooltipWidth = tooltip.offsetWidth;
+                    tooltip.style.visibility = 'visible';
+
+                    let tooltipX = e.clientX - containerRect.left + 15;
+                    let tooltipY = 5;
+
+                    // If tooltip would go off right edge, position it to the left of cursor
+                    if (tooltipX + tooltipWidth > containerRect.width - 10) {
+                        tooltipX = e.clientX - containerRect.left - tooltipWidth - 15;
+                    }
+                    // Ensure it doesn't go off left edge
+                    if (tooltipX < 5) tooltipX = 5;
+
+                    tooltip.style.left = tooltipX + 'px';
+                    tooltip.style.top = tooltipY + 'px';
+                    if (metricsTooltipPinned) tooltip.dataset.positioned = 'true';
+                }
+            }
+
+            canvas.addEventListener('mousemove', function(e) {
+                if (!metricsTooltipPinned) {
+                    updateTooltip(e);
+                }
+            });
+
+            canvas.addEventListener('click', function(e) {
+                if (metricsTooltipPinned) {
+                    // Unpin
+                    metricsTooltipPinned = false;
+                    tooltip.dataset.positioned = '';
+                    updateTooltip(e);
+                } else {
+                    // Pin at current position
+                    metricsTooltipPinned = true;
+                    const rect = canvas.getBoundingClientRect();
+                    const filesExist = {{ files_exist | tojson if files_exist is defined else 'true' }};
+                    renderTooltipContent(lastTooltipSampleIndex, e, rect, filesExist);
+                }
+            });
+
+            canvas.addEventListener('mouseleave', function() {
+                if (!metricsTooltipPinned) {
+                    tooltip.style.display = 'none';
+                }
+            });
+
+            // Close tooltip when clicking outside
+            document.addEventListener('click', function(e) {
+                if (metricsTooltipPinned && !tooltip.contains(e.target) && e.target !== canvas) {
+                    metricsTooltipPinned = false;
+                    tooltip.dataset.positioned = '';
+                    tooltip.style.display = 'none';
+                }
+            });
+        }
+
+        // Handle window resize
+        let resizeTimeout;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(function() {
+                if (metricsData && metricsData.length > 0) {
+                    renderMetricsChart();
+                }
+            }, 100);
+        });
+
         $(document).ready(function () {
             convertTimesToLocal(); // Convert times on page load
             initializeTestTree();
             initializeRunExecutionTime();
+            initializeMetricsChart();
+            initializeMetricsChartHover();
 
             // Add event listeners for expand/collapse buttons
             $('#expand-all-btn').on('click', function() {
@@ -3861,145 +4372,199 @@
             const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
             const ws = new WebSocket(`${scheme}://${location.host}/ws/ui`);
             ws.binaryType = 'arraybuffer';
+
+            // UI Update Throttling - batch WebSocket updates and apply every 500ms
+            let pendingUpdates = {
+                testCaseStarted: [],
+                testCaseFinished: [],
+                metrics: [],
+                runFinished: null
+            };
+            let uiUpdateScheduled = false;
+            const UI_UPDATE_INTERVAL = 500; // ms
+
+            function scheduleUIUpdate() {
+                if (uiUpdateScheduled) return;
+                uiUpdateScheduled = true;
+                setTimeout(flushUIUpdates, UI_UPDATE_INTERVAL);
+            }
+
+            function flushUIUpdates() {
+                uiUpdateScheduled = false;
+
+                // Process test case started
+                pendingUpdates.testCaseStarted.forEach(msg => {
+                    addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta, true);
+                });
+                if (pendingUpdates.testCaseStarted.length > 0) {
+                    addLiveIndicator();
+                }
+                pendingUpdates.testCaseStarted = [];
+
+                // Process test case finished
+                pendingUpdates.testCaseFinished.forEach(msg => {
+                    addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta);
+                    if (msg.counts) {
+                        updateResultBadges(msg.counts);
+                    }
+                });
+                pendingUpdates.testCaseFinished = [];
+
+                // Check if any tests are still running
+                let hasRunningTests = false;
+                testMap.forEach((testEntry) => {
+                    if (testEntry.Status && testEntry.Status.toLowerCase() === 'running') {
+                        hasRunningTests = true;
+                    }
+                });
+                if (!hasRunningTests) {
+                    removeLiveIndicator();
+                }
+
+                // Process metrics updates (batch all pending metrics together)
+                if (pendingUpdates.metrics.length > 0) {
+                    const allMetrics = pendingUpdates.metrics.flat();
+                    if (allMetrics.length > 0) {
+                        handleMetricsUpdate(allMetrics);
+                    }
+                    pendingUpdates.metrics = [];
+                }
+
+                // Process run finished (use latest)
+                if (pendingUpdates.runFinished) {
+                    processRunFinished(pendingUpdates.runFinished);
+                    pendingUpdates.runFinished = null;
+                }
+            }
+
             ws.onmessage = (event) => {
                 try {
                     const msg = msgpack.decode(new Uint8Array(event.data));
                     if (msg.type === 'test_case_started' && msg.run_id === '{{ run_id }}') {
-                        addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta, true); // Force running status
-                        // Add live indicator when tests are running
-                        addLiveIndicator();
+                        pendingUpdates.testCaseStarted.push(msg);
+                        scheduleUIUpdate();
+                    }
+                    else if (msg.type === 'metrics' && msg.run_id === '{{ run_id }}') {
+                        pendingUpdates.metrics.push(msg.metrics);
+                        scheduleUIUpdate();
                     }
                     else if ((msg.type === 'test_case_finished' || msg.type === 'test_case_updated') && msg.run_id === '{{ run_id }}') {
-                        addOrUpdateTestCase(msg.test_case_full_name, msg.tc_meta);
-
-                        // Check if any tests are still running
-                        let hasRunningTests = false;
-                        testMap.forEach((testEntry) => {
-                            if (testEntry.Status && testEntry.Status.toLowerCase() === 'running') {
-                                hasRunningTests = true;
-                            }
-                        });
-
-                        if (!hasRunningTests) {
-                            removeLiveIndicator();
-                        }
-
-                        // Update result badges with optimized counts
-                        if (msg.counts) {
-                            updateResultBadges(msg.counts);
-                        }
-
-                        // Don't update top-right status badge on individual test case updates
-                        // Only update result badges, status badge will be updated on run_finished
+                        pendingUpdates.testCaseFinished.push(msg);
+                        scheduleUIUpdate();
                     }
                     else if ((msg.type === 'run_finished' || msg.type === 'run_updated') && msg.run.run_id === '{{ run_id }}') {
-                        // Add live indicator if run status is running
-                        if (msg.run.status && msg.run.status.toLowerCase() === 'running') {
-                            addLiveIndicator();
-                            // Start run execution time tracking if not already started
-                            if (!runStartTime && msg.run.start_time) {
-                                // Find the earliest test case start time for more accurate execution time
-                                let earliestStartTime = null;
-                                let earliestStartTimeStr = '';
+                        pendingUpdates.runFinished = msg;
+                        scheduleUIUpdate();
+                    }
+                } catch(e) {
+                    console.error('Failed to decode message:', e);
+                }
+            };
 
-                                testMap.forEach((testEntry, testId) => {
-                                    if (testEntry.startTime) {
-                                        // Test case start times are local time strings - convert to UTC milliseconds for comparison
-                                        const testStartTime = new Date(testEntry.startTime).getTime();
-                                        if (!earliestStartTime || testStartTime < earliestStartTime) {
-                                            earliestStartTime = testStartTime;
-                                            earliestStartTimeStr = testEntry.startTime;
-                                        }
-                                    }
-                                });
+            function processRunFinished(msg) {
+                // Add live indicator if run status is running
+                if (msg.run.status && msg.run.status.toLowerCase() === 'running') {
+                    addLiveIndicator();
+                    // Start run execution time tracking if not already started
+                    if (!runStartTime && msg.run.start_time) {
+                        // Find the earliest test case start time for more accurate execution time
+                        let earliestStartTime = null;
+                        let earliestStartTimeStr = '';
 
-                                // Use earliest test case start time if available, otherwise use run start time
-                                const startTimeToUse = earliestStartTimeStr || msg.run.start_time;
-                                runStartTime = new Date(startTimeToUse).getTime();
-                                showRunExecutionTime();
-                                startRunExecutionTimer();
-                            }
-                        } else {
-                            // Run finished - stop real-time tracking and show final time
-                            stopRunExecutionTimer();
-                            if (msg.run.start_time && msg.run.end_time) {
-                                // Calculate and show final execution time
-                                let startTimeStr = msg.run.start_time;
-                                let endTimeStr = msg.run.end_time;
-
-                                if (!endTimeStr.includes('Z') && !endTimeStr.includes('+') && !endTimeStr.includes('-', 10)) {
-                                    endTimeStr += 'Z';
-                                }
-
-                                const start = new Date(startTimeStr);
-                                const end = new Date(endTimeStr);
-                                const duration = end - start;
-
-                                if (duration > 0) {
-                                    const formattedTime = formatExecutionTime(duration);
-                                    const runExecutionTimeElement = document.getElementById('run-execution-time');
-                                    if (runExecutionTimeElement) {
-                                        runExecutionTimeElement.textContent = `⏱️ ${formattedTime}`;
-                                        runExecutionTimeElement.style.display = 'inline';
-                                    }
-                                }
-                            }
-                        }
-
-                        // Show download button when run finishes
-                        showDownloadButton();
-
-                        // Update result badges and status badge using new functions
-                        // Count test results for badges
-                        let passedCount = 0;
-                        let failedCount = 0;
-                        let skippedCount = 0;
-                        let abortedCount = 0;
-                        let errorCount = 0;
-
-                        testMap.forEach((testEntry) => {
-                            // Only count test cases that have URLs (actual test cases, not parent containers)
-                            if (testEntry.traceHtmlFile && testEntry.Status) {
-                                const status = testEntry.Status.toLowerCase();
-                                if (status === 'passed') {
-                                    passedCount++;
-                                } else if (status === 'failed') {
-                                    failedCount++;
-                                } else if (status === 'skipped') {
-                                    skippedCount++;
-                                } else if (status === 'error') {
-                                    errorCount++;
-                                } else if (status === 'aborted') {
-                                    abortedCount++;
+                        testMap.forEach((testEntry, testId) => {
+                            if (testEntry.startTime) {
+                                // Test case start times are local time strings - convert to UTC milliseconds for comparison
+                                const testStartTime = new Date(testEntry.startTime).getTime();
+                                if (!earliestStartTime || testStartTime < earliestStartTime) {
+                                    earliestStartTime = testStartTime;
+                                    earliestStartTimeStr = testEntry.startTime;
                                 }
                             }
                         });
 
-                        // Update result badges
-                        updateResultBadges({passed: passedCount, failed: failedCount, skipped: skippedCount, aborted: abortedCount, error: errorCount});
+                        // Use earliest test case start time if available, otherwise use run start time
+                        const startTimeToUse = earliestStartTimeStr || msg.run.start_time;
+                        runStartTime = new Date(startTimeToUse).getTime();
+                        showRunExecutionTime();
+                        startRunExecutionTimer();
+                    }
+                } else {
+                    // Run finished - stop real-time tracking and show final time
+                    stopRunExecutionTimer();
+                    if (msg.run.start_time && msg.run.end_time) {
+                        // Calculate and show final execution time
+                        let startTimeStr = msg.run.start_time;
+                        let endTimeStr = msg.run.end_time;
 
-                        // Update top-right status badge
-                        updateTopStatusBadge(msg.run, {passed: passedCount, failed: failedCount, skipped: skippedCount, aborted: abortedCount, error: errorCount});
+                        if (!endTimeStr.includes('Z') && !endTimeStr.includes('+') && !endTimeStr.includes('-', 10)) {
+                            endTimeStr += 'Z';
+                        }
 
-                        // Update End Time if available
-                        if (msg.run.end_time) {
-                            const endTimeDisplay = document.getElementById('end-time-display');
-                            if (endTimeDisplay) {
-                                endTimeDisplay.textContent = convertToLocalTime(msg.run.end_time);
+                        const start = new Date(startTimeStr);
+                        const end = new Date(endTimeStr);
+                        const duration = end - start;
+
+                        if (duration > 0) {
+                            const formattedTime = formatExecutionTime(duration);
+                            const runExecutionTimeElement = document.getElementById('run-execution-time');
+                            if (runExecutionTimeElement) {
+                                runExecutionTimeElement.textContent = `⏱️ ${formattedTime}`;
+                                runExecutionTimeElement.style.display = 'inline';
                             }
                         }
+                    }
+                }
 
-                        // Remove live indicator when run finishes
-                        if (msg.run.status.toLowerCase() === 'finished') {
-                            removeLiveIndicator();
-                            // Rebuild the tree with compact structure when run finishes
-                            rebuildCompactTree();
+                // Show download button when run finishes
+                showDownloadButton();
+
+                // Update result badges and status badge using new functions
+                // Count test results for badges
+                let passedCount = 0;
+                let failedCount = 0;
+                let skippedCount = 0;
+                let abortedCount = 0;
+                let errorCount = 0;
+
+                testMap.forEach((testEntry) => {
+                    // Only count test cases that have URLs (actual test cases, not parent containers)
+                    if (testEntry.traceHtmlFile && testEntry.Status) {
+                        const status = testEntry.Status.toLowerCase();
+                        if (status === 'passed') {
+                            passedCount++;
+                        } else if (status === 'failed') {
+                            failedCount++;
+                        } else if (status === 'skipped') {
+                            skippedCount++;
+                        } else if (status === 'error') {
+                            errorCount++;
+                        } else if (status === 'aborted') {
+                            abortedCount++;
                         }
                     }
-                } catch(e) {
-                    console.error('WS message parse error', e);
+                });
+
+                // Update result badges
+                updateResultBadges({passed: passedCount, failed: failedCount, skipped: skippedCount, aborted: abortedCount, error: errorCount});
+
+                // Update top-right status badge
+                updateTopStatusBadge(msg.run, {passed: passedCount, failed: failedCount, skipped: skippedCount, aborted: abortedCount, error: errorCount});
+
+                // Update End Time if available
+                if (msg.run.end_time) {
+                    const endTimeDisplay = document.getElementById('end-time-display');
+                    if (endTimeDisplay) {
+                        endTimeDisplay.textContent = convertToLocalTime(msg.run.end_time);
+                    }
                 }
-            };
+
+                // Remove live indicator when run finishes
+                if (msg.run.status.toLowerCase() === 'finished') {
+                    removeLiveIndicator();
+                    // Rebuild the tree with compact structure when run finishes
+                    rebuildCompactTree();
+                }
+            }
             {% endif %}
         });
 

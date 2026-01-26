@@ -25,6 +25,7 @@ from .protocol import (
     MSG_RUN_FINISHED,
     MSG_BATCH,
     MSG_HEARTBEAT,
+    MSG_METRICS,
     STATUS_RUNNING,
     STATUS_PASSED,
     STATUS_FAILED,
@@ -58,6 +59,9 @@ from .protocol import (
     F_LOCAL_RUN,
     F_ERROR,
     F_RUN_URL,
+    F_METRICS,
+    F_CPU,
+    F_MEMORY,
     F_GROUP_URL,
     F_GROUP_HASH,
 )
@@ -338,6 +342,9 @@ class WebSocketServer:
                     elif msg_type == "heartbeat":
                         # Client heartbeat - just acknowledge receipt, activity is tracked by message receipt
                         logger.debug(f"Heartbeat received for run {data.get('run_id', 'unknown')}")
+
+                    elif msg_type == "metrics":
+                        await self._handle_metrics(data, run)
 
                     elif msg_type == "test_case_started":
                         await self._handle_test_case_started(data, run)
@@ -809,6 +816,47 @@ class WebSocketServer:
             logger.error(f"Error in test_case_finished: {e}")
             import traceback
             traceback.print_exc()
+
+    async def _handle_metrics(self, data, run):
+        """Handle metrics message with CPU and memory samples."""
+        try:
+            if not run:
+                logger.debug("Metrics received but no active run")
+                return
+
+            metrics = data.get("metrics", [])
+            if not metrics:
+                return
+
+            # Append metrics to run's metrics list
+            for sample in metrics:
+                ts = sample.get("ts") or sample.get("timestamp")
+                cpu = sample.get("cpu", 0)
+                mem = sample.get("mem") or sample.get("memory", 0)
+                net = sample.get("net", 0)
+                ni = sample.get("ni")
+
+                metric_entry = {
+                    "ts": ts,
+                    "cpu": cpu,
+                    "mem": mem,
+                    "net": net
+                }
+                if ni:
+                    metric_entry["ni"] = ni
+                run.metrics.append(metric_entry)
+
+            logger.debug(f"Received {len(metrics)} metrics samples for run {run.id}, total: {len(run.metrics)}")
+
+            # Broadcast metrics to UI clients
+            await self.broadcast_ui({
+                "type": "metrics",
+                "run_id": run.id,
+                "metrics": metrics
+            })
+
+        except Exception as e:
+            logger.error(f"Error handling metrics: {e}")
 
     async def _handle_run_finished(self, data, run):
         """Handle run_finished message."""

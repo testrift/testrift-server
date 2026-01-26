@@ -51,6 +51,8 @@ class TestRunData:
         self.last_update = datetime.now(UTC)
         # String table for interned component/channel strings (id -> string)
         self.string_table: dict[int, str] = {}
+        # System metrics samples: list of {ts, cpu, mem}
+        self.metrics: list[dict] = []
 
     def update_last(self):
         """Update the last activity timestamp."""
@@ -77,6 +79,9 @@ class TestRunData:
         if self.string_table:
             # Convert int keys to strings for JSON compatibility
             result["string_table"] = {str(k): v for k, v in self.string_table.items()}
+        # Include metrics if present
+        if self.metrics:
+            result["metrics"] = self.metrics
         return result
 
     @classmethod
@@ -103,6 +108,8 @@ class TestRunData:
         # Load string table for interned component/channel strings
         string_table_raw = meta.get("string_table", {})
         run.string_table = {int(k): v for k, v in string_table_raw.items()}
+        # Load metrics
+        run.metrics = meta.get("metrics", [])
         return run
 
     @staticmethod

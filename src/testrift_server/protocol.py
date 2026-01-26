@@ -18,6 +18,7 @@ MSG_RUN_FINISHED = 7
 MSG_BATCH = 8
 MSG_HEARTBEAT = 9
 MSG_STRING_TABLE = 10  # For registering component/channel strings
+MSG_METRICS = 11       # System metrics (CPU, memory)
 
 # Reverse lookup for logging/debugging
 MSG_TYPE_NAMES = {
@@ -31,6 +32,7 @@ MSG_TYPE_NAMES = {
     MSG_BATCH: "batch",
     MSG_HEARTBEAT: "heartbeat",
     MSG_STRING_TABLE: "string_table",
+    MSG_METRICS: "metrics",
 }
 
 # =============================================================================
@@ -144,6 +146,13 @@ F_COUNT_ABORTED = "ca"    # Aborted count
 
 # String table fields
 F_STRINGS = "str"         # String table entries: {id: string, ...}
+
+# Metrics fields
+F_METRICS = "mt"          # Metrics array
+F_CPU = "cpu"             # CPU usage percentage (float 0-100)
+F_MEMORY = "mem"          # Memory usage percentage (float 0-100)
+F_NET = "net"             # Network utilization percentage (float 0-100)
+F_NET_INTERFACES = "ni"   # Network interface details array
 
 # =============================================================================
 # STRING TABLE MANAGEMENT
