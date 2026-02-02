@@ -158,6 +158,21 @@ class TestResultsDatabase:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_group_metadata_run_id ON group_metadata (run_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_group_metadata_key ON group_metadata (key)")
 
+            # Create run_commits table for tracking commit SHAs per repo per run
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS run_commits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    repo_name TEXT NOT NULL,
+                    commit_sha TEXT NOT NULL,
+                    repo_url TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE,
+                    UNIQUE (run_id, repo_name)
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_run_commits_run_id ON run_commits (run_id)")
+
             await db.commit()
 
         self._initialized = True
@@ -980,6 +995,93 @@ class TestResultsDatabase:
                 return 'regression'
 
         return None
+
+    async def insert_run_commits(
+        self,
+        run_id: str,
+        commits: List[Dict[str, str]]
+    ) -> bool:
+        """
+        Insert commit SHAs for a run.
+
+        Args:
+            run_id: The run ID
+            commits: List of dicts with repo_name, commit_sha, and optional repo_url
+
+        Returns:
+            True if successful
+        """
+        async with self.get_connection() as db:
+            try:
+                for commit in commits:
+                    await db.execute("""
+                        INSERT OR REPLACE INTO run_commits (run_id, repo_name, commit_sha, repo_url)
+                        VALUES (?, ?, ?, ?)
+                    """, (
+                        run_id,
+                        commit.get("repo_name"),
+                        commit.get("commit_sha"),
+                        commit.get("repo_url"),
+                    ))
+                await db.commit()
+                return True
+            except Exception as e:
+                print(f"Error inserting run commits: {e}")
+                await db.rollback()
+                return False
+
+    async def get_last_commits_for_group(self, group_hash: str) -> Dict[str, str]:
+        """
+        Get the last commit SHA for each repo from the most recent run in a group.
+
+        Args:
+            group_hash: The group hash to query
+
+        Returns:
+            Dict mapping repo_name to commit_sha
+        """
+        async with self.get_connection() as db:
+            # Find the most recent completed run in this group
+            cursor = await db.execute("""
+                SELECT run_id FROM test_runs
+                WHERE group_hash = ? AND status != 'running'
+                ORDER BY start_time DESC
+                LIMIT 1
+            """, (group_hash,))
+            row = await cursor.fetchone()
+
+            if not row:
+                return {}
+
+            last_run_id = row[0]
+
+            # Get all commits for that run
+            cursor = await db.execute("""
+                SELECT repo_name, commit_sha FROM run_commits
+                WHERE run_id = ?
+            """, (last_run_id,))
+            rows = await cursor.fetchall()
+
+            return {row[0]: row[1] for row in rows}
+
+    async def get_commits_for_run(self, run_id: str) -> List[Dict[str, str]]:
+        """
+        Get all commit records for a run.
+
+        Returns:
+            List of dicts with repo_name, commit_sha, repo_url
+        """
+        async with self.get_connection() as db:
+            cursor = await db.execute("""
+                SELECT repo_name, commit_sha, repo_url FROM run_commits
+                WHERE run_id = ?
+            """, (run_id,))
+            rows = await cursor.fetchall()
+
+            return [
+                {"repo_name": row[0], "commit_sha": row[1], "repo_url": row[2]}
+                for row in rows
+            ]
 
 
 # Global database instance - will be initialized with config path

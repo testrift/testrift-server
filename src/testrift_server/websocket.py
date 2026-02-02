@@ -26,12 +26,15 @@ from .protocol import (
     MSG_BATCH,
     MSG_HEARTBEAT,
     MSG_METRICS,
+    MSG_RUN_PREPARE,
+    MSG_RUN_PREPARE_RESPONSE,
     STATUS_RUNNING,
     STATUS_PASSED,
     STATUS_FAILED,
     STATUS_SKIPPED,
     STATUS_ABORTED,
     STATUS_FINISHED,
+    STATUS_PREPARING,
     DIR_TX,
     DIR_RX,
     PHASE_TEARDOWN,
@@ -103,9 +106,53 @@ async def send_msgpack(ws, data):
 class WebSocketServer:
     """Manages WebSocket connections for NUnit clients and UI clients."""
 
+    # Prepared runs expire after 15 minutes if NUnit doesn't connect
+    PREPARED_RUN_EXPIRY_SECONDS = 15 * 60
+
     def __init__(self):
         self.test_runs: dict[str, TestRunData] = {}  # run_id -> TestRunData
+        self.prepared_runs: dict[str, dict] = {}  # run_id -> {run_data, created_at, commits, ...}
         self.ui_clients = set()  # websockets for UI clients
+        self._cleanup_task = None
+
+    async def start_prepared_runs_cleanup(self):
+        """Start background task to clean up expired prepared runs."""
+        self._cleanup_task = asyncio.create_task(self._cleanup_prepared_runs_loop())
+
+    async def stop_prepared_runs_cleanup(self):
+        """Stop the cleanup task."""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _cleanup_prepared_runs_loop(self):
+        """Periodically remove prepared runs older than PREPARED_RUN_EXPIRY_SECONDS."""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Check every minute
+                now = datetime.now(UTC)
+                expired = []
+                for run_id, prepared in list(self.prepared_runs.items()):
+                    created_at = prepared.get("created_at")
+                    if created_at and (now - created_at).total_seconds() > self.PREPARED_RUN_EXPIRY_SECONDS:
+                        expired.append(run_id)
+
+                for run_id in expired:
+                    logger.info(f"Removing expired prepared run: {run_id}")
+                    prepared = self.prepared_runs.pop(run_id, None)
+                    # Clean up the run folder if it exists
+                    if prepared:
+                        run_path = get_run_path(run_id)
+                        if run_path.exists():
+                            import shutil
+                            shutil.rmtree(run_path, ignore_errors=True)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in prepared runs cleanup: {e}")
 
     async def get_unique_run_name(self, base_name: str, group_hash: str = None) -> str:
         """
@@ -333,7 +380,11 @@ class WebSocketServer:
                         logger.error(f"Error parsing MessagePack message: {e}")
                         continue
 
-                    if msg_type == "run_started":
+                    if msg_type == "run_prepare":
+                        await self._handle_run_prepare(ws, data)
+                        # run_prepare doesn't set run - collector disconnects after
+
+                    elif msg_type == "run_started":
                         run = await self._handle_run_started(ws, data, string_table)
 
                     elif msg_type == "batch":
@@ -385,42 +436,94 @@ class WebSocketServer:
             except asyncio.CancelledError:
                 pass
 
-    async def _handle_run_started(self, ws, data, string_table):
-        """Handle run_started message from NUnit client."""
+    async def _handle_run_prepare(self, ws, data):
+        """Handle run_prepare message from collector.
+
+        Creates a prepared run that waits for NUnit to connect.
+        The run is not visible in UI until activated via run_started.
+        """
         try:
-            # Check if client provided a custom run_id
-            client_run_id = data.get("run_id")
-            validation_error = None
+            run_id = uuid.uuid4().hex[:12]
 
-            if client_run_id:
-                # Validate the custom run ID
-                is_valid, error_msg = validate_custom_run_id(client_run_id)
-                if not is_valid:
-                    validation_error = error_msg
-                else:
-                    # Check if run_id already exists
-                    if client_run_id in self.test_runs:
-                        validation_error = f"Run ID '{client_run_id}' is already in use"
-                    else:
-                        try:
-                            existing_run = await database.db.get_test_run_by_id(client_run_id)
-                            if existing_run:
-                                validation_error = f"Run ID '{client_run_id}' is already in use"
-                        except Exception as db_check_error:
-                            logger.error(f"Error checking database for run_id: {db_check_error}")
-                            validation_error = "Error validating run ID"
+            retention_days = data.get("retention_days", DEFAULT_RETENTION_DAYS)
+            local_run = data.get("local_run", False)
+            user_metadata = data.get("user_metadata", {})
+            raw_group = data.get("group")
+            group_payload = normalize_group_payload(raw_group)
+            group_hash = compute_group_hash(group_payload) if group_payload else None
 
-                if validation_error:
-                    error_response = {
-                        F_TYPE: MSG_RUN_STARTED_RESPONSE,
-                        F_ERROR: validation_error
-                    }
-                    await send_msgpack(ws, error_response)
-                    return None
+            # Get or generate run_name
+            run_name = data.get("run_name")
+            if not run_name:
+                run_name = datetime.now(UTC).strftime("Run %Y-%m-%d %H:%M:%S")
 
-                run_id = client_run_id
+            run_name = await self.get_unique_run_name(run_name, group_hash)
+
+            # Compute deletes_at for server-side retention
+            try:
+                days = int(retention_days) if retention_days is not None else None
+            except Exception:
+                days = None
+            if days:
+                deletes_at = (datetime.now(UTC) + timedelta(days=days)).replace(tzinfo=None).isoformat() + "Z"
             else:
-                run_id = uuid.uuid4().hex[:12]
+                deletes_at = None
+
+            # Store as prepared run (not active yet)
+            self.prepared_runs[run_id] = {
+                "run_id": run_id,
+                "run_name": run_name,
+                "retention_days": retention_days,
+                "local_run": local_run,
+                "user_metadata": user_metadata,
+                "group_payload": group_payload,
+                "group_hash": group_hash,
+                "deletes_at": deletes_at,
+                "created_at": datetime.now(UTC),
+            }
+
+            # Create folder for commits storage
+            run_path = get_run_path(run_id)
+            run_path.mkdir(parents=True, exist_ok=True)
+
+            log_event("run_prepared", run_id=run_id, run_name=run_name, group_hash=group_hash)
+
+            # Send response
+            response = {
+                F_TYPE: MSG_RUN_PREPARE_RESPONSE,
+                F_RUN_ID: run_id,
+                F_RUN_NAME: run_name,
+            }
+            if group_hash:
+                response[F_GROUP_HASH] = group_hash
+                response[F_GROUP_URL] = f"/groups/{group_hash}"
+            await send_msgpack(ws, response)
+
+        except Exception as e:
+            logger.error(f"Error in run_prepare: {e}")
+            import traceback
+            traceback.print_exc()
+            error_response = {
+                F_TYPE: MSG_RUN_PREPARE_RESPONSE,
+                F_ERROR: str(e)
+            }
+            await send_msgpack(ws, error_response)
+
+    async def _handle_run_started(self, ws, data, string_table):
+        """Handle run_started message from NUnit client.
+
+        If run_id is provided and matches a prepared run, activates it.
+        Otherwise creates a new run.
+        """
+        try:
+            client_run_id = data.get("run_id")
+
+            # Check if this is activating a prepared run
+            if client_run_id and client_run_id in self.prepared_runs:
+                return await self._activate_prepared_run(ws, client_run_id, data, string_table)
+
+            # Normal flow: create new run
+            run_id = uuid.uuid4().hex[:12]
 
             retention_days = data.get("retention_days", DEFAULT_RETENTION_DAYS)
             local_run = data.get("local_run", False)
@@ -506,6 +609,68 @@ class WebSocketServer:
             import traceback
             traceback.print_exc()
             return None
+
+    async def _activate_prepared_run(self, ws, run_id, data, string_table):
+        """Activate a prepared run when NUnit connects."""
+        prepared = self.prepared_runs.pop(run_id)
+
+        retention_days = prepared["retention_days"]
+        local_run = prepared["local_run"]
+        user_metadata = prepared["user_metadata"]
+        group_payload = prepared["group_payload"]
+        group_hash = prepared["group_hash"]
+        run_name = prepared["run_name"]
+        deletes_at = prepared["deletes_at"]
+
+        start_time = data.get("start_time")
+
+        run = TestRunData(run_id, retention_days, local_run, user_metadata, group_payload, group_hash, run_name)
+
+        if start_time:
+            run.start_time = start_time
+
+        self.test_runs[run_id] = run
+        run.string_table = string_table
+
+        # Save meta (run folder was already created by run_prepare)
+        meta_dict = run.to_dict()
+        if deletes_at:
+            meta_dict["deletes_at"] = deletes_at
+        write_meta_msgpack(run_id, meta_dict)
+
+        log_event("run_activated", run_id=run_id, run_name=run_name)
+
+        # Log to database (run becomes visible now)
+        try:
+            await database.log_test_run_started(
+                run_id,
+                retention_days,
+                local_run,
+                user_metadata,
+                run_name=run_name,
+                group_name=group_payload["name"] if group_payload else None,
+                group_hash=group_hash,
+                group_metadata=(group_payload or {}).get("metadata")
+            )
+        except Exception as db_error:
+            logger.error(f"Database logging error for run_activated: {db_error}")
+
+        # Broadcast to UI clients
+        await self.broadcast_ui({"type": "run_started", "run": meta_dict})
+
+        # Send response
+        response = {
+            F_TYPE: MSG_RUN_STARTED_RESPONSE,
+            F_RUN_ID: run_id,
+            F_RUN_NAME: run_name,
+            F_RUN_URL: f"/testRun/{run_id}/index.html"
+        }
+        if group_hash:
+            response[F_GROUP_HASH] = group_hash
+            response[F_GROUP_URL] = f"/groups/{group_hash}"
+        await send_msgpack(ws, response)
+
+        return run
 
     async def _handle_batch(self, data, run, raw_message):
         """Handle batch message containing multiple events for high-throughput scenarios."""

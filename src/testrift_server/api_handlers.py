@@ -837,6 +837,140 @@ async def api_admin_shutdown_handler(request):
     return web.json_response({"success": True})
 
 
+# --- Commit/Diff Endpoints for testrift-collector ---
+
+async def api_group_last_commits_handler(request):
+    """Get last commit SHAs for all repos from the most recent run in a group."""
+    try:
+        group_hash = request.match_info["group_hash"]
+
+        if not validate_group_hash_value(group_hash):
+            return web.json_response({
+                "success": False,
+                "error": "Invalid group hash"
+            }, status=400)
+
+        commits = await database.db.get_last_commits_for_group(group_hash)
+
+        return web.json_response({
+            "success": True,
+            "commits": commits
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_group_last_commits_handler: {e}")
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+async def api_run_commits_upload_handler(request):
+    """Upload commit diffs for a run."""
+    try:
+        run_id = request.match_info["run_id"]
+
+        if not validate_run_id(run_id):
+            return web.json_response({
+                "success": False,
+                "error": "Invalid run ID"
+            }, status=400)
+
+        # Parse JSON body
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({
+                "success": False,
+                "error": "Invalid JSON body"
+            }, status=400)
+
+        diffs = body.get("diffs", [])
+        if not isinstance(diffs, list):
+            return web.json_response({
+                "success": False,
+                "error": "'diffs' must be an array"
+            }, status=400)
+
+        # Store commit SHAs in database for future queries
+        commits_to_store = []
+        for diff in diffs:
+            if diff.get("name") and diff.get("current_sha"):
+                commits_to_store.append({
+                    "repo_name": diff["name"],
+                    "commit_sha": diff["current_sha"],
+                    "repo_url": diff.get("url"),
+                })
+
+        if commits_to_store:
+            await database.db.insert_run_commits(run_id, commits_to_store)
+
+        # Store full diff data as JSON file in run directory
+        run_path = get_run_path(run_id)
+        run_path.mkdir(parents=True, exist_ok=True)
+
+        diffs_file = run_path / "commits.json"
+        import json
+        import aiofiles
+        async with aiofiles.open(diffs_file, "w", encoding="utf-8") as f:
+            await f.write(json.dumps({"diffs": diffs}, indent=2))
+
+        return web.json_response({
+            "success": True,
+            "stored_commits": len(commits_to_store),
+            "stored_diffs": len(diffs)
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_run_commits_upload_handler: {e}")
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+async def api_run_commits_get_handler(request):
+    """Get commit diffs for a run."""
+    try:
+        run_id = request.match_info["run_id"]
+
+        if not validate_run_id(run_id):
+            return web.json_response({
+                "success": False,
+                "error": "Invalid run ID"
+            }, status=400)
+
+        # Try to read from commits.json file
+        run_path = get_run_path(run_id)
+        diffs_file = run_path / "commits.json"
+
+        if diffs_file.exists():
+            import aiofiles
+            async with aiofiles.open(diffs_file, "r", encoding="utf-8") as f:
+                content = await f.read()
+            import json
+            data = json.loads(content)
+            return web.json_response({
+                "success": True,
+                "diffs": data.get("diffs", [])
+            })
+
+        # Fall back to database records (just the SHA, no full diffs)
+        commits = await database.db.get_commits_for_run(run_id)
+        return web.json_response({
+            "success": True,
+            "commits": commits,
+            "diffs": []
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_run_commits_get_handler: {e}")
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
 # --- Route Registration ---
 
 def get_routes():
@@ -851,6 +985,7 @@ def get_routes():
         web.get("/api/metadata/keys", api_metadata_keys_handler),
         web.get("/api/metadata/values", api_metadata_values_handler),
         web.get("/api/groups/{group_hash}", api_group_details_handler),
+        web.get("/api/groups/{group_hash}/last-commits", api_group_last_commits_handler),
         web.get("/api/failures/toplist", api_failures_toplist_handler),
         web.get("/api/classifications/{run_id}", api_classifications_for_run_handler),
         web.get("/api/tc-hover-history", api_tc_hover_history_handler),
@@ -858,4 +993,6 @@ def get_routes():
         web.post("/api/migrate-data", api_migrate_data_handler),
         web.get("/api/server-info", api_server_info_handler),
         web.post("/api/admin/shutdown", api_admin_shutdown_handler),
+        web.post("/api/runs/{run_id}/commits", api_run_commits_upload_handler),
+        web.get("/api/runs/{run_id}/commits", api_run_commits_get_handler),
     ]

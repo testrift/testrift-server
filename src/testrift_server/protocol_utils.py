@@ -14,6 +14,8 @@ from .protocol import (
     MSG_BATCH,
     MSG_HEARTBEAT,
     MSG_METRICS,
+    MSG_RUN_PREPARE,
+    MSG_RUN_PREPARE_RESPONSE,
     STATUS_RUNNING,
     STATUS_PASSED,
     STATUS_FAILED,
@@ -72,6 +74,8 @@ MSG_TYPE_NAMES = {
     MSG_BATCH: "batch",
     MSG_HEARTBEAT: "heartbeat",
     MSG_METRICS: "metrics",
+    MSG_RUN_PREPARE: "run_prepare",
+    MSG_RUN_PREPARE_RESPONSE: "run_prepare_response",
 }
 
 

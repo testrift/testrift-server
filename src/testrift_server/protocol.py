@@ -19,6 +19,8 @@ MSG_BATCH = 8
 MSG_HEARTBEAT = 9
 MSG_STRING_TABLE = 10  # For registering component/channel strings
 MSG_METRICS = 11       # System metrics (CPU, memory)
+MSG_RUN_PREPARE = 12   # Prepare a run (from collector, before NUnit connects)
+MSG_RUN_PREPARE_RESPONSE = 13  # Response with run_id and group_hash
 
 # Reverse lookup for logging/debugging
 MSG_TYPE_NAMES = {
@@ -33,6 +35,8 @@ MSG_TYPE_NAMES = {
     MSG_HEARTBEAT: "heartbeat",
     MSG_STRING_TABLE: "string_table",
     MSG_METRICS: "metrics",
+    MSG_RUN_PREPARE: "run_prepare",
+    MSG_RUN_PREPARE_RESPONSE: "run_prepare_response",
 }
 
 # =============================================================================
@@ -44,6 +48,7 @@ STATUS_FAILED = 3
 STATUS_SKIPPED = 4
 STATUS_ABORTED = 5
 STATUS_FINISHED = 6  # For runs
+STATUS_PREPARING = 7  # Run prepared by collector, waiting for NUnit
 
 STATUS_NAMES = {
     STATUS_RUNNING: "running",
@@ -52,6 +57,7 @@ STATUS_NAMES = {
     STATUS_SKIPPED: "skipped",
     STATUS_ABORTED: "aborted",
     STATUS_FINISHED: "finished",
+    STATUS_PREPARING: "preparing",
 }
 
 STATUS_FROM_NAME = {v: k for k, v in STATUS_NAMES.items()}

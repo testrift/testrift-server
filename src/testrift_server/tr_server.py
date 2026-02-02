@@ -88,6 +88,9 @@ async def on_startup(app):
 
     app["cleanup_task"] = asyncio.create_task(cleanup_old_runs())
 
+    # Start prepared runs cleanup task
+    await ws_server.start_prepared_runs_cleanup()
+
 
 async def on_cleanup(app):
     """Application cleanup handler."""
@@ -96,6 +99,9 @@ async def on_cleanup(app):
         await app["cleanup_task"]
     except asyncio.CancelledError:
         pass
+
+    # Stop prepared runs cleanup
+    await ws_server.stop_prepared_runs_cleanup()
 
 
 app.on_startup.append(on_startup)
