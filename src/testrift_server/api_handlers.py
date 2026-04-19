@@ -16,11 +16,14 @@ from .config import (
     get_config_fingerprint,
     get_config_hash,
 )
+from .models import TestRunData
 from .utils import (
     get_run_path,
     get_case_log_path,
     get_case_stack_path,
+    find_test_case_by_tc_id,
     read_jsonl,
+    read_mplog,
     validate_run_id,
     validate_group_hash_value,
     TC_ID_FIELD,
@@ -206,9 +209,9 @@ async def api_test_results_over_time_handler(request):
         )
 
         # Log the results
-        logger.info(f"API test-runs-over-time: {len(results)} test runs")
+        logger.debug(f"API test-runs-over-time: {len(results)} test runs")
         for result in results[:3]:  # Show first 3 runs
-            logger.info(f"  Run: {result.get('run_id')[:8]}..., Passed: {result.get('passed_tests')}, Failed: {result.get('failed_tests')}, Skipped: {result.get('skipped_tests')}")
+            logger.debug(f"  Run: {result.get('run_id')[:8]}..., Passed: {result.get('passed_tests')}, Failed: {result.get('failed_tests')}, Skipped: {result.get('skipped_tests')}")
 
         return web.json_response({
             "success": True,
@@ -428,34 +431,59 @@ async def api_failures_toplist_handler(request):
                 metadata_filters=metadata_filters if metadata_filters else None
             )
 
+            # Cache loaded runs to avoid re-loading the same run multiple times
+            run_cache = {}
+
+            def _load_stack_traces_for_case(case):
+                """Load stack traces for a test case, handling both live and finished runs."""
+                run_id = case['run_id']
+                tc_id = case.get('tc_id')
+                if not tc_id:
+                    return []
+
+                # First try individual stack file (works for in-progress/aborted runs)
+                try:
+                    stack_path = get_case_stack_path(run_id, tc_id=tc_id)
+                    if stack_path.exists():
+                        return read_mplog(stack_path)
+                except Exception:
+                    pass
+
+                # For finished runs, load via run model (reads from merged file)
+                if run_id not in run_cache:
+                    try:
+                        run_cache[run_id] = TestRunData.load_from_disk(run_id)
+                    except Exception:
+                        run_cache[run_id] = None
+
+                run = run_cache[run_id]
+                if run is None:
+                    return []
+
+                tc = find_test_case_by_tc_id(run, tc_id)
+                if tc is None:
+                    return []
+
+                if not tc.stack_traces and tc.log_offset is not None:
+                    tc.load_log_from_disk()
+
+                return tc.stack_traces or []
+
             # Group by first line of stack trace (symptom)
             symptom_map = {}
             for case in failed_cases:
-                # Load stack trace from file
-                tc_id = case.get('tc_id')
-                try:
-                    if tc_id:
-                        stack_path = get_case_stack_path(case['run_id'], tc_id=tc_id)
-                    else:
-                        stack_path = get_case_stack_path(case['run_id'], case['tc_full_name'])
-                except Exception:
-                    stack_path = None
+                traces = _load_stack_traces_for_case(case)
                 symptom = None
                 stack_trace_sample = None
 
-                if stack_path and stack_path.exists():
-                    try:
-                        traces = read_jsonl(stack_path)
-                        if traces and len(traces) > 0:
-                            first_trace = traces[0]
-                            stack_lines = first_trace.get('stack_trace', [])
-                            if stack_lines and len(stack_lines) > 0:
-                                # Use first line of stack trace as symptom
-                                symptom = stack_lines[0].strip() if isinstance(stack_lines[0], str) else str(stack_lines[0])
-                                # Store full trace for sample
-                                stack_trace_sample = '\n'.join(stack_lines[:10])  # First 10 lines
-                    except Exception as e:
-                        logger.error(f"Error reading stack trace: {e}")
+                if traces:
+                    first_trace = traces[0]
+                    stack_lines = first_trace.get('stack_trace', [])
+                    if stack_lines and len(stack_lines) > 0:
+                        # Use first line of stack trace as symptom
+                        symptom = stack_lines[0].strip() if isinstance(stack_lines[0], str) else str(stack_lines[0])
+                        # Store full trace for sample
+                        stack_trace_sample = '\n'.join(stack_lines[:10])  # First 10 lines
 
                 if not symptom:
                     symptom = "No stack trace available"
@@ -971,6 +999,295 @@ async def api_run_commits_get_handler(request):
         }, status=500)
 
 
+# --- AI Analysis API ---
+
+async def api_trigger_analysis_handler(request):
+    """Trigger AI failure analysis for a run. POST /api/runs/{run_id}/analyze"""
+    try:
+        run_id = request.match_info["run_id"]
+        if not validate_run_id(run_id):
+            return web.json_response({"success": False, "error": "Invalid run ID"}, status=400)
+
+        from .ai_analysis import get_analysis_status, run_failure_analysis
+        from .config import AI_ANALYSIS_CONFIG
+
+        status = get_analysis_status(run_id)
+        if status.status == "running":
+            return web.json_response({"success": True, "status": "already_running"})
+        if status.status == "completed":
+            return web.json_response({"success": True, "status": "already_completed"})
+
+        if not AI_ANALYSIS_CONFIG.get("enabled", False) and not AI_ANALYSIS_CONFIG.get("openai_api_key"):
+            return web.json_response({"success": False, "error": "AI analysis not configured"}, status=400)
+
+        ws_server = request.app.get("ws_server")
+        broadcast_fn = ws_server.broadcast_ui if ws_server else None
+        asyncio.create_task(run_failure_analysis(run_id, broadcast_fn=broadcast_fn))
+
+        return web.json_response({"success": True, "status": "started"}, status=202)
+
+    except Exception as e:
+        logger.error(f"Error in api_trigger_analysis_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_analysis_status_handler(request):
+    """Get analysis status for a run. GET /api/runs/{run_id}/analysis"""
+    try:
+        run_id = request.match_info["run_id"]
+        if not validate_run_id(run_id):
+            return web.json_response({"success": False, "error": "Invalid run ID"}, status=400)
+
+        from .ai_analysis import get_analysis_status
+        status = get_analysis_status(run_id)
+
+        return web.json_response({
+            "success": True,
+            "status": status.status,
+            "analyzed_count": status.analyzed_count,
+            "deduped_count": status.deduped_count,
+            "skipped_count": status.skipped_count,
+            "total_failures": status.total_failures,
+            "error": status.error,
+            "completed_at": status.completed_at,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_analysis_status_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_analysis_for_tc_handler(request):
+    """Get analysis result for a specific test case. GET /api/runs/{run_id}/analysis/{tc_full_name}"""
+    try:
+        run_id = request.match_info["run_id"]
+        tc_full_name = request.match_info["tc_full_name"]
+
+        result = await database.db.get_analysis_for_test_case(run_id, tc_full_name)
+        if not result:
+            return web.json_response({"success": False, "error": "No analysis found"}, status=404)
+
+        import json as json_mod
+        refs = []
+        if result.get("references_json"):
+            try:
+                refs = json_mod.loads(result["references_json"])
+            except json_mod.JSONDecodeError:
+                pass
+
+        return web.json_response({
+            "success": True,
+            "tc_full_name": tc_full_name,
+            "summary": result.get("summary"),
+            "summary_html": result.get("summary_html"),
+            "references": refs,
+            "confidence": result.get("confidence"),
+            "category": result.get("category"),
+            "model_used": result.get("model_used"),
+            "tier_used": result.get("tier_used"),
+            "reasoning": result.get("reasoning"),
+            "deep_html": result.get("deep_html"),
+            "token_count": result.get("token_count"),
+            "created_at": result.get("created_at"),
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_analysis_for_tc_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_analysis_summary_handler(request):
+    """Get all analysis results for a run. GET /api/runs/{run_id}/analysis/summary"""
+    try:
+        run_id = request.match_info["run_id"]
+        if not validate_run_id(run_id):
+            return web.json_response({"success": False, "error": "Invalid run ID"}, status=400)
+
+        analyses = await database.db.get_analyses_for_run(run_id)
+        import json as json_mod
+
+        results = []
+        for a in analyses:
+            refs = []
+            if a.get("references_json"):
+                try:
+                    refs = json_mod.loads(a["references_json"])
+                except json_mod.JSONDecodeError:
+                    pass
+
+            results.append({
+                "tc_full_name": a.get("tc_full_name"),
+                "tc_id": a.get("tc_id"),
+                "summary": a.get("summary"),
+                "summary_html": a.get("summary_html"),
+                "references": refs,
+                "confidence": a.get("confidence"),
+                "category": a.get("category"),
+                "model_used": a.get("model_used"),
+                "tier_used": a.get("tier_used"),
+                "reasoning": a.get("reasoning"),
+                "token_count": a.get("token_count"),
+                "created_at": a.get("created_at"),
+            })
+
+        return web.json_response({"success": True, "analyses": results})
+
+    except Exception as e:
+        logger.error(f"Error in api_analysis_summary_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_trigger_deep_analysis_handler(request):
+    """Trigger deep analysis for a single test case. POST /api/runs/{run_id}/analyze/{tc_full_name}/deep"""
+    try:
+        run_id = request.match_info["run_id"]
+        tc_full_name = request.match_info["tc_full_name"]
+        if not validate_run_id(run_id):
+            return web.json_response({"success": False, "error": "Invalid run ID"}, status=400)
+
+        from .ai_analysis import get_deep_analysis_status, run_deep_analysis
+        from .config import AI_ANALYSIS_CONFIG
+
+        status = get_deep_analysis_status(run_id, tc_full_name)
+        if status.get("status") == "running":
+            return web.json_response({"success": True, "status": "already_running"})
+
+        if not AI_ANALYSIS_CONFIG.get("openai_api_key"):
+            return web.json_response({"success": False, "error": "AI analysis not configured"}, status=400)
+
+        asyncio.create_task(run_deep_analysis(run_id, tc_full_name))
+        return web.json_response({"success": True, "status": "started"}, status=202)
+
+    except Exception as e:
+        logger.error(f"Error in api_trigger_deep_analysis_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_deep_analysis_status_handler(request):
+    """Get deep analysis status. GET /api/runs/{run_id}/analyze/{tc_full_name}/deep"""
+    try:
+        run_id = request.match_info["run_id"]
+        tc_full_name = request.match_info["tc_full_name"]
+
+        from .ai_analysis import get_deep_analysis_status
+        status = get_deep_analysis_status(run_id, tc_full_name)
+        return web.json_response({"success": True, **status})
+
+    except Exception as e:
+        logger.error(f"Error in api_deep_analysis_status_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_email_recipients_get_handler(request):
+    """Get current email recipients. GET /api/settings/email-recipients"""
+    try:
+        import json as json_mod
+        from .config import EMAIL_CONFIG
+
+        db_value = await database.db.get_setting("email_recipients")
+        if db_value:
+            try:
+                addresses = json_mod.loads(db_value)
+                source = "database"
+            except json_mod.JSONDecodeError:
+                addresses = EMAIL_CONFIG.get("to_addresses", [])
+                source = "config_file"
+        else:
+            addresses = EMAIL_CONFIG.get("to_addresses", [])
+            source = "config_file"
+
+        return web.json_response({
+            "success": True,
+            "to_addresses": addresses,
+            "source": source,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_email_recipients_get_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_email_recipients_put_handler(request):
+    """Update email recipients. PUT /api/settings/email-recipients"""
+    try:
+        import json as json_mod
+        body = await request.json()
+        addresses = body.get("to_addresses", [])
+
+        if not isinstance(addresses, list):
+            return web.json_response({"success": False, "error": "to_addresses must be a list"}, status=400)
+
+        await database.db.set_setting("email_recipients", json_mod.dumps(addresses))
+
+        return web.json_response({"success": True, "to_addresses": addresses, "source": "database"})
+
+    except Exception as e:
+        logger.error(f"Error in api_email_recipients_put_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_email_recipients_delete_handler(request):
+    """Reset email recipients to config defaults. DELETE /api/settings/email-recipients"""
+    try:
+        from .config import EMAIL_CONFIG
+        await database.db.delete_setting("email_recipients")
+        return web.json_response({
+            "success": True,
+            "to_addresses": EMAIL_CONFIG.get("to_addresses", []),
+            "source": "config_file",
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_email_recipients_delete_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_ai_usage_handler(request):
+    """Get AI usage and budget status. GET /api/settings/ai-usage"""
+    try:
+        from datetime import datetime, UTC
+        from .config import AI_ANALYSIS_CONFIG
+
+        month = datetime.now(UTC).strftime("%Y-%m")
+        usage = await database.db.get_ai_usage_for_month(month)
+
+        budget = AI_ANALYSIS_CONFIG.get("monthly_budget_usd", 0)
+        cost = usage["estimated_cost_usd"] if usage else 0
+
+        return web.json_response({
+            "success": True,
+            "current_month": month,
+            "estimated_cost_usd": cost,
+            "monthly_budget_usd": budget,
+            "budget_utilization": cost / budget if budget > 0 else 0,
+            "warning_threshold": AI_ANALYSIS_CONFIG.get("budget_warning_threshold", 0.8),
+            "warning_sent": usage.get("warning_sent", False) if usage else False,
+            "prompt_tokens": usage.get("prompt_tokens", 0) if usage else 0,
+            "completion_tokens": usage.get("completion_tokens", 0) if usage else 0,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_ai_usage_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_logs_handler(request):
+    """Get recent server log entries. GET /api/logs?after_seq=0&level=INFO&limit=500"""
+    try:
+        from .log_buffer import log_buffer
+
+        after_seq = int(request.query.get("after_seq", 0))
+        level = request.query.get("level", None)
+        limit = int(request.query.get("limit", 500))
+
+        entries = log_buffer.get_entries(after_seq=after_seq, level=level, limit=limit)
+        return web.json_response({"success": True, "entries": entries})
+
+    except Exception as e:
+        logger.error(f"Error in api_logs_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
 # --- Route Registration ---
 
 def get_routes():
@@ -995,4 +1312,19 @@ def get_routes():
         web.post("/api/admin/shutdown", api_admin_shutdown_handler),
         web.post("/api/runs/{run_id}/commits", api_run_commits_upload_handler),
         web.get("/api/runs/{run_id}/commits", api_run_commits_get_handler),
+        # AI analysis endpoints
+        web.post("/api/runs/{run_id}/analyze", api_trigger_analysis_handler),
+        web.get("/api/runs/{run_id}/analysis", api_analysis_status_handler),
+        web.get("/api/runs/{run_id}/analysis/summary", api_analysis_summary_handler),
+        web.get("/api/runs/{run_id}/analysis/{tc_full_name:.+}", api_analysis_for_tc_handler),
+        # Deep analysis endpoints
+        web.post("/api/runs/{run_id}/analyze/{tc_full_name:.+}/deep", api_trigger_deep_analysis_handler),
+        web.get("/api/runs/{run_id}/analyze/{tc_full_name:.+}/deep", api_deep_analysis_status_handler),
+        # Settings endpoints
+        web.get("/api/settings/email-recipients", api_email_recipients_get_handler),
+        web.put("/api/settings/email-recipients", api_email_recipients_put_handler),
+        web.delete("/api/settings/email-recipients", api_email_recipients_delete_handler),
+        web.get("/api/settings/ai-usage", api_ai_usage_handler),
+        # Server log endpoint
+        web.get("/api/logs", api_logs_handler),
     ]

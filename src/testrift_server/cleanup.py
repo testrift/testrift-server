@@ -116,7 +116,7 @@ async def cleanup_runs_sweep():
                 if run_path.exists():
                     try:
                         shutil.rmtree(run_path)
-                        logger.info(f"Deleted filesystem data for run {run_id} (keeping database metadata)")
+                        logger.debug(f"Deleted filesystem data for run {run_id} (keeping database metadata)")
                     except Exception as e:
                         logger.error(f"Error deleting filesystem data for run {run_id}: {e}")
 
@@ -131,8 +131,8 @@ async def cleanup_old_runs():
         await asyncio.sleep(3600)  # Run every hour
 
 
-def _log_event(event: str, **fields):
-    """Log an event with timestamp."""
+def _log_event(event: str, level: str = "info", **fields):
+    """Log an event with timestamp at the specified level."""
     import json
     record = {"event": event, **fields, "ts": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"}
-    logger.info(json.dumps(record))
+    getattr(logger, level, logger.info)(json.dumps(record))

@@ -60,10 +60,10 @@ def render_template(template_name, **context):
     return template.render(**context)
 
 
-def log_event(event: str, **fields):
-    """Log an event with timestamp."""
+def log_event(event: str, level: str = "info", **fields):
+    """Log an event with timestamp at the specified level."""
     record = {"event": event, **fields, "ts": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"}
-    logger.info(json.dumps(record))
+    getattr(logger, level, logger.info)(json.dumps(record))
 
 
 # --- Page handlers ---
@@ -365,7 +365,7 @@ async def test_case_log_handler(request):
         # Also consider it live if this specific test case is running
         if test_case.status == "running":
             live_run = True
-        logger.info(
+        logger.debug(
             "Live run detection - Run in memory: %s, Run status: %s, Test case %s status: %s, Live: %s",
             run_id,
             run.status,
@@ -399,11 +399,11 @@ async def test_case_log_handler(request):
 
             if recent_logs:
                 live_run = True
-                logger.info(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Recent logs: {recent_logs}, Live: {live_run}")
+                logger.debug(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Recent logs: {recent_logs}, Live: {live_run}")
             else:
-                logger.info(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, No recent logs, Live: {live_run}")
+                logger.debug(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, No recent logs, Live: {live_run}")
         else:
-            logger.info(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Live: {live_run}")
+            logger.debug(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Live: {live_run}")
 
     # Get group_hash for history feature
     group_hash = None
@@ -616,10 +616,10 @@ async def zip_export_handler(request):
         }
         return web.FileResponse(path=zip_path, headers=headers)
     except FileNotFoundError as e:
-        log_event("zip_export_missing", run_id=run_id, error=str(e))
+        log_event("zip_export_missing", level="warning", run_id=run_id, error=str(e))
         return web.Response(status=404, text=f"Export failed: {str(e)}. Try re-running the export after the test finishes.")
     except Exception as e:
-        log_event("zip_export_error", run_id=run_id, error=str(e))
+        log_event("zip_export_error", level="error", run_id=run_id, error=str(e))
         return web.Response(status=500, text="Export failed due to a server error. Please try again later.")
 
 
@@ -766,7 +766,7 @@ async def upload_attachment_handler(request):
         })
 
     except Exception as e:
-        log_event("attachment_upload_error", run_id=run_id, test_case_id=tc_id, error=str(e))
+        log_event("attachment_upload_error", level="error", run_id=run_id, test_case_id=tc_id, error=str(e))
         return web.Response(status=500, text=f"Upload failed: {str(e)}")
 
 
@@ -895,6 +895,28 @@ async def matrix_handler(request):
         return web.Response(status=500, text=f"Error loading matrix page: {str(e)}")
 
 
+async def settings_handler(request):
+    """Serve the settings page."""
+    try:
+        html = render_template('settings.html')
+        return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+
+    except Exception as e:
+        logger.error(f"Error in settings_handler: {e}")
+        return web.Response(status=500, text=f"Error loading settings page: {str(e)}")
+
+
+async def server_log_handler(request):
+    """Serve the server log page."""
+    try:
+        html = render_template('server_log.html')
+        return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+
+    except Exception as e:
+        logger.error(f"Error in server_log_handler: {e}")
+        return web.Response(status=500, text=f"Error loading server log page: {str(e)}")
+
+
 # --- Route Registration ---
 
 def get_routes():
@@ -911,6 +933,8 @@ def get_routes():
         web.get("/analyzer", analyzer_handler),
         web.get("/matrix", matrix_handler),
         web.get("/failures", failures_handler),
+        web.get("/settings", settings_handler),
+        web.get("/logs", server_log_handler),
     ]
 
     # Add attachment routes only if enabled

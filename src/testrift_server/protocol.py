@@ -150,6 +150,11 @@ F_COUNT_FAILED = "cf"     # Failed count
 F_COUNT_SKIPPED = "cs"    # Skipped count
 F_COUNT_ABORTED = "ca"    # Aborted count
 
+# AI analysis fields (sent in run_started)
+F_AI_ANALYSIS = "aa"      # AI analysis preference (int: 0=default, 1=auto, 2=skip)
+F_AI_EMAIL = "ae"         # AI email override (int: 0=default, 1=always, 2=suppress)
+F_AI_EMAIL_TO = "er"      # AI email recipients override (list[str])
+
 # String table fields
 F_STRINGS = "str"         # String table entries: {id: string, ...}
 

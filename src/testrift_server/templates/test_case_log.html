@@ -186,6 +186,19 @@
                             </div>
                             <div class="stack-trace-empty" id="stackTraceEmptyState">No stack traces reported.</div>
                         </div>
+
+                        {% if server_mode %}
+                        <!-- AI Failure Analysis -->
+                        <div class="ai-analysis-section" id="aiAnalysisSection" style="display: none;">
+                            <div class="ai-analysis-header">
+                                <h5>🤖 AI Failure Analysis</h5>
+                                <button id="aiReanalyzeBtn" class="btn btn-xs" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 4px; padding: 3px 10px; font-size: 0.8em; display: none;" onclick="reanalyzeTestCase()">Re-analyze</button>
+                            </div>
+                            <div class="ai-analysis-card" id="aiAnalysisCard">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
 
 

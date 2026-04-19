@@ -53,6 +53,10 @@ class TestRunData:
         self.string_table: dict[int, str] = {}
         # System metrics samples: list of {ts, cpu, mem}
         self.metrics: list[dict] = []
+        # AI analysis preferences (from NUnit config, sent in run_started)
+        self.ai_analysis_preference = 0  # 0=default, 1=auto, 2=skip
+        self.ai_email_preference = 0     # 0=default, 1=always send, 2=suppress
+        self.ai_email_to = None          # Override recipient list (list[str] or None)
 
     def update_last(self):
         """Update the last activity timestamp."""
@@ -82,6 +86,13 @@ class TestRunData:
         # Include metrics if present
         if self.metrics:
             result["metrics"] = self.metrics
+        # Include AI analysis preferences if set
+        if self.ai_analysis_preference:
+            result["ai_analysis_preference"] = self.ai_analysis_preference
+        if self.ai_email_preference:
+            result["ai_email_preference"] = self.ai_email_preference
+        if self.ai_email_to:
+            result["ai_email_to"] = self.ai_email_to
         return result
 
     @classmethod
@@ -110,6 +121,10 @@ class TestRunData:
         run.string_table = {int(k): v for k, v in string_table_raw.items()}
         # Load metrics
         run.metrics = meta.get("metrics", [])
+        # Load AI analysis preferences
+        run.ai_analysis_preference = meta.get("ai_analysis_preference", 0)
+        run.ai_email_preference = meta.get("ai_email_preference", 0)
+        run.ai_email_to = meta.get("ai_email_to")
         return run
 
     @staticmethod
@@ -253,7 +268,7 @@ class TestCaseData:
         try:
             # Append to disk file using async I/O with MessagePack
             await write_mplog_entries_async(stack_path, [entry])
-            logger.info(f"Persisted stack trace to {stack_path}")
+            logger.debug(f"Persisted stack trace to {stack_path}")
         except Exception as persist_error:
             logger.error(f"Failed to persist stack trace for {self.id}: {persist_error}")
 

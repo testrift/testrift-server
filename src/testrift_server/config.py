@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -21,6 +22,16 @@ STATIC_DIR = BASE_DIR / "static"
 
 # Set when loading config at import time.
 CONFIG_PATH_USED = None
+
+
+def expand_env_vars(value):
+    """Expand ${env:VAR} placeholders in a string value."""
+    if not isinstance(value, str):
+        return value
+    def _replace(match):
+        var_name = match.group(1)
+        return os.environ.get(var_name, "")
+    return re.sub(r'\$\{env:([^}]+)\}', _replace, value)
 
 
 def parse_size_string(size_str):
@@ -139,6 +150,43 @@ def load_config(config_path=None):
         if not isinstance(config_data['attachment_max_size'], int) or config_data['attachment_max_size'] <= 0:
             raise ValueError(f"attachments.max_size_bytes must be a positive integer, got: {config_data['attachment_max_size']}")
 
+        # AI analysis configuration
+        ai_config = config.get('ai_analysis', {})
+        config_data['ai_analysis'] = {
+            'enabled': ai_config.get('enabled', False),
+            'openai_api_key': expand_env_vars(ai_config.get('openai_api_key', '${env:OPENAI_API_KEY}')),
+            'trigger': ai_config.get('trigger', 'auto'),
+            'send_email': ai_config.get('send_email', True),
+            'max_failures_per_run': ai_config.get('max_failures_per_run', 20),
+            'effort': ai_config.get('effort', 'normal'),
+            'dedup_window_days': ai_config.get('dedup_window_days', 30),
+            'model_tier1': ai_config.get('model_tier1', 'gpt-4.1-mini'),
+            'model_tier2': ai_config.get('model_tier2', 'gpt-4.1'),
+            'monthly_budget_usd': float(ai_config.get('monthly_budget_usd', 10.0)),
+            'budget_warning_threshold': float(ai_config.get('budget_warning_threshold', 0.8)),
+        }
+        # Validate trigger
+        valid_triggers = ('auto', 'manual', 'disabled')
+        if config_data['ai_analysis']['trigger'] not in valid_triggers:
+            raise ValueError(f"ai_analysis.trigger must be one of {valid_triggers}")
+        # Validate effort
+        valid_efforts = ('low', 'normal', 'high')
+        if config_data['ai_analysis']['effort'] not in valid_efforts:
+            raise ValueError(f"ai_analysis.effort must be one of {valid_efforts}")
+
+        # Email configuration
+        email_config = config.get('email', {})
+        config_data['email'] = {
+            'enabled': email_config.get('enabled', False),
+            'smtp_host': email_config.get('smtp_host', ''),
+            'smtp_port': email_config.get('smtp_port', 587),
+            'smtp_user': expand_env_vars(email_config.get('smtp_user', '')),
+            'smtp_password': expand_env_vars(email_config.get('smtp_password', '')),
+            'smtp_tls': email_config.get('smtp_tls', True),
+            'from_address': email_config.get('from_address', ''),
+            'to_addresses': email_config.get('to_addresses', []),
+        }
+
         return config_data
 
     except FileNotFoundError:
@@ -155,7 +203,30 @@ def load_config(config_path=None):
             'default_retention_days': 7,
             'data_dir': (Path.cwd() / "data").resolve(),
             'attachments_enabled': True,
-            'attachment_max_size': parse_size_string('10MB')
+            'attachment_max_size': parse_size_string('10MB'),
+            'ai_analysis': {
+                'enabled': False,
+                'openai_api_key': expand_env_vars('${env:OPENAI_API_KEY}'),
+                'trigger': 'auto',
+                'send_email': True,
+                'max_failures_per_run': 20,
+                'effort': 'normal',
+                'dedup_window_days': 30,
+                'model_tier1': 'gpt-4.1-mini',
+                'model_tier2': 'gpt-4.1',
+                'monthly_budget_usd': 10.0,
+                'budget_warning_threshold': 0.8,
+            },
+            'email': {
+                'enabled': False,
+                'smtp_host': '',
+                'smtp_port': 587,
+                'smtp_user': '',
+                'smtp_password': '',
+                'smtp_tls': True,
+                'from_address': '',
+                'to_addresses': [],
+            },
         }
     except yaml.YAMLError as e:
         logger.error(f"Error parsing configuration file: {e}")
@@ -245,3 +316,5 @@ DEFAULT_RETENTION_DAYS = CONFIG['default_retention_days']
 LOCALHOST_ONLY = CONFIG['localhost_only']
 ATTACHMENTS_ENABLED = CONFIG['attachments_enabled']
 ATTACHMENT_MAX_SIZE = CONFIG['attachment_max_size']
+AI_ANALYSIS_CONFIG = CONFIG['ai_analysis']
+EMAIL_CONFIG = CONFIG['email']

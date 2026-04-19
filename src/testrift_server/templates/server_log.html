@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Log - TestRift</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root { font-size: 14px; }
+        a { color: #337ab7; }
+        a:hover { color: #23527c; }
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.428571429;
+        }
+        .main-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin: 20px auto;
+            padding: 0;
+            overflow: hidden;
+            max-width: 1400px;
+        }
+        .header-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header-section h1 { margin: 0; font-size: 3em; font-weight: 300; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .header-section .subtitle { font-size: 1.4em; opacity: 0.9; margin-top: 10px; }
+        .back-link { display: inline-block; margin: 15px 30px; color: #667eea; text-decoration: none; font-weight: 500; }
+        .back-link:hover { text-decoration: underline; }
+        .toolbar {
+            display: flex; align-items: center; gap: 12px; padding: 0 30px 15px; flex-wrap: wrap;
+        }
+        .toolbar label { font-weight: 600; color: #495057; font-size: 0.9em; margin: 0; }
+        .toolbar select, .toolbar input[type="text"] {
+            padding: 4px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.9em;
+        }
+        .toolbar .auto-label { font-size: 0.85em; color: #6c757d; }
+        .log-container {
+            padding: 0 30px 30px;
+            overflow-x: auto;
+        }
+        .log-table {
+            width: 100%; border-collapse: collapse; font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace; font-size: 0.85em;
+        }
+        .log-table th {
+            position: sticky; top: 0; background: #f8f9fa; border-bottom: 2px solid #dee2e6;
+            padding: 6px 10px; text-align: left; font-weight: 600; color: #495057;
+        }
+        .log-table td {
+            padding: 3px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; white-space: nowrap;
+        }
+        .log-table td.msg-col { white-space: pre-wrap; word-break: break-all; max-width: 900px; }
+        .log-table tr:hover { background: #f8f9ff; }
+        .log-table tr.level-ERROR td, .log-table tr.level-CRITICAL td { background: #fff0f0; color: #c00; }
+        .log-table tr.level-WARNING td { background: #fffbe6; color: #856404; }
+        .log-table tr.level-DEBUG td { color: #999; }
+        .level-badge {
+            display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.8em; font-weight: 600; min-width: 55px; text-align: center;
+        }
+        .level-badge.DEBUG { background: #e9ecef; color: #6c757d; }
+        .level-badge.INFO { background: #d4edda; color: #155724; }
+        .level-badge.WARNING { background: #fff3cd; color: #856404; }
+        .level-badge.ERROR { background: #f8d7da; color: #721c24; }
+        .level-badge.CRITICAL { background: #721c24; color: white; }
+        .scroll-bottom-notice {
+            display: none; position: fixed; bottom: 20px; right: 20px;
+            background: #667eea; color: white; border: none; border-radius: 20px;
+            padding: 8px 16px; cursor: pointer; font-size: 0.85em; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 100;
+        }
+        .paused-indicator {
+            display: inline-block; padding: 2px 8px; border-radius: 10px;
+            background: #fff3cd; color: #856404; font-size: 0.85em; font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="header-section">
+            <h1>Server Log</h1>
+            <div class="subtitle">Live server output</div>
+        </div>
+
+        <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> Back to Test Runs</a>
+
+        <div class="toolbar">
+            <label>Level:</label>
+            <select id="level-filter" onchange="onFilterChange()">
+                <option value="">ALL</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO" selected>INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+            </select>
+            <label>Search:</label>
+            <input type="text" id="search-filter" placeholder="filter text..." oninput="onFilterChange()" style="width: 200px;">
+            <label class="auto-label">
+                <input type="checkbox" id="auto-scroll" checked> Auto-scroll
+            </label>
+            <span id="paused-indicator" class="paused-indicator" style="display:none;">⏸ Paused — scroll down to resume</span>
+            <span style="margin-left: auto; font-size: 0.85em; color: #6c757d;">
+                <span id="entry-count">0</span> entries
+            </span>
+        </div>
+
+        <div class="log-container" id="log-container" style="max-height: 70vh; overflow-y: auto;">
+            <table class="log-table">
+                <thead><tr><th style="width:180px;">Time</th><th style="width:70px;">Level</th><th style="width:180px;">Logger</th><th>Message</th></tr></thead>
+                <tbody id="log-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <button class="scroll-bottom-notice" id="scroll-btn" onclick="scrollToBottom()">↓ New log entries</button>
+
+    <script>
+    let lastSeq = 0;
+    let pollTimer = null;
+    let allEntries = [];
+    const POLL_INTERVAL = 1500;
+
+    function escapeHtml(s) {
+        if (!s) return '';
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function formatTime(iso) {
+        try {
+            const d = new Date(iso);
+            return d.toLocaleTimeString('en-GB', {hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit', fractionalSecondDigits:3});
+        } catch { return iso; }
+    }
+
+    function renderEntry(e) {
+        const tr = document.createElement('tr');
+        tr.className = 'level-' + e.level;
+        tr.dataset.seq = e.seq;
+        tr.innerHTML = `<td>${escapeHtml(formatTime(e.ts))}</td><td><span class="level-badge ${e.level}">${e.level}</span></td><td>${escapeHtml(e.logger)}</td><td class="msg-col">${escapeHtml(e.message)}</td>`;
+        return tr;
+    }
+
+    const LEVEL_ORDER = { 'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50 };
+
+    function matchesFilter(entry) {
+        const levelFilter = document.getElementById('level-filter').value;
+        if (levelFilter) {
+            const minLevel = LEVEL_ORDER[levelFilter] || 0;
+            const entryLevel = LEVEL_ORDER[entry.level] || 0;
+            if (entryLevel < minLevel) return false;
+        }
+        const search = document.getElementById('search-filter').value.toLowerCase();
+        if (search && !entry.message.toLowerCase().includes(search) && !entry.logger.toLowerCase().includes(search)) {
+            return false;
+        }
+        return true;
+    }
+
+    function rebuildTable() {
+        const tbody = document.getElementById('log-tbody');
+        tbody.innerHTML = '';
+        let count = 0;
+        for (const e of allEntries) {
+            if (matchesFilter(e)) {
+                tbody.appendChild(renderEntry(e));
+                count++;
+            }
+        }
+        document.getElementById('entry-count').textContent = count;
+        maybeAutoScroll();
+    }
+
+    function appendNewEntries(entries) {
+        const tbody = document.getElementById('log-tbody');
+        let added = 0;
+        for (const e of entries) {
+            if (matchesFilter(e)) {
+                tbody.appendChild(renderEntry(e));
+                added++;
+            }
+        }
+        if (added > 0) {
+            document.getElementById('entry-count').textContent = tbody.children.length;
+            maybeAutoScroll();
+        }
+    }
+
+    function maybeAutoScroll() {
+        if (document.getElementById('auto-scroll').checked) {
+            const container = document.getElementById('log-container');
+            container.scrollTop = container.scrollHeight;
+            document.getElementById('scroll-btn').style.display = 'none';
+            document.getElementById('paused-indicator').style.display = 'none';
+        }
+    }
+
+    function scrollToBottom() {
+        document.getElementById('auto-scroll').checked = true;
+        maybeAutoScroll();
+    }
+
+    // Detect manual scroll-up to pause auto-scroll
+    document.getElementById('log-container').addEventListener('scroll', function() {
+        const el = this;
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+        if (!atBottom) {
+            document.getElementById('auto-scroll').checked = false;
+            document.getElementById('paused-indicator').style.display = '';
+        } else {
+            document.getElementById('auto-scroll').checked = true;
+            document.getElementById('scroll-btn').style.display = 'none';
+            document.getElementById('paused-indicator').style.display = 'none';
+        }
+    });
+
+    function onFilterChange() {
+        rebuildTable();
+    }
+
+    async function poll() {
+        try {
+            const url = `/api/logs?after_seq=${lastSeq}&limit=500`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data.success && data.entries.length > 0) {
+                for (const e of data.entries) {
+                    if (e.seq > lastSeq) lastSeq = e.seq;
+                }
+                allEntries.push(...data.entries);
+                // Keep buffer bounded
+                if (allEntries.length > 5000) {
+                    allEntries = allEntries.slice(-4000);
+                }
+                appendNewEntries(data.entries);
+
+                if (!document.getElementById('auto-scroll').checked) {
+                    document.getElementById('scroll-btn').style.display = '';
+                }
+            }
+        } catch (e) {
+            console.error('Log poll error:', e);
+        }
+        pollTimer = setTimeout(poll, POLL_INTERVAL);
+    }
+
+    // Initial load
+    poll();
+    </script>
+</body>
+</html>

@@ -47,8 +47,16 @@ formatter = logging.Formatter(
 )
 handler = logging.StreamHandler()
 handler.setFormatter(formatter)
+handler.setLevel(logging.INFO)
 root_logger.addHandler(handler)
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(logging.DEBUG)
+
+# Add in-memory ring buffer handler for the /logs page
+from .log_buffer import log_buffer
+buf_formatter = logging.Formatter('%(message)s')
+log_buffer.setFormatter(buf_formatter)
+log_buffer.setLevel(logging.DEBUG)
+root_logger.addHandler(log_buffer)
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +85,14 @@ async def on_startup(app):
         await database.db.initialize()
         log_event("database_initialized")
     except Exception as e:
-        log_event("database_init_error", error=str(e))
+        log_event("database_init_error", level="error", error=str(e))
 
     # Run an immediate cleanup sweep at startup
     try:
         await cleanup_runs_sweep()
         await cleanup_abandoned_running_runs()
     except Exception as e:
-        log_event("startup_cleanup_error", error=str(e))
+        log_event("startup_cleanup_error", level="error", error=str(e))
 
     app["cleanup_task"] = asyncio.create_task(cleanup_old_runs())
 
@@ -121,8 +129,15 @@ def main(argv=None):
     )
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
+    handler.setLevel(logging.INFO)
     root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG)
+
+    # Re-add ring buffer handler (removed above with the old handlers)
+    buf_formatter = logging.Formatter('%(message)s')
+    log_buffer.setFormatter(buf_formatter)
+    log_buffer.setLevel(logging.DEBUG)
+    root_logger.addHandler(log_buffer)
 
     parser = argparse.ArgumentParser(prog="testrift-server")
     parser.add_argument(
@@ -189,7 +204,10 @@ def main(argv=None):
         message = " ".join(str(arg) for arg in args)
         logger.info(message)
 
-    web.run_app(app, host=host, port=PORT, print=_runner_print)
+    # Disable aiohttp's built-in access logging — it always logs at INFO level
+    # and there's no way to downgrade it to DEBUG. Application-level log_event()
+    # calls already cover meaningful request activity.
+    web.run_app(app, host=host, port=PORT, print=_runner_print, access_log=None)
     return 0
 
 

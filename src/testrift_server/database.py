@@ -173,6 +173,71 @@ class TestResultsDatabase:
             """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_run_commits_run_id ON run_commits (run_id)")
 
+            # AI analysis tables
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ai_analyses (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fingerprint     TEXT NOT NULL,
+                    summary         TEXT NOT NULL,
+                    summary_html    TEXT,
+                    references_json TEXT,
+                    confidence      REAL NOT NULL,
+                    category        TEXT NOT NULL,
+                    model_used      TEXT NOT NULL,
+                    tier_used       INTEGER NOT NULL,
+                    reasoning       TEXT,
+                    deep_html       TEXT,
+                    context_hash    TEXT NOT NULL,
+                    token_count     INTEGER,
+                    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(fingerprint, context_hash)
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_ai_analyses_fingerprint ON ai_analyses(fingerprint)")
+
+            # Ensure new columns exist for legacy databases
+            cursor = await db.execute("PRAGMA table_info(ai_analyses)")
+            columns = await cursor.fetchall()
+            ai_col_names = {col[1] for col in columns}
+            if "summary_html" not in ai_col_names:
+                await db.execute("ALTER TABLE ai_analyses ADD COLUMN summary_html TEXT")
+            if "deep_html" not in ai_col_names:
+                await db.execute("ALTER TABLE ai_analyses ADD COLUMN deep_html TEXT")
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS test_case_analyses (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id          TEXT NOT NULL,
+                    tc_full_name    TEXT NOT NULL,
+                    analysis_id     INTEGER NOT NULL REFERENCES ai_analyses(id),
+                    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(run_id, tc_full_name)
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_tc_analyses_run_id ON test_case_analyses(run_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_tc_analyses_analysis_id ON test_case_analyses(analysis_id)")
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ai_usage (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    month               TEXT NOT NULL,
+                    prompt_tokens       INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens   INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost_usd  REAL NOT NULL DEFAULT 0.0,
+                    warning_sent        BOOLEAN NOT NULL DEFAULT 0,
+                    updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(month)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key         TEXT PRIMARY KEY,
+                    value       TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             await db.commit()
 
         self._initialized = True
@@ -326,6 +391,9 @@ class TestResultsDatabase:
 
             conditions = []
             params = []
+
+            # Always exclude 'preparing' runs from UI - they're not yet active
+            conditions.append("tr.status != 'preparing'")
 
             if status_filter:
                 conditions.append("tr.status = ?")
@@ -600,6 +668,38 @@ class TestResultsDatabase:
 
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
+
+    async def classify_test_case(
+        self,
+        tc_full_name: str,
+        group_hash: Optional[str] = None
+    ) -> Optional[str]:
+        """Classify a test case based on recent history.
+
+        Returns a classification string:
+        - "new_failure": first time this TC failed (or no history)
+        - "regression": was passing recently, now failing
+        - "persistent_failure": has been failing consistently
+        - "flaky": intermittent pass/fail pattern
+        """
+        history = await self.get_test_case_history(tc_full_name, limit=10, group_hash=group_hash)
+        if not history:
+            return "new_failure"
+
+        statuses = [h.get("status", "").lower() for h in history]
+
+        fail_count = sum(1 for s in statuses if s in ("failed", "error"))
+        pass_count = sum(1 for s in statuses if s == "passed")
+
+        if fail_count == 0:
+            return "new_failure"
+        if pass_count == 0:
+            return "persistent_failure"
+        if fail_count >= 2 and pass_count >= 2:
+            return "flaky"
+        if len(statuses) >= 2 and statuses[0] in ("failed", "error") and statuses[1] == "passed":
+            return "regression"
+        return "persistent_failure"
 
     async def get_unique_metadata_values(self, key: str) -> List[str]:
         """Get unique values for a specific metadata key."""
@@ -1041,10 +1141,11 @@ class TestResultsDatabase:
             Dict mapping repo_name to commit_sha
         """
         async with self.get_connection() as db:
-            # Find the most recent completed run in this group
+            # Find the most recent run in this group that has started execution
+            # Include 'running' and 'finished' runs, exclude only 'preparing' runs
             cursor = await db.execute("""
                 SELECT run_id FROM test_runs
-                WHERE group_hash = ? AND status != 'running'
+                WHERE group_hash = ? AND status != 'preparing'
                 ORDER BY start_time DESC
                 LIMIT 1
             """, (group_hash,))
@@ -1083,6 +1184,235 @@ class TestResultsDatabase:
                 for row in rows
             ]
 
+    # --- AI Analysis Methods ---
+
+    async def get_analysis_by_fingerprint(self, fingerprint: str, max_age_days: int = 30) -> Optional[Dict]:
+        """Find an existing analysis by symptom fingerprint within the dedup window."""
+        async with self.get_connection() as db:
+            cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=max_age_days)).isoformat() + "Z"
+            cursor = await db.execute("""
+                SELECT id, fingerprint, summary, references_json, confidence, category,
+                       model_used, tier_used, reasoning, context_hash, token_count, created_at
+                FROM ai_analyses
+                WHERE fingerprint = ? AND created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (fingerprint, cutoff))
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def insert_ai_analysis(self, fingerprint: str, summary: str, references_json: str,
+                                  confidence: float, category: str, model_used: str,
+                                  tier_used: int, reasoning: Optional[str],
+                                  context_hash: str, token_count: Optional[int],
+                                  summary_html: Optional[str] = None) -> int:
+        """Insert a new AI analysis result. Returns the analysis ID."""
+        async with self.get_connection() as db:
+            cursor = await db.execute("""
+                INSERT OR REPLACE INTO ai_analyses
+                (fingerprint, summary, summary_html, references_json, confidence, category,
+                 model_used, tier_used, reasoning, context_hash, token_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (fingerprint, summary, summary_html, references_json, confidence, category,
+                  model_used, tier_used, reasoning, context_hash, token_count))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def link_analysis_to_test_case(self, run_id: str, tc_full_name: str, analysis_id: int):
+        """Link an AI analysis to a specific test case in a run."""
+        async with self.get_connection() as db:
+            await db.execute("""
+                INSERT OR REPLACE INTO test_case_analyses (run_id, tc_full_name, analysis_id)
+                VALUES (?, ?, ?)
+            """, (run_id, tc_full_name, analysis_id))
+            await db.commit()
+
+    async def get_analyses_for_run(self, run_id: str) -> List[Dict]:
+        """Get all AI analyses for a run."""
+        async with self.get_connection() as db:
+            cursor = await db.execute("""
+                SELECT tca.tc_full_name, tc.tc_id,
+                       aa.id as analysis_id, aa.fingerprint,
+                       aa.summary, aa.summary_html, aa.references_json,
+                       aa.confidence, aa.category,
+                       aa.model_used, aa.tier_used, aa.reasoning, aa.deep_html,
+                       aa.token_count, aa.created_at
+                FROM test_case_analyses tca
+                JOIN ai_analyses aa ON tca.analysis_id = aa.id
+                LEFT JOIN test_cases tc ON tca.run_id = tc.run_id AND tca.tc_full_name = tc.tc_full_name
+                WHERE tca.run_id = ?
+                ORDER BY tca.tc_full_name
+            """, (run_id,))
+            rows = await cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+
+    async def get_analysis_for_test_case(self, run_id: str, tc_full_name: str) -> Optional[Dict]:
+        """Get AI analysis for a specific test case in a run."""
+        async with self.get_connection() as db:
+            cursor = await db.execute("""
+                SELECT aa.id as analysis_id, aa.fingerprint, aa.summary,
+                       aa.summary_html, aa.references_json, aa.confidence,
+                       aa.category, aa.model_used, aa.tier_used, aa.reasoning,
+                       aa.deep_html, aa.token_count, aa.created_at
+                FROM test_case_analyses tca
+                JOIN ai_analyses aa ON tca.analysis_id = aa.id
+                WHERE tca.run_id = ? AND tca.tc_full_name = ?
+            """, (run_id, tc_full_name))
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def update_deep_analysis(self, analysis_id: int, deep_html: str,
+                                    token_count_add: int = 0):
+        """Store deep analysis HTML for an existing analysis."""
+        async with self.get_connection() as db:
+            await db.execute("""
+                UPDATE ai_analyses
+                SET deep_html = ?, token_count = COALESCE(token_count, 0) + ?
+                WHERE id = ?
+            """, (deep_html, token_count_add, analysis_id))
+            await db.commit()
+
+    async def record_ai_usage(self, month: str, prompt_tokens: int,
+                               completion_tokens: int, cost_usd: float) -> Dict:
+        """Record AI token usage for budget tracking. Returns current month totals."""
+        async with self.get_connection() as db:
+            await db.execute("""
+                INSERT INTO ai_usage (month, prompt_tokens, completion_tokens, estimated_cost_usd, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(month) DO UPDATE SET
+                    prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                    completion_tokens = completion_tokens + excluded.completion_tokens,
+                    estimated_cost_usd = estimated_cost_usd + excluded.estimated_cost_usd,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (month, prompt_tokens, completion_tokens, cost_usd))
+            await db.commit()
+
+            cursor = await db.execute("""
+                SELECT month, prompt_tokens, completion_tokens, estimated_cost_usd, warning_sent
+                FROM ai_usage WHERE month = ?
+            """, (month,))
+            row = await cursor.fetchone()
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+
+    async def mark_budget_warning_sent(self, month: str):
+        """Mark that a budget warning email has been sent for this month."""
+        async with self.get_connection() as db:
+            await db.execute("""
+                UPDATE ai_usage SET warning_sent = 1, updated_at = CURRENT_TIMESTAMP
+                WHERE month = ?
+            """, (month,))
+            await db.commit()
+
+    async def get_ai_usage_for_month(self, month: str) -> Optional[Dict]:
+        """Get AI usage data for a specific month."""
+        async with self.get_connection() as db:
+            cursor = await db.execute("""
+                SELECT month, prompt_tokens, completion_tokens, estimated_cost_usd, warning_sent
+                FROM ai_usage WHERE month = ?
+            """, (month,))
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        """Get a setting value by key."""
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_setting(self, key: str, value: str):
+        """Set a setting value."""
+        async with self.get_connection() as db:
+            await db.execute("""
+                INSERT INTO settings (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (key, value))
+            await db.commit()
+
+    async def delete_setting(self, key: str):
+        """Delete a setting."""
+        async with self.get_connection() as db:
+            await db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            await db.commit()
+
+    async def get_test_case_info(self, run_id: str, tc_full_name: str) -> Optional[Dict]:
+        """Get basic info for a single test case."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM test_cases WHERE run_id = ? AND tc_full_name = ?",
+                (run_id, tc_full_name)
+            )
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def get_run_info(self, run_id: str) -> Optional[Dict]:
+        """Get basic info for a run."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM test_runs WHERE run_id = ?", (run_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def get_test_case_info(self, run_id: str, tc_full_name: str) -> Optional[Dict]:
+        """Get basic info for a single test case."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM test_cases WHERE run_id = ? AND tc_full_name = ?",
+                (run_id, tc_full_name)
+            )
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def get_run_info(self, run_id: str) -> Optional[Dict]:
+        """Get basic info for a run."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM test_runs WHERE run_id = ?", (run_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                columns = [desc[0] for desc in cursor.description]
+                return dict(zip(columns, row))
+            return None
+
+    async def get_failed_test_cases_for_run(self, run_id: str) -> List[Dict]:
+        """Get all failed/error test cases for a run, ordered by priority."""
+        async with self.get_connection() as db:
+            cursor = await db.execute("""
+                SELECT tc.*, tr.group_hash
+                FROM test_cases tc
+                JOIN test_runs tr ON tc.run_id = tr.run_id
+                WHERE tc.run_id = ? AND tc.status IN ('failed', 'error')
+                ORDER BY tc.start_time
+            """, (run_id,))
+            rows = await cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+
 
 # Global database instance - will be initialized with config path
 db = None
@@ -1108,12 +1438,13 @@ async def log_test_run_started(
     run_name: Optional[str] = None,
     group_name: Optional[str] = None,
     group_hash: Optional[str] = None,
-    group_metadata: Dict[str, Any] = None
+    group_metadata: Dict[str, Any] = None,
+    status: str = "running"
 ):
     """Log a test run start to the database."""
     test_run = TestRunData(
         run_id=run_id,
-        status="running",
+        status=status,
         start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
         end_time=None,
         retention_days=retention_days,

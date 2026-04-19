@@ -67,6 +67,9 @@ from .protocol import (
     F_MEMORY,
     F_GROUP_URL,
     F_GROUP_HASH,
+    F_AI_ANALYSIS,
+    F_AI_EMAIL,
+    F_AI_EMAIL_TO,
 )
 from .protocol_utils import normalize_message
 from .utils import (
@@ -91,10 +94,10 @@ logger = logging.getLogger(__name__)
 
 
 
-def log_event(event: str, **fields):
-    """Log an event with timestamp."""
+def log_event(event: str, level: str = "info", **fields):
+    """Log an event with timestamp at the specified level."""
     record = {"event": event, **fields, "ts": datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"}
-    logger.info(json.dumps(record))
+    getattr(logger, level, logger.info)(json.dumps(record))
 
 
 async def send_msgpack(ws, data):
@@ -141,7 +144,7 @@ class WebSocketServer:
                         expired.append(run_id)
 
                 for run_id in expired:
-                    logger.info(f"Removing expired prepared run: {run_id}")
+                    logger.debug(f"Removing expired prepared run: {run_id}")
                     prepared = self.prepared_runs.pop(run_id, None)
                     # Clean up the run folder if it exists
                     if prepared:
@@ -333,7 +336,7 @@ class WebSocketServer:
                         # The receive loop will either:
                         # 1. Process run_finished that's already in the queue -> run finishes normally
                         # 2. Timeout on inactivity -> run gets aborted by timeout handler
-                        logger.info(f"Monitor[{iteration}]: WebSocket ping failed ({e}), stopping monitor")
+                        logger.debug(f"Monitor[{iteration}]: WebSocket ping failed ({e}), stopping monitor")
                         break
 
                     if run and run.status == "running":
@@ -346,7 +349,7 @@ class WebSocketServer:
                     logger.debug(f"Monitor[{iteration}]: cancelled")
                     break
                 except Exception as e:
-                    logger.info(f"Monitor[{iteration}]: error: {e}")
+                    logger.debug(f"Monitor[{iteration}]: error: {e}")
                     break
 
         monitor_task = asyncio.create_task(monitor_connection())
@@ -355,18 +358,18 @@ class WebSocketServer:
         string_table = {}
 
         try:
-            logger.info(f"Starting NUnit WebSocket connection monitoring")
+            logger.debug(f"Starting NUnit WebSocket connection monitoring")
             async for msg in ws:
                 last_activity = datetime.now(UTC)
-                logger.info(f"Received message from NUnit client: {msg.type}")
+                logger.debug(f"Received message from NUnit client: {msg.type}")
 
                 if msg.type == web.WSMsgType.CLOSE:
-                    logger.info(f"NUnit WebSocket connection closed normally for run {run.id if run else 'unknown'}")
+                    logger.debug(f"NUnit WebSocket connection closed normally for run {run.id if run else 'unknown'}")
                     if run and run.status == "running":
                         await mark_run_aborted("WebSocket closed before run_finished was sent")
                     break
                 elif msg.type == web.WSMsgType.ERROR:
-                    logger.info(f"NUnit WebSocket connection error: {ws.exception()}")
+                    logger.warning(f"NUnit WebSocket connection error: {ws.exception()}")
                     if run and run.status == "running":
                         await mark_run_aborted("WebSocket error before run_finished was sent")
                     break
@@ -486,6 +489,19 @@ class WebSocketServer:
             run_path = get_run_path(run_id)
             run_path.mkdir(parents=True, exist_ok=True)
 
+            # Insert into database so commits can reference this run_id via foreign key
+            # Use 'preparing' status - will be updated to 'running' when NUnit connects
+            await database.log_test_run_started(
+                run_id=run_id,
+                retention_days=retention_days,
+                local_run=local_run,
+                user_metadata=user_metadata,
+                run_name=run_name,
+                group_name=group_payload.get("name") if group_payload else None,
+                group_hash=group_hash,
+                status="preparing",
+            )
+
             log_event("run_prepared", run_id=run_id, run_name=run_name, group_hash=group_hash)
 
             # Send response
@@ -546,6 +562,11 @@ class WebSocketServer:
 
             if start_time:
                 run.start_time = start_time
+
+            # Capture AI analysis preferences from client
+            run.ai_analysis_preference = data.get("ai_analysis_preference", data.get("aa", 0))
+            run.ai_email_preference = data.get("ai_email_preference", data.get("ae", 0))
+            run.ai_email_to = data.get("ai_email_to", data.get("er"))
 
             # Compute deletes_at for server-side retention
             try:
@@ -640,20 +661,11 @@ class WebSocketServer:
 
         log_event("run_activated", run_id=run_id, run_name=run_name)
 
-        # Log to database (run becomes visible now)
+        # Update database status from 'preparing' to 'running' (run becomes visible in UI)
         try:
-            await database.log_test_run_started(
-                run_id,
-                retention_days,
-                local_run,
-                user_metadata,
-                run_name=run_name,
-                group_name=group_payload["name"] if group_payload else None,
-                group_hash=group_hash,
-                group_metadata=(group_payload or {}).get("metadata")
-            )
+            await database.db.update_test_run(run_id, status="running")
         except Exception as db_error:
-            logger.error(f"Database logging error for run_activated: {db_error}")
+            logger.error(f"Database update error for run_activated: {db_error}")
 
         # Broadcast to UI clients
         await self.broadcast_ui({"type": "run_started", "run": meta_dict})
@@ -680,14 +692,14 @@ class WebSocketServer:
             raw_events = raw_message.get(F_EVENTS, []) if isinstance(raw_message, dict) else []
 
             if not run_id:
-                logger.info("Error: run_id missing from batch message")
+                logger.warning("Error: run_id missing from batch message")
                 return
 
             if not run:
                 run = self.test_runs.get(run_id)
 
             if not run:
-                logger.info(f"Error: Run '{run_id}' not found for batch message")
+                logger.warning(f"Error: Run '{run_id}' not found for batch message")
                 return
 
             if len(raw_events) != len(events):
@@ -712,7 +724,7 @@ class WebSocketServer:
                 else:
                     logger.warning(f"Unknown event_type in batch: {event_type}")
 
-            log_event("batch", run_id=run_id, event_count=len(events))
+            log_event("batch", level="debug", run_id=run_id, event_count=len(events))
 
         except Exception as e:
             logger.error(f"Error in batch: {e}")
@@ -727,24 +739,24 @@ class WebSocketServer:
             tc_id = data.get("tc_id")
 
             if not run_id:
-                logger.info("Error: run_id missing from test_case_started message")
+                logger.warning("Error: run_id missing from test_case_started message")
                 return
 
             if not tc_full_name:
-                logger.info("Error: tc_full_name missing from test_case_started message")
+                logger.warning("Error: tc_full_name missing from test_case_started message")
                 return
 
             if not tc_id:
-                logger.info("Error: tc_id missing from test_case_started message")
+                logger.warning("Error: tc_id missing from test_case_started message")
                 return
 
             if not validate_test_case_id(tc_id):
-                logger.info(f"Error: Invalid tc_id '{tc_id}' - must be alphanumeric with hyphens")
+                logger.warning(f"Error: Invalid tc_id '{tc_id}' - must be alphanumeric with hyphens")
                 return
 
             run = self.test_runs.get(run_id)
             if not run:
-                logger.info(f"Error: Run '{run_id}' not found for test_case_started message")
+                logger.warning(f"Error: Run '{run_id}' not found for test_case_started message")
                 return
 
             # Replace HTML entities with actual quotes
@@ -811,21 +823,21 @@ class WebSocketServer:
             tc_id = data.get("tc_id")
 
             if not run_id:
-                logger.info("Error: run_id missing from log_batch message")
+                logger.warning("Error: run_id missing from log_batch message")
                 return
 
             if not tc_id:
-                logger.info("Error: tc_id missing from log_batch message")
+                logger.warning("Error: tc_id missing from log_batch message")
                 return
 
             run = self.test_runs.get(run_id)
             if not run:
-                logger.info(f"Error: Run '{run_id}' not found for log_batch message")
+                logger.warning(f"Error: Run '{run_id}' not found for log_batch message")
                 return
 
             test_case = run.test_cases_by_tc_id.get(tc_id)
             if not test_case:
-                logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
+                logger.warning(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
                 return
 
             if raw_message is None or not isinstance(raw_message, dict):
@@ -836,7 +848,7 @@ class WebSocketServer:
 
             run.update_last()
             await test_case.add_log_entries(raw_entries)
-            log_event("log_batch", run_id=run.id, tc_id=tc_id, count=len(raw_entries))
+            log_event("log_batch", level="debug", run_id=run.id, tc_id=tc_id, count=len(raw_entries))
 
         except Exception as e:
             logger.error(f"Error in log_batch: {e}")
@@ -850,17 +862,17 @@ class WebSocketServer:
             tc_id = data.get("tc_id")
 
             if not run_id or not tc_id:
-                logger.info("Error: run_id or tc_id missing from exception message")
+                logger.warning("Error: run_id or tc_id missing from exception message")
                 return
 
             run = self.test_runs.get(run_id)
             if not run:
-                logger.info(f"Error: Run '{run_id}' not found for exception message")
+                logger.warning(f"Error: Run '{run_id}' not found for exception message")
                 return
 
             test_case = run.test_cases_by_tc_id.get(tc_id)
             if not test_case:
-                logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
+                logger.warning(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
                 return
 
             timestamp = data.get("timestamp") or datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
@@ -887,7 +899,7 @@ class WebSocketServer:
                 run_data["deletes_at"] = current_meta["deletes_at"]
             write_meta_msgpack(run.id, run_data)
 
-            log_event("exception", run_id=run.id, test_case_id=test_case.full_name)
+            log_event("exception", level="warning", run_id=run.id, test_case_id=test_case.full_name)
 
         except Exception as e:
             logger.error(f"Error in exception handling: {e}")
@@ -901,21 +913,21 @@ class WebSocketServer:
             tc_id = data.get("tc_id")
 
             if not run_id:
-                logger.info("Error: run_id missing from test_case_finished message")
+                logger.warning("Error: run_id missing from test_case_finished message")
                 return
 
             if not tc_id:
-                logger.info("Error: tc_id missing from test_case_finished message")
+                logger.warning("Error: tc_id missing from test_case_finished message")
                 return
 
             run = self.test_runs.get(run_id)
             if not run:
-                logger.info(f"Error: Run '{run_id}' not found for test_case_finished message")
+                logger.warning(f"Error: Run '{run_id}' not found for test_case_finished message")
                 return
 
             test_case = run.test_cases_by_tc_id.get(tc_id)
             if not test_case:
-                logger.info(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
+                logger.warning(f"Error: Test case with tc_id '{tc_id}' not found in run '{run_id}'")
                 return
 
             # Validate and set status
@@ -924,7 +936,7 @@ class WebSocketServer:
                 test_case.status = status
                 test_case.end_time = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
             else:
-                logger.info(f"Error: Invalid test status '{data.get('status')}' for test case {test_case.full_name}, ignoring test case")
+                logger.warning(f"Error: Invalid test status '{data.get('status')}' for test case {test_case.full_name}, ignoring test case")
                 return
 
             tc_meta = test_case.to_dict()
@@ -1097,6 +1109,16 @@ class WebSocketServer:
             # Broadcast to UI
             await self.broadcast_ui({"type": "run_finished", "run": run_data})
 
+            # Trigger AI failure analysis if configured
+            try:
+                from .ai_analysis import should_analyze, run_failure_analysis
+                from .config import AI_ANALYSIS_CONFIG
+                if should_analyze(run_data, AI_ANALYSIS_CONFIG):
+                    logger.info(f"Triggering AI failure analysis for run {run_id}")
+                    asyncio.create_task(run_failure_analysis(run_id, broadcast_fn=self.broadcast_ui))
+            except Exception as ai_error:
+                logger.error(f"Error triggering AI analysis: {ai_error}")
+
             # Remove finished run from memory
             if run_id in self.test_runs:
                 del self.test_runs[run_id]
@@ -1189,9 +1211,9 @@ class WebSocketServer:
         try:
             if cases_dir.exists() and not any(cases_dir.iterdir()):
                 cases_dir.rmdir()
-                logger.info(f"Cleaned up cases directory for run {run_id}")
+                logger.debug(f"Cleaned up cases directory for run {run_id}")
             else:
-                logger.info(f"Cleaned up log files for run {run_id}, preserved attachments")
+                logger.debug(f"Cleaned up log files for run {run_id}, preserved attachments")
         except Exception as e:
             logger.warning(f"Failed to remove cases directory: {e}")
 
@@ -1231,29 +1253,29 @@ class WebSocketServer:
 
     async def handle_log_stream(self, ws, run_id, test_case_id):
         """Handle WebSocket connection for live log streaming."""
-        logger.info(f"WebSocket log stream request: run_id={run_id}, test_case_storage_id={test_case_id}")
+        logger.debug(f"WebSocket log stream request: run_id={run_id}, test_case_storage_id={test_case_id}")
 
         if not validate_run_id(run_id) or not validate_test_case_id(test_case_id):
-            logger.info(f"Invalid run_id or test_case_id: {run_id}, {test_case_id}")
+            logger.warning(f"Invalid run_id or test_case_id: {run_id}, {test_case_id}")
             await send_msgpack(ws, {"type": "error", "message": "Invalid run ID or test case ID"})
             await ws.close()
             return
 
         test_run = self.test_runs.get(run_id)
         if not test_run:
-            logger.info(f"Test run not found in memory: {run_id}")
+            logger.debug(f"Test run not found in memory: {run_id}")
             await send_msgpack(ws, {"type": "error", "message": "Test run not found"})
             await ws.close()
             return
 
         test_case = find_test_case_by_tc_id(test_run, test_case_id)
         if not test_case:
-            logger.info(f"Couldn't find test case {test_case_id} in test run {run_id}")
+            logger.debug(f"Couldn't find test case {test_case_id} in test run {run_id}")
             await send_msgpack(ws, {"type": "error", "message": "Test case not found"})
             await ws.close()
             return
 
-        logger.info(f"WebSocket log stream established for {run_id}/{test_case_id}")
+        logger.debug(f"WebSocket log stream established for {run_id}/{test_case_id}")
 
         # Send the string table first so UI can decode interned strings
         try:
@@ -1283,10 +1305,10 @@ class WebSocketServer:
             # Sort by timestamp
             initial_items.sort(key=lambda x: x[0] or "")
 
-            logger.info(f"Replaying {len(initial_items)} log entries for {run_id}/{test_case_id}")
+            logger.debug(f"Replaying {len(initial_items)} log entries for {run_id}/{test_case_id}")
             for _, item in initial_items:
                 await send_msgpack(ws, item)
-            logger.info(f"Finished replaying log entries for {run_id}/{test_case_id}")
+            logger.debug(f"Finished replaying log entries for {run_id}/{test_case_id}")
 
         except Exception as e:
             logger.error(f"Error sending existing logs: {e}")

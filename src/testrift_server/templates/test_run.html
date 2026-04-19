@@ -111,11 +111,57 @@
             display: flex;
             justify-content: flex-end;
             align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
         }
 
         .status-badge-top {
             display: inline-flex;
             align-items: center;
+        }
+
+        .run-commits-pill {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            background: rgba(102, 126, 234, 0.12);
+            border: 1px solid rgba(102, 126, 234, 0.4);
+            color: #3d3f63;
+            border-radius: 999px;
+            padding: 6px 14px;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+
+        .run-commits-pill:hover {
+            background: rgba(102, 126, 234, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .run-commits-pill.disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+            background: #f1f3f5;
+            border-color: #d2d5e1;
+            color: #83879f;
+            transform: none;
+        }
+
+        .run-commits-pill .pill-label {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.75em;
+            color: #5b5f82;
+        }
+
+        .run-commits-pill .pill-meta {
+            font-weight: 500;
+        }
+
+        .run-commits-pill .pill-meta.muted {
+            color: #999;
         }
 
         .run-bottom-section {
@@ -170,6 +216,291 @@
         .download-btn.disabled:hover {
             transform: none;
             box-shadow: none;
+        }
+
+        .run-commits-modal .modal-header {
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .run-commits-modal .modal-title {
+            font-weight: 600;
+        }
+
+        .run-commits-modal .modal-subtitle {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 6px;
+        }
+
+        .run-commits-modal .modal-body {
+            background: #f9fafc;
+        }
+
+        .commit-modal-layout {
+            display: flex;
+            gap: 16px;
+            min-height: 320px;
+        }
+
+        .commit-column {
+            background: white;
+            border-radius: 10px;
+            padding: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .commit-repo-column {
+            flex: 0 0 220px;
+        }
+
+        .column-title {
+            font-size: 0.85em;
+            font-weight: 700;
+            color: #6c757d;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .detail-section-label {
+            font-size: 0.8em;
+            font-weight: 700;
+            color: #6c757d;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .commit-repo-list {
+            overflow-y: auto;
+            max-height: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .commit-repo-button {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            border: 1px solid #dde1f5;
+            border-radius: 8px;
+            padding: 10px 12px;
+            background: #f8f9ff;
+            color: #3b3d56;
+            text-align: left;
+            cursor: pointer;
+            transition: border 0.2s ease, background 0.2s ease, transform 0.1s ease;
+        }
+
+        .commit-repo-button:hover {
+            border-color: #667eea;
+        }
+
+        .commit-repo-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: transparent;
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.25);
+        }
+
+        .commit-repo-button.active .repo-name,
+        .commit-repo-button.active .repo-meta {
+            color: white;
+        }
+
+        .commit-repo-button .repo-name {
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .commit-repo-button .repo-meta {
+            font-size: 0.8em;
+            opacity: 0.9;
+        }
+
+        .repo-meta-pill {
+            align-self: flex-start;
+            margin-top: 6px;
+            background: rgba(255,255,255,0.6);
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 0.7em;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border: 1px solid rgba(255,255,255,0.4);
+            color: #4c4f6b;
+        }
+
+        .commit-repo-button.active .repo-meta-pill {
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.3);
+            color: white;
+        }
+
+        .commit-timeline {
+            position: relative;
+            padding-left: 20px;
+            overflow-y: auto;
+            max-height: 420px;
+        }
+
+        .commit-timeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #e0e4ff;
+        }
+
+        .timeline-entry {
+            position: relative;
+            padding: 8px 10px 8px 18px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: background 0.2s ease, border 0.2s ease;
+        }
+
+        .timeline-entry:hover {
+            border-color: rgba(102, 126, 234, 0.4);
+        }
+
+        .timeline-entry.active {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: rgba(102, 126, 234, 0.6);
+        }
+
+        .timeline-entry .timeline-dot {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #667eea;
+            left: -15px;
+            top: 14px;
+            border: 3px solid white;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.4);
+        }
+
+        .timeline-entry .commit-subject {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .timeline-entry .commit-meta {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+
+        .timeline-entry .commit-sha {
+            font-size: 0.75em;
+            font-family: 'Courier New', monospace;
+            color: #495057;
+        }
+
+        .commit-detail-panel {
+            overflow-y: auto;
+            max-height: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .commit-detail-header h5 {
+            margin: 0;
+            font-weight: 600;
+        }
+
+        .commit-detail-meta {
+            font-size: 0.85em;
+            color: #6c757d;
+        }
+
+        .repo-sha-range {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .sha-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #f1f3ff;
+            border: 1px solid #d6daf4;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 0.8em;
+            font-family: 'Courier New', monospace;
+        }
+
+        .sha-chip-label {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.75em;
+            color: #6c757d;
+        }
+
+        .sha-chip-value {
+            font-weight: 600;
+            color: #2f3271;
+        }
+
+        .file-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .file-chip {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #f1f3f5;
+            border: 1px solid #dee2e6;
+            font-size: 0.8em;
+        }
+
+        .file-chip-type {
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .file-chip-path {
+            font-family: 'Courier New', monospace;
+            color: #444;
+        }
+
+        .commit-empty-hint {
+            color: #6c757d;
+            font-size: 0.85em;
+        }
+
+        .repo-link {
+            margin-top: 8px;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        @media (max-width: 900px) {
+            .commit-modal-layout {
+                flex-direction: column;
+            }
+
+            .commit-repo-column {
+                flex: 1;
+            }
         }
 
         .info-grid {
@@ -753,6 +1084,58 @@
         height: 80px !important;
     }
 
+    .ai-analysis-run-section {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border: none;
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+    }
+    .ai-status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 0.85em;
+        font-weight: 500;
+    }
+    .ai-status-badge.analyzing { background: #fff3cd; color: #856404; }
+    .ai-status-badge.completed { background: #d4edda; color: #155724; }
+    .ai-status-badge.failed { background: #f8d7da; color: #721c24; }
+    .ai-status-badge.not-analyzed { background: #e2e3e5; color: #383d41; }
+    .ai-error-message {
+        background: #f8d7da; color: #721c24; border-radius: 8px;
+        padding: 10px 15px; margin-top: 10px; font-size: 0.9em;
+    }
+    .ai-error-message a { color: #721c24; text-decoration: underline; }
+    .ai-category-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 8px;
+        font-size: 0.8em;
+        font-weight: 500;
+        background: #e3f2fd;
+        color: #1565c0;
+    }
+    .ai-category-badge.bug { background: #fce4ec; color: #c62828; }
+    .ai-category-badge.flaky { background: #fff8e1; color: #f57f17; }
+    .ai-category-badge.infra { background: #e8eaf6; color: #283593; }
+    .ai-category-badge.config { background: #f3e5f5; color: #6a1b9a; }
+    .ai-confidence-bar {
+        display: inline-block;
+        width: 60px;
+        height: 8px;
+        background: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+        vertical-align: middle;
+    }
+    .ai-confidence-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: #28a745;
+    }
+
     .metrics-summary {
         display: flex;
         gap: 30px;
@@ -798,6 +1181,10 @@
                         </div>
                     </div>
                     <div class="run-status-section">
+                        <button id="run-commits-pill" class="run-commits-pill" type="button">
+                            <span class="pill-label">Git Commits</span>
+                            <span class="pill-meta muted">Loading...</span>
+                        </button>
                         <div class="status-badge-top">
                         {% if status.lower() == 'running' %}
                             <span id="run-status" class="status-badge status-badge-lg status-running">
@@ -881,6 +1268,25 @@
             </div>
 
             <!-- System Metrics Chart -->
+            {% if server_mode %}
+            <!-- AI Failure Analysis -->
+            <div class="ai-analysis-run-section" id="aiAnalysisSection" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="margin: 0; color: #495057; font-weight: 600;">🤖 AI Failure Analysis</h4>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="ai-status-badge" class="ai-status-badge"></span>
+                        <button id="ai-analyze-btn" class="btn btn-sm" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 6px; padding: 5px 14px; font-size: 0.85em;" onclick="triggerAnalysis()" style="display:none;">Analyze Failures</button>
+                    </div>
+                </div>
+                <div id="ai-analysis-results" style="display: none;">
+                    <table class="table table-condensed" style="font-size: 0.9em;">
+                        <thead><tr><th>Test Case</th><th>Category</th><th>Summary</th><th>Confidence</th></tr></thead>
+                        <tbody id="ai-analysis-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
             <div class="metrics-section" id="metrics-section" style="display: none;">
                 <div class="metrics-header">
                     <h4 style="margin: 0; color: #495057; font-weight: 600;">System Metrics</h4>
@@ -955,6 +1361,35 @@
             </ul>
         </div>
     </div>
+
+    <div class="modal fade" id="run-commits-modal" tabindex="-1" role="dialog" aria-labelledby="runCommitsModalLabel">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content run-commits-modal">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title" id="runCommitsModalLabel">Git Commits</h4>
+                    <div class="modal-subtitle" id="commit-modal-subtitle"></div>
+                </div>
+                <div class="modal-body">
+                    <div class="commit-modal-layout">
+                        <div class="commit-column commit-repo-column">
+                            <div class="column-title">Repositories</div>
+                            <div id="commit-repo-list" class="commit-repo-list"></div>
+                        </div>
+                        <div class="commit-column">
+                            <div class="column-title">Commits</div>
+                            <div id="commit-timeline" class="commit-timeline"></div>
+                        </div>
+                        <div class="commit-column">
+                            <div class="column-title">Details</div>
+                            <div id="commit-detail-panel" class="commit-detail-panel"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Template configuration for JavaScript
         const runConfig = {
@@ -1020,6 +1455,597 @@
             skipped: true,
             error: true
         };
+
+        const commitExplorerState = {
+            repos: [],
+            selectedRepoIndex: -1,
+            selectedCommitIndex: -1,
+            hasDetailedCommits: false
+        };
+
+        function initializeCommitExplorer() {
+            if (!runConfig || !runConfig.runId) {
+                return;
+            }
+
+            const pill = document.getElementById('run-commits-pill');
+            if (!pill) {
+                return;
+            }
+
+            pill.style.display = 'inline-flex';
+
+            pill.addEventListener('click', () => {
+                if (commitExplorerState.repos.length === 0 || pill.classList.contains('disabled')) {
+                    return;
+                }
+                renderCommitModal();
+                $('#run-commits-modal').modal('show');
+            });
+
+            setCommitPillLoading();
+            fetchRunCommits();
+        }
+
+        function setCommitPillLoading() {
+            const pill = document.getElementById('run-commits-pill');
+            if (!pill) {
+                return;
+            }
+            pill.style.display = 'inline-flex';
+            pill.classList.add('disabled');
+            pill.innerHTML = '<span class="pill-label">Git Commits</span><span class="pill-meta muted">Loading...</span>';
+            pill.removeAttribute('title');
+        }
+
+        function setCommitPillError(message) {
+            const pill = document.getElementById('run-commits-pill');
+            if (!pill) {
+                return;
+            }
+            pill.style.display = 'inline-flex';
+            pill.classList.add('disabled');
+            pill.innerHTML = '<span class="pill-label">Git Commits</span><span class="pill-meta muted">Unavailable</span>';
+            if (message) {
+                pill.title = message;
+            }
+        }
+
+        function updateCommitPillSummary() {
+            const pill = document.getElementById('run-commits-pill');
+            if (!pill) {
+                return;
+            }
+            pill.style.display = 'inline-flex';
+
+            const repoCount = commitExplorerState.repos.length;
+            const commitCount = commitExplorerState.repos.reduce((sum, repo) => {
+                const repoCommits = Array.isArray(repo.commits) ? repo.commits.length : 0;
+                return sum + repoCommits;
+            }, 0);
+
+            if (repoCount === 0) {
+                pill.classList.add('disabled');
+                pill.innerHTML = '<span class="pill-label">Git Commits</span><span class="pill-meta muted">No data</span>';
+                pill.title = 'testrift-collector did not upload commit metadata for this run.';
+                return;
+            }
+
+            pill.classList.remove('disabled');
+            const repoLabel = repoCount === 1 ? 'repo' : 'repos';
+            let metaText = repoCount + ' ' + repoLabel;
+            if (commitCount > 0) {
+                const commitLabel = commitCount === 1 ? 'commit' : 'commits';
+                metaText += ' · ' + commitLabel;
+            } else {
+                // Check if all repos have no changes vs some have no diff data
+                const allNoChange = commitExplorerState.repos.every(r => r.noChange);
+                const anyFallbackOnly = commitExplorerState.repos.some(r => r.fallbackOnly);
+                if (allNoChange) {
+                    metaText += ' · No changes';
+                } else if (anyFallbackOnly) {
+                    metaText += ' · SHA only';
+                } else {
+                    metaText += ' · No changes';
+                }
+            }
+
+            pill.innerHTML = '<span class="pill-label">Git Commits</span><span class="pill-meta">' + metaText + '</span>';
+            pill.removeAttribute('title');
+        }
+
+        async function fetchRunCommits() {
+            if (!runConfig || !runConfig.runId) {
+                return;
+            }
+            const pill = document.getElementById('run-commits-pill');
+            if (!pill) {
+                return;
+            }
+
+            try {
+                let payload;
+                if (runConfig.serverMode) {
+                    const response = await fetch('/api/runs/' + encodeURIComponent(runConfig.runId) + '/commits', {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Server responded with ' + response.status);
+                    }
+
+                    payload = await response.json();
+                    if (!payload.success) {
+                        throw new Error(payload.error || 'Failed to load commit metadata');
+                    }
+                } else {
+                    const localResponse = await fetch('commits.json', { cache: 'no-store' });
+                    if (!localResponse.ok) {
+                        payload = { success: true, diffs: [], commits: [] };
+                    } else {
+                        const localData = await localResponse.json();
+                        payload = {
+                            success: true,
+                            diffs: Array.isArray(localData.diffs) ? localData.diffs : [],
+                            commits: Array.isArray(localData.commits) ? localData.commits : []
+                        };
+                    }
+                }
+
+                const normalized = normalizeCommitPayload(payload);
+                commitExplorerState.repos = normalized.repos;
+                commitExplorerState.hasDetailedCommits = normalized.hasDetailedCommits;
+                commitExplorerState.selectedRepoIndex = normalized.repos.length > 0 ? 0 : -1;
+                commitExplorerState.selectedCommitIndex = 0;
+
+                updateCommitPillSummary();
+            } catch (error) {
+                console.error('Failed to fetch commit metadata:', error);
+                if (!runConfig.serverMode) {
+                    setCommitPillError('Commit metadata is unavailable in static exports.');
+                } else {
+                    setCommitPillError(error && error.message ? error.message : 'Unable to load commits');
+                }
+            }
+        }
+
+        function normalizeCommitPayload(payload) {
+            const repoMap = new Map();
+            const diffList = Array.isArray(payload.diffs) ? payload.diffs : [];
+
+            diffList.forEach((diff) => {
+                if (!diff || !diff.name) {
+                    return;
+                }
+                const commits = Array.isArray(diff.commits) ? diff.commits.map((commit) => ({
+                    sha: commit.sha || commit.commit_sha || '',
+                    subject: commit.subject || commit.message || '(no subject)',
+                    author: commit.author || commit.author_name || 'Unknown author',
+                    timestamp: commit.timestamp || commit.date || null,
+                    files: Array.isArray(commit.files) ? commit.files.map((file) => ({
+                        path: file.path || file.file || '',
+                        change_type: file.change_type || file.type || ''
+                    })) : []
+                })) : [];
+
+                const currentSha = diff.current_sha || diff.currentSha || null;
+                const previousSha = diff.previous_sha || diff.previousSha || null;
+                // noChange: same SHA as previous run (no new commits)
+                // fallbackOnly: no diff data was collected (only SHA known)
+                const noChange = currentSha && previousSha && currentSha === previousSha && commits.length === 0;
+                repoMap.set(diff.name, {
+                    name: diff.name,
+                    url: diff.url || null,
+                    currentSha,
+                    previousSha,
+                    commits,
+                    noChange,
+                    fallbackOnly: !noChange && commits.length === 0 && !previousSha
+                });
+            });
+
+            const fallbackRaw = payload.commits;
+            let fallbackList = [];
+            if (Array.isArray(fallbackRaw)) {
+                fallbackList = fallbackRaw;
+            } else if (fallbackRaw && typeof fallbackRaw === 'object') {
+                fallbackList = Object.keys(fallbackRaw).map((key) => ({
+                    repo_name: key,
+                    commit_sha: fallbackRaw[key]
+                }));
+            }
+
+            fallbackList.forEach((entry, index) => {
+                if (!entry) {
+                    return;
+                }
+                const repoName = entry.repo_name || entry.name || 'Repository ' + (index + 1);
+                if (!repoMap.has(repoName)) {
+                    repoMap.set(repoName, {
+                        name: repoName,
+                        url: entry.repo_url || entry.url || null,
+                        currentSha: entry.commit_sha || entry.current_sha || null,
+                        previousSha: entry.previous_sha || null,
+                        commits: [],
+                        fallbackOnly: true
+                    });
+                } else {
+                    const repo = repoMap.get(repoName);
+                    repo.currentSha = repo.currentSha || entry.commit_sha || entry.current_sha || repo.currentSha;
+                    repo.previousSha = repo.previousSha || entry.previous_sha || repo.previousSha;
+                    repo.url = repo.url || entry.repo_url || entry.url || repo.url;
+                    repo.fallbackOnly = repo.fallbackOnly && (!repo.commits || repo.commits.length === 0);
+                }
+            });
+
+            const repos = Array.from(repoMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+            const hasDetailedCommits = repos.some((repo) => Array.isArray(repo.commits) && repo.commits.length > 0);
+
+            return {
+                repos,
+                hasDetailedCommits
+            };
+        }
+
+        function shortSha(sha) {
+            if (!sha) {
+                return '--';
+            }
+            return sha.length > 7 ? sha.slice(0, 7) : sha;
+        }
+
+        function formatCommitTimestamp(timestamp) {
+            if (!timestamp) {
+                return 'Unknown time';
+            }
+            const date = new Date(timestamp);
+            if (Number.isNaN(date.getTime())) {
+                return timestamp;
+            }
+            return date.toLocaleString();
+        }
+
+        function renderCommitModal() {
+            if (commitExplorerState.selectedRepoIndex === -1 && commitExplorerState.repos.length > 0) {
+                commitExplorerState.selectedRepoIndex = 0;
+            }
+
+            const subtitle = document.getElementById('commit-modal-subtitle');
+            if (subtitle) {
+                const repoCount = commitExplorerState.repos.length;
+                const commitCount = commitExplorerState.repos.reduce((sum, repo) => sum + (Array.isArray(repo.commits) ? repo.commits.length : 0), 0);
+                if (repoCount === 0) {
+                    subtitle.textContent = 'No commit metadata captured for this run.';
+                } else if (commitCount === 0) {
+                    const repoLabel = repoCount === 1 ? 'repository' : 'repositories';
+                    subtitle.textContent = repoCount + ' ' + repoLabel + ' · SHA only';
+                } else {
+                    const repoLabel = repoCount === 1 ? 'repository' : 'repositories';
+                    const commitLabel = commitCount === 1 ? 'commit' : 'commits';
+                    subtitle.textContent = repoCount + ' ' + repoLabel + ' · ' + commitCount + ' ' + commitLabel;
+                }
+            }
+
+            renderRepoList();
+            renderCommitTimeline();
+            renderCommitDetails();
+        }
+
+        function renderRepoList() {
+            const repoList = document.getElementById('commit-repo-list');
+            if (!repoList) {
+                return;
+            }
+            repoList.innerHTML = '';
+
+            if (commitExplorerState.repos.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'No repositories recorded.';
+                repoList.appendChild(empty);
+                return;
+            }
+
+            commitExplorerState.repos.forEach((repo, index) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'commit-repo-button' + (index === commitExplorerState.selectedRepoIndex ? ' active' : '');
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'repo-name';
+                nameEl.textContent = repo.name;
+                button.appendChild(nameEl);
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'repo-meta';
+                if (repo.commits && repo.commits.length > 0) {
+                    const commitLabel = repo.commits.length === 1 ? 'commit' : 'commits';
+                    metaEl.textContent = repo.commits.length + ' ' + commitLabel;
+                } else if (repo.currentSha) {
+                    metaEl.textContent = '@ ' + shortSha(repo.currentSha);
+                } else {
+                    metaEl.textContent = 'No SHA recorded';
+                }
+                button.appendChild(metaEl);
+
+                if (repo.noChange) {
+                    const badge = document.createElement('span');
+                    badge.className = 'repo-meta-pill';
+                    badge.textContent = 'No changes';
+                    button.appendChild(badge);
+                } else if (repo.fallbackOnly) {
+                    const badge = document.createElement('span');
+                    badge.className = 'repo-meta-pill';
+                    badge.textContent = 'SHA only';
+                    button.appendChild(badge);
+                }
+
+                button.addEventListener('click', () => {
+                    selectRepo(index);
+                });
+
+                repoList.appendChild(button);
+            });
+        }
+
+        function selectRepo(index) {
+            if (index < 0 || index >= commitExplorerState.repos.length) {
+                return;
+            }
+            if (commitExplorerState.selectedRepoIndex === index) {
+                return;
+            }
+            commitExplorerState.selectedRepoIndex = index;
+            commitExplorerState.selectedCommitIndex = 0;
+            renderRepoList();
+            renderCommitTimeline();
+            renderCommitDetails();
+        }
+
+        function renderCommitTimeline() {
+            const timeline = document.getElementById('commit-timeline');
+            if (!timeline) {
+                return;
+            }
+            timeline.innerHTML = '';
+
+            const repo = commitExplorerState.repos[commitExplorerState.selectedRepoIndex];
+            if (!repo) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'Select a repository to view commits.';
+                timeline.appendChild(empty);
+                return;
+            }
+
+            if (!repo.commits || repo.commits.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                if (repo.noChange) {
+                    empty.textContent = 'No changes since last run (same commit).';
+                } else if (repo.fallbackOnly) {
+                    empty.textContent = 'No diff data collected for this repository.';
+                } else {
+                    empty.textContent = 'No commits in this diff range.';
+                }
+                timeline.appendChild(empty);
+                return;
+            }
+
+            if (commitExplorerState.selectedCommitIndex < 0 || commitExplorerState.selectedCommitIndex >= repo.commits.length) {
+                commitExplorerState.selectedCommitIndex = 0;
+            }
+
+            repo.commits.forEach((commit, index) => {
+                const entry = document.createElement('div');
+                entry.className = 'timeline-entry' + (index === commitExplorerState.selectedCommitIndex ? ' active' : '');
+
+                const dot = document.createElement('div');
+                dot.className = 'timeline-dot';
+                entry.appendChild(dot);
+
+                const subject = document.createElement('div');
+                subject.className = 'commit-subject';
+                subject.textContent = commit.subject || '(no subject)';
+                entry.appendChild(subject);
+
+                const meta = document.createElement('div');
+                meta.className = 'commit-meta';
+                meta.textContent = (commit.author || 'Unknown author') + ' • ' + formatCommitTimestamp(commit.timestamp);
+                entry.appendChild(meta);
+
+                const sha = document.createElement('div');
+                sha.className = 'commit-sha';
+                sha.textContent = shortSha(commit.sha);
+                entry.appendChild(sha);
+
+                entry.addEventListener('click', () => {
+                    selectCommit(index);
+                });
+
+                timeline.appendChild(entry);
+            });
+        }
+
+        function selectCommit(index) {
+            const repo = commitExplorerState.repos[commitExplorerState.selectedRepoIndex];
+            if (!repo || !Array.isArray(repo.commits) || index < 0 || index >= repo.commits.length) {
+                return;
+            }
+            if (commitExplorerState.selectedCommitIndex === index) {
+                return;
+            }
+            commitExplorerState.selectedCommitIndex = index;
+            renderCommitTimeline();
+            renderCommitDetails();
+        }
+
+        function renderCommitDetails() {
+            const panel = document.getElementById('commit-detail-panel');
+            if (!panel) {
+                return;
+            }
+            panel.innerHTML = '';
+
+            const repo = commitExplorerState.repos[commitExplorerState.selectedRepoIndex];
+            if (!repo) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'Select a repository to inspect commit metadata.';
+                panel.appendChild(empty);
+                return;
+            }
+
+            if (!repo.commits || repo.commits.length === 0) {
+                renderFallbackRepoDetail(panel, repo);
+                return;
+            }
+
+            if (commitExplorerState.selectedCommitIndex < 0 || commitExplorerState.selectedCommitIndex >= repo.commits.length) {
+                commitExplorerState.selectedCommitIndex = 0;
+            }
+
+            const commit = repo.commits[commitExplorerState.selectedCommitIndex];
+
+            const header = document.createElement('div');
+            header.className = 'commit-detail-header';
+            const title = document.createElement('h5');
+            title.textContent = commit.subject || '(no subject)';
+            header.appendChild(title);
+            const meta = document.createElement('div');
+            meta.className = 'commit-detail-meta';
+            meta.textContent = (commit.author || 'Unknown author') + ' • ' + formatCommitTimestamp(commit.timestamp);
+            header.appendChild(meta);
+            panel.appendChild(header);
+
+            const shaRow = document.createElement('div');
+            shaRow.className = 'repo-sha-range';
+            const commitChip = createShaChipElement('Commit', commit.sha);
+            if (commitChip) {
+                shaRow.appendChild(commitChip);
+            }
+            const resolvedCurrent = repo.currentSha || commit.sha;
+            if (resolvedCurrent && resolvedCurrent !== commit.sha) {
+                const currentChip = createShaChipElement('Current', resolvedCurrent);
+                if (currentChip) {
+                    shaRow.appendChild(currentChip);
+                }
+            }
+            const previousChip = createShaChipElement('Previous', repo.previousSha);
+            if (previousChip) {
+                shaRow.appendChild(previousChip);
+            }
+            if (shaRow.children.length > 0) {
+                panel.appendChild(shaRow);
+            }
+
+            if (repo.url) {
+                const repoLink = document.createElement('a');
+                repoLink.href = repo.url;
+                repoLink.target = '_blank';
+                repoLink.rel = 'noopener noreferrer';
+                repoLink.className = 'repo-link';
+                repoLink.textContent = 'Open repository';
+                panel.appendChild(repoLink);
+            }
+
+            const filesHeader = document.createElement('div');
+            filesHeader.className = 'detail-section-label';
+            filesHeader.textContent = 'Changed files';
+            panel.appendChild(filesHeader);
+
+            const fileList = document.createElement('div');
+            fileList.className = 'file-chip-list';
+            if (commit.files && commit.files.length > 0) {
+                commit.files.forEach((file) => {
+                    const chip = document.createElement('span');
+                    chip.className = 'file-chip';
+
+                    const type = document.createElement('span');
+                    type.className = 'file-chip-type';
+                    type.textContent = (file.change_type || '?').toUpperCase();
+                    chip.appendChild(type);
+
+                    const path = document.createElement('span');
+                    path.className = 'file-chip-path';
+                    path.textContent = file.path || 'unknown path';
+                    chip.appendChild(path);
+
+                    chip.title = type.textContent + ' ' + (file.path || '');
+                    fileList.appendChild(chip);
+                });
+            } else {
+                const hint = document.createElement('div');
+                hint.className = 'commit-empty-hint';
+                hint.textContent = 'No file-level metadata was captured for this commit.';
+                fileList.appendChild(hint);
+            }
+            panel.appendChild(fileList);
+        }
+
+        function renderFallbackRepoDetail(panel, repo) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'empty-state';
+            if (repo.noChange) {
+                placeholder.textContent = 'No changes detected since the last test run.';
+            } else if (repo.fallbackOnly) {
+                placeholder.textContent = 'This repository reported only the latest SHA for this run.';
+            } else {
+                placeholder.textContent = 'No commits found in the diff range.';
+            }
+            panel.appendChild(placeholder);
+
+            const shaRow = document.createElement('div');
+            shaRow.className = 'repo-sha-range';
+            const currentChip = createShaChipElement('Current', repo.currentSha);
+            if (currentChip) {
+                shaRow.appendChild(currentChip);
+            }
+            const previousChip = createShaChipElement('Previous', repo.previousSha);
+            if (previousChip) {
+                shaRow.appendChild(previousChip);
+            }
+            if (shaRow.children.length > 0) {
+                panel.appendChild(shaRow);
+            }
+
+            if (repo.fallbackOnly) {
+                const hint = document.createElement('div');
+                hint.className = 'commit-empty-hint';
+                hint.textContent = 'Enable commit diff collection in testrift-collector to see detailed history here.';
+                panel.appendChild(hint);
+            }
+
+            if (repo.url) {
+                const repoLink = document.createElement('a');
+                repoLink.href = repo.url;
+                repoLink.target = '_blank';
+                repoLink.rel = 'noopener noreferrer';
+                repoLink.className = 'repo-link';
+                repoLink.textContent = 'Open repository';
+                panel.appendChild(repoLink);
+            }
+        }
+
+        function createShaChipElement(label, value) {
+            if (!value) {
+                return null;
+            }
+            const chip = document.createElement('span');
+            chip.className = 'sha-chip';
+            chip.title = value;
+            const labelEl = document.createElement('span');
+            labelEl.className = 'sha-chip-label';
+            labelEl.textContent = label;
+            chip.appendChild(labelEl);
+            const valueEl = document.createElement('span');
+            valueEl.className = 'sha-chip-value';
+            valueEl.textContent = shortSha(value);
+            chip.appendChild(valueEl);
+            return chip;
+        }
 
         // Real-time execution time tracking
         function startExecutionTimer() {
@@ -4341,6 +5367,7 @@
             initializeRunExecutionTime();
             initializeMetricsChart();
             initializeMetricsChartHover();
+            initializeCommitExplorer();
 
             // Add event listeners for expand/collapse buttons
             $('#expand-all-btn').on('click', function() {
@@ -4705,6 +5732,159 @@
                     statusBadgeTop.appendChild(finishedBadge);
                 }
             }
+        }
+
+        // --- AI Analysis ---
+        function escapeHtmlAi(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function getCategoryClass(cat) {
+            if (!cat) return '';
+            const c = cat.toLowerCase();
+            if (c.includes('bug') || c.includes('regression')) return 'bug';
+            if (c.includes('flaky') || c.includes('intermittent')) return 'flaky';
+            if (c.includes('infra') || c.includes('environment')) return 'infra';
+            if (c.includes('config')) return 'config';
+            return '';
+        }
+
+        async function loadAiAnalysisStatus() {
+            try {
+                const resp = await fetch(`/api/runs/${runConfig.runId}/analysis`);
+                const data = await resp.json();
+                if (!data.success) return;
+
+                const section = document.getElementById('aiAnalysisSection');
+                const badge = document.getElementById('ai-status-badge');
+                const btn = document.getElementById('ai-analyze-btn');
+
+                // Clear any previous error message
+                let errDiv = document.getElementById('ai-error-msg');
+                if (errDiv) errDiv.remove();
+
+                if (data.status === 'completed') {
+                    section.style.display = '';
+                    badge.textContent = `Analyzed (${data.analyzed_count}/${data.total_failures})`;
+                    badge.className = 'ai-status-badge completed';
+                    btn.style.display = 'none';
+                    loadAiAnalysisSummary();
+                } else if (data.status === 'running') {
+                    section.style.display = '';
+                    badge.innerHTML = 'Analyzing... <span class="status-spinner"></span>';
+                    badge.className = 'ai-status-badge analyzing';
+                    btn.style.display = 'none';
+                    setTimeout(loadAiAnalysisStatus, 3000);
+                } else if (data.status === 'failed') {
+                    section.style.display = '';
+                    badge.textContent = 'Failed';
+                    badge.className = 'ai-status-badge failed';
+                    btn.style.display = '';
+                    btn.disabled = false;
+                    btn.textContent = 'Retry';
+                    // Show error details
+                    errDiv = document.createElement('div');
+                    errDiv.id = 'ai-error-msg';
+                    errDiv.className = 'ai-error-message';
+                    errDiv.innerHTML = '⚠️ ' + escapeHtmlAi(data.error || 'Analysis failed') + ' — check the <a href="/logs">server log</a> for details.';
+                    section.appendChild(errDiv);
+                } else {
+                    // Not analyzed - show button if there are failures
+                    const failedCount = {{ failed_count | tojson }};
+                    const errorCount = {{ (error_count if error_count is defined else 0) | tojson }};
+                    if (failedCount > 0 || errorCount > 0) {
+                        section.style.display = '';
+                        badge.textContent = 'Not analyzed';
+                        badge.className = 'ai-status-badge not-analyzed';
+                        btn.style.display = '';
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load AI analysis status:', e);
+            }
+        }
+
+        async function loadAiAnalysisSummary() {
+            try {
+                const resp = await fetch(`/api/runs/${runConfig.runId}/analysis/summary`);
+                const data = await resp.json();
+                if (!data.success || !data.analyses || data.analyses.length === 0) return;
+
+                const tbody = document.getElementById('ai-analysis-tbody');
+                tbody.innerHTML = '';
+                data.analyses.forEach(a => {
+                    const catClass = getCategoryClass(a.category);
+                    const conf = a.confidence ? Math.round(a.confidence * 100) : 0;
+                    const row = document.createElement('tr');
+
+                    // Build clickable TC name link
+                    const tcShort = escapeHtmlAi(a.tc_full_name ? a.tc_full_name.split('.').pop() : '');
+                    let tcCell;
+                    if (a.tc_id) {
+                        const tcUrl = `${LOG_URL_BASE}${encodeURIComponent(a.tc_id)}.html`;
+                        tcCell = `<a href="${tcUrl}" title="${escapeHtmlAi(a.tc_full_name)}">${tcShort}</a>`;
+                    } else {
+                        tcCell = `<span title="${escapeHtmlAi(a.tc_full_name)}">${tcShort}</span>`;
+                    }
+
+                    // Use summary_html if available, fall back to plain text
+                    const summaryContent = a.summary_html || escapeHtmlAi(a.summary || '');
+
+                    row.innerHTML = `
+                        <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tcCell}</td>
+                        <td><span class="ai-category-badge ${catClass}">${escapeHtmlAi(a.category || 'unknown')}</span></td>
+                        <td style="max-width:400px;">${summaryContent}</td>
+                        <td><span class="ai-confidence-bar"><span class="ai-confidence-fill" style="width:${conf}%"></span></span> ${conf}%</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                document.getElementById('ai-analysis-results').style.display = '';
+            } catch (e) {
+                console.error('Failed to load AI analysis summary:', e);
+            }
+        }
+
+        async function triggerAnalysis() {
+            const btn = document.getElementById('ai-analyze-btn');
+            const badge = document.getElementById('ai-status-badge');
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+            // Clear old error
+            const oldErr = document.getElementById('ai-error-msg');
+            if (oldErr) oldErr.remove();
+            try {
+                const resp = await fetch(`/api/runs/${runConfig.runId}/analyze`, {method: 'POST'});
+                const data = await resp.json();
+                if (data.success) {
+                    badge.innerHTML = 'Analyzing... <span class="status-spinner"></span>';
+                    badge.className = 'ai-status-badge analyzing';
+                    setTimeout(loadAiAnalysisStatus, 2000);
+                } else {
+                    badge.textContent = 'Failed';
+                    badge.className = 'ai-status-badge failed';
+                    const section = document.getElementById('aiAnalysisSection');
+                    const errDiv = document.createElement('div');
+                    errDiv.id = 'ai-error-msg';
+                    errDiv.className = 'ai-error-message';
+                    errDiv.innerHTML = '⚠️ ' + escapeHtmlAi(data.error || 'Unknown error') + ' — check the <a href="/logs">server log</a> for details.';
+                    section.appendChild(errDiv);
+                    btn.disabled = false;
+                    btn.textContent = 'Retry';
+                }
+            } catch (e) {
+                badge.textContent = 'Error';
+                badge.className = 'ai-status-badge failed';
+                btn.disabled = false;
+                btn.textContent = 'Retry';
+            }
+        }
+
+        // Load AI analysis status on page load (server mode only)
+        if (runConfig.serverMode) {
+            loadAiAnalysisStatus();
         }
     </script>
 </body>

@@ -1604,3 +1604,158 @@ span {
     0% { background-color: rgba(255, 193, 7, 0.3); }
     100% { background-color: transparent; }
 }
+
+/* AI Failure Analysis Section */
+.ai-analysis-section {
+    margin-top: 25px;
+}
+
+.ai-analysis-header {
+    margin: 20px 0 10px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #dee2e6;
+    display: block;
+    clear: both;
+}
+
+.ai-analysis-header h5 {
+    margin: 0;
+    color: #495057;
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+.ai-analysis-card {
+    background: #1a2744;
+    border: 1px solid rgba(100, 149, 237, 0.3);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-top: 12px;
+    font-family: inherit;
+}
+
+.ai-analysis-summary {
+    font-size: 0.95em;
+    line-height: 1.6;
+    color: #e0e0e0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ai-analysis-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(100, 149, 237, 0.2);
+}
+
+.ai-analysis-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.78em;
+    font-weight: 500;
+}
+
+.ai-analysis-badge.category {
+    background: rgba(100, 149, 237, 0.2);
+    color: #93b5f5;
+}
+
+.ai-analysis-badge.confidence-high {
+    background: rgba(40, 167, 69, 0.2);
+    color: #7dcea0;
+}
+
+.ai-analysis-badge.confidence-medium {
+    background: rgba(255, 193, 7, 0.2);
+    color: #f0d77b;
+}
+
+.ai-analysis-badge.confidence-low {
+    background: rgba(220, 53, 69, 0.2);
+    color: #e88a93;
+}
+
+.ai-analysis-badge.model {
+    background: rgba(108, 117, 125, 0.2);
+    color: #adb5bd;
+}
+
+.ai-analysis-references {
+    margin-top: 12px;
+}
+
+.ai-analysis-references-title {
+    font-size: 0.82em;
+    font-weight: 600;
+    color: #93b5f5;
+    margin-bottom: 6px;
+}
+
+.ai-analysis-ref-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.ai-analysis-ref-list li {
+    font-size: 0.85em;
+    color: #adb5bd;
+    padding: 2px 0;
+}
+
+.ai-analysis-ref-list li a {
+    color: #66b3ff;
+    text-decoration: underline;
+}
+
+.ai-analysis-ref-list li a:hover {
+    color: #4da6ff;
+}
+
+.ai-analysis-reasoning {
+    margin-top: 10px;
+}
+
+.ai-analysis-reasoning-toggle {
+    font-size: 0.82em;
+    color: #93b5f5;
+    cursor: pointer;
+    user-select: none;
+    border: none;
+    background: none;
+    padding: 0;
+}
+
+.ai-analysis-reasoning-toggle:hover {
+    color: #b3cff7;
+}
+
+.ai-analysis-reasoning-content {
+    display: none;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font-size: 0.85em;
+    line-height: 1.5;
+    color: #adb5bd;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ai-analysis-reasoning-content.expanded {
+    display: block;
+}
+
+.dark-theme .ai-analysis-header {
+    border-bottom-color: #495057;
+}
+
+.dark-theme .ai-analysis-header h5 {
+    color: #495057;
+}

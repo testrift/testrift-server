@@ -135,6 +135,9 @@ Initiates a new test run.
 - `rd`: (optional) Retention days
 - `lr`: (optional) Local run flag
 - `ts`: (optional) Start timestamp in ms
+- `aa`: (optional) AI analysis preference — `0` = default (server decides), `1` = auto, `2` = skip
+- `ae`: (optional) AI email preference — `0` = default, `1` = always send, `2` = suppress
+- `er`: (optional) AI email recipients override — list of email addresses
 
 **Example (MessagePack structure shown as JSON for readability):**
 ```json

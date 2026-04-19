@@ -1991,12 +1991,197 @@ function scrollToClosestLogEntry(targetTs) {
     }
 }
 
+// ============================================================================
+// AI FAILURE ANALYSIS
+// ============================================================================
+
+function loadAiAnalysis() {
+    if (!templateConfig || !templateConfig.serverMode) return;
+
+    const section = document.getElementById('aiAnalysisSection');
+    const card = document.getElementById('aiAnalysisCard');
+    if (!section || !card) return;
+
+    const runId = templateConfig.runId;
+    const tcFullName = templateConfig.testCaseFullName;
+
+    fetch(`/api/runs/${encodeURIComponent(runId)}/analysis/${encodeURIComponent(tcFullName)}`)
+        .then(response => {
+            if (response.status === 404) return null;
+            return response.json();
+        })
+        .then(data => {
+            if (!data || !data.success) return;
+            section.style.display = '';
+            card.innerHTML = renderAiAnalysis(data);
+            const reBtn = document.getElementById('aiReanalyzeBtn');
+            if (reBtn) reBtn.style.display = '';
+        })
+        .catch(error => {
+            console.error('Error loading AI analysis:', error);
+        });
+}
+
+function renderAiAnalysis(data) {
+    let html = '';
+
+    // Summary (use summary_html if available)
+    if (data.summary_html) {
+        html += `<div class="ai-analysis-summary">${data.summary_html}</div>`;
+    } else if (data.summary) {
+        html += `<div class="ai-analysis-summary">${escapeHtml(data.summary)}</div>`;
+    }
+
+    // Deep analysis
+    if (data.deep_html) {
+        html += `<div class="ai-analysis-deep">${data.deep_html}</div>`;
+    }
+
+    // Deep analysis button (only if no deep_html yet)
+    if (!data.deep_html) {
+        html += `<div style="margin: 8px 0;"><button id="aiDeepAnalysisBtn" class="btn btn-sm btn-info" onclick="triggerDeepAnalysis()">🔍 Deep Analysis</button></div>`;
+    }
+
+    // References
+    if (data.references && data.references.length > 0) {
+        html += '<div class="ai-analysis-references">';
+        html += '<div class="ai-analysis-references-title">References</div>';
+        html += '<ul class="ai-analysis-ref-list">';
+        for (const ref of data.references) {
+            if (ref.url) {
+                html += `<li><a href="${escapeHtml(ref.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(ref.title || ref.url)}</a></li>`;
+            } else if (ref.title) {
+                html += `<li>${escapeHtml(ref.title)}</li>`;
+            }
+        }
+        html += '</ul></div>';
+    }
+
+    // Meta badges
+    const badges = [];
+    if (data.category) {
+        badges.push(`<span class="ai-analysis-badge category">${escapeHtml(data.category)}</span>`);
+    }
+    if (data.confidence) {
+        const level = data.confidence >= 0.7 ? 'high' : data.confidence >= 0.4 ? 'medium' : 'low';
+        badges.push(`<span class="ai-analysis-badge confidence-${level}">Confidence: ${Math.round(data.confidence * 100)}%</span>`);
+    }
+    if (data.model_used) {
+        badges.push(`<span class="ai-analysis-badge model">${escapeHtml(data.model_used)}</span>`);
+    }
+    if (badges.length > 0) {
+        html += `<div class="ai-analysis-meta">${badges.join('')}</div>`;
+    }
+
+    // Reasoning (collapsible)
+    if (data.reasoning) {
+        html += '<div class="ai-analysis-reasoning">';
+        html += '<button class="ai-analysis-reasoning-toggle" onclick="toggleAnalysisReasoning(this)">▶ Show reasoning</button>';
+        html += `<div class="ai-analysis-reasoning-content">${escapeHtml(data.reasoning)}</div>`;
+        html += '</div>';
+    }
+
+    return html;
+}
+
+function toggleAnalysisReasoning(btn) {
+    const content = btn.nextElementSibling;
+    if (content.classList.contains('expanded')) {
+        content.classList.remove('expanded');
+        btn.textContent = '▶ Show reasoning';
+    } else {
+        content.classList.add('expanded');
+        btn.textContent = '▼ Hide reasoning';
+    }
+}
+
+function reanalyzeTestCase() {
+    if (!templateConfig) return;
+    const btn = document.getElementById('aiReanalyzeBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+
+    fetch(`/api/runs/${encodeURIComponent(templateConfig.runId)}/analyze`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                alert('Failed: ' + (data.error || 'Unknown'));
+                if (btn) { btn.disabled = false; btn.textContent = 'Re-analyze'; }
+                return;
+            }
+            // Poll for completion then reload
+            const poll = setInterval(() => {
+                fetch(`/api/runs/${encodeURIComponent(templateConfig.runId)}/analysis`)
+                    .then(r => r.json())
+                    .then(s => {
+                        if (s.success && s.status === 'completed') {
+                            clearInterval(poll);
+                            loadAiAnalysis();
+                            if (btn) { btn.disabled = false; btn.textContent = 'Re-analyze'; }
+                        } else if (s.success && s.status === 'failed') {
+                            clearInterval(poll);
+                            alert('Analysis failed: ' + (s.error || 'Unknown error'));
+                            if (btn) { btn.disabled = false; btn.textContent = 'Re-analyze'; }
+                        }
+                    });
+            }, 2000);
+        })
+        .catch(e => {
+            alert('Error: ' + e.message);
+            if (btn) { btn.disabled = false; btn.textContent = 'Re-analyze'; }
+        });
+}
+
+function triggerDeepAnalysis() {
+    if (!templateConfig) return;
+    const btn = document.getElementById('aiDeepAnalysisBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+
+    const runId = encodeURIComponent(templateConfig.runId);
+    const tcName = encodeURIComponent(templateConfig.testCaseFullName);
+
+    fetch(`/api/runs/${runId}/analyze/${tcName}/deep`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                alert('Failed: ' + (data.error || 'Unknown'));
+                if (btn) { btn.disabled = false; btn.textContent = '🔍 Deep Analysis'; }
+                return;
+            }
+            const poll = setInterval(() => {
+                fetch(`/api/runs/${runId}/analyze/${tcName}/deep`)
+                    .then(r => r.json())
+                    .then(s => {
+                        if (s.success && s.status === 'completed') {
+                            clearInterval(poll);
+                            loadAiAnalysis();
+                        } else if (s.success && s.status === 'failed') {
+                            clearInterval(poll);
+                            alert('Deep analysis failed: ' + (s.error || 'Unknown error'));
+                            if (btn) { btn.disabled = false; btn.textContent = '🔍 Deep Analysis'; }
+                        }
+                    });
+            }, 3000);
+        })
+        .catch(e => {
+            alert('Error: ' + e.message);
+            if (btn) { btn.disabled = false; btn.textContent = '🔍 Deep Analysis'; }
+        });
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 // Initialize when DOM is ready and templateConfig is available
 if (typeof templateConfig !== 'undefined') {
     initializeTestCaseLog();
     initializeAttachments();
     initializeStackTraceSection();
     initializeMetricsSummary();
+    loadAiAnalysis();
 } else {
     // Wait for templateConfig to be defined
     document.addEventListener('DOMContentLoaded', function() {
@@ -2005,6 +2190,7 @@ if (typeof templateConfig !== 'undefined') {
             initializeAttachments();
             initializeStackTraceSection();
             initializeMetricsSummary();
+            loadAiAnalysis();
         }
     });
 }
