@@ -1,0 +1,29 @@
+# TestRift server configuration for the Docker container.
+server:
+  # Port number for the server to listen on (also EXPOSE'd in the Dockerfile).
+  port: 8080
+
+  # Must be false inside a container so the server binds 0.0.0.0 and is
+  # reachable from outside the container. Restrict exposure at the
+  # docker/host networking layer instead.
+  localhost_only: false
+
+# Data directory for storing test run data. Absolute path mapped to the
+# /data volume declared in the Dockerfile so data survives container restarts.
+data:
+  directory: "/data"
+  default_retention_days: 7
+
+# Attachment configuration
+attachments:
+  enabled: true
+  max_size: "10MB"
+
+# AI analysis (optional). Provide OPENAI_API_KEY as an environment variable.
+ai_analysis:
+  enabled: false
+  openai_api_key: "${env:OPENAI_API_KEY}"
+
+# Email notifications (optional).
+email:
+  enabled: false

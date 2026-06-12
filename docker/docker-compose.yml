@@ -1,0 +1,23 @@
+services:
+  testrift-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      # Use the host network during the build (e.g. for restricted/proxied networks).
+      network: host
+    image: testrift-server:latest
+    container_name: testrift-server
+    restart: unless-stopped
+    # Use the host network at runtime. The server binds 0.0.0.0:8080 directly on
+    # the host, so no port mapping is needed (and `ports` is ignored in this mode).
+    network_mode: host
+    volumes:
+      # Persist test run data and the SQLite database on the host.
+      - testrift-data:/data
+    environment:
+      # Optional: enable AI analysis by setting OPENAI_API_KEY here or in a .env file.
+      # OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TZ: UTC
+
+volumes:
+  testrift-data:
