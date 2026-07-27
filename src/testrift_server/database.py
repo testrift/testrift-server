@@ -244,6 +244,26 @@ class TestResultsDatabase:
             """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_ai_analyses_fingerprint ON ai_analyses(fingerprint)")
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS collection_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+                    profile_id INTEGER NOT NULL REFERENCES summary_profiles(id) ON DELETE CASCADE,
+                    requested_at TEXT NOT NULL,
+                    context_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    summary TEXT,
+                    model_used TEXT,
+                    prompt_version TEXT,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                    error TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(collection_id, profile_id, requested_at)
+                )
+            """)
+
             # Ensure new columns exist for legacy databases
             cursor = await db.execute("PRAGMA table_info(ai_analyses)")
             columns = await cursor.fetchall()
@@ -1616,6 +1636,22 @@ class TestResultsDatabase:
         async with self.get_connection() as db:
             cursor = await db.execute("SELECT source_role, revision FROM run_sources WHERE run_id = ?", (run_id,))
             return {role: revision for role, revision in await cursor.fetchall()}
+
+    async def get_or_create_collection_report(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist an idempotent Collection report context and return its stored record."""
+        async with self.get_connection() as db:
+            await db.execute(
+                """INSERT INTO collection_reports (collection_id, profile_id, requested_at, context_json)
+                   VALUES (?, ?, ?, ?) ON CONFLICT(collection_id, profile_id, requested_at) DO NOTHING""",
+                (context["collection_id"], context["profile_id"], context["requested_at"], json.dumps(context)),
+            )
+            await db.commit()
+            cursor = await db.execute(
+                "SELECT * FROM collection_reports WHERE collection_id = ? AND profile_id = ? AND requested_at = ?",
+                (context["collection_id"], context["profile_id"], context["requested_at"]),
+            )
+            row = await cursor.fetchone()
+            return dict(zip([column[0] for column in cursor.description], row))
 
     async def get_commits_for_run(self, run_id: str) -> List[Dict[str, str]]:
         """

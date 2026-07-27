@@ -54,6 +54,17 @@ class AnalysisRunStatus:
     completed_at: Optional[str] = None
 
 
+@dataclass
+class CollectionReportContext:
+    """Persisted deterministic input to a Collection-level AI report."""
+    collection_id: int
+    profile_id: int
+    requested_at: str
+    selections: list[dict]
+    sources: dict[str, dict]
+    failure_clusters: list[dict]
+
+
 class BudgetExceededError(Exception):
     """Raised when monthly AI budget is exceeded."""
     pass

@@ -17,7 +17,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from .ai_models import AnalysisContext, AnalysisResult, AnalysisRunStatus, BudgetExceededError
+from .ai_models import AnalysisContext, AnalysisResult, AnalysisRunStatus, BudgetExceededError, CollectionReportContext
 from .ai_prompts import (
     SYSTEM_PROMPT_TIER1,
     SYSTEM_PROMPT_TIER2,
@@ -29,6 +29,7 @@ from .ai_prompts import (
 from .config import AI_ANALYSIS_CONFIG, EMAIL_CONFIG
 from .utils import get_run_path, read_meta_msgpack
 from . import database
+from .summary_profiles import select_profile_from_database
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,39 @@ MODEL_PRICING = {
     "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
     "gpt-4.1": {"input": 2.00, "output": 8.00},
 }
+
+
+async def build_collection_report_context(db_instance, profile_id: int, requested_at: datetime) -> CollectionReportContext:
+    """Build a report input from deterministic Summary selections only."""
+    inputs = await db_instance.get_summary_profile_selection_inputs(profile_id)
+    selections = await select_profile_from_database(db_instance, profile_id, requested_at)
+    selected_ids = {selection.run_id for selection in selections if selection.run_id}
+    sources = {run["run_id"]: run["sources"] for run in inputs["runs"] if run["run_id"] in selected_ids}
+    clusters = {}
+    if selected_ids:
+        placeholders = ", ".join("?" for _ in selected_ids)
+        async with db_instance.get_connection() as connection:
+            cursor = await connection.execute(
+                f"""SELECT tc_full_name, status, run_id FROM test_cases
+                    WHERE run_id IN ({placeholders}) AND status IN ('failed', 'error')""",
+                list(selected_ids),
+            )
+            for test_name, status, run_id in await cursor.fetchall():
+                clusters.setdefault((test_name, status), []).append(run_id)
+    return CollectionReportContext(
+        collection_id=inputs["profile"]["collection_id"],
+        profile_id=profile_id,
+        requested_at=requested_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        selections=[selection.__dict__ for selection in selections],
+        sources=sources,
+        failure_clusters=[{"test_name": name, "status": status, "run_ids": run_ids, "scope": "shared" if len(run_ids) > 1 else "target-specific"} for (name, status), run_ids in clusters.items()],
+    )
+
+
+async def create_collection_report(db_instance, profile_id: int, requested_at: datetime) -> dict:
+    """Persist the deterministic report context without independently selecting Runs."""
+    context = await build_collection_report_context(db_instance, profile_id, requested_at)
+    return await db_instance.get_or_create_collection_report(context.__dict__)
 
 
 def _estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:

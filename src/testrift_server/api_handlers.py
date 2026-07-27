@@ -33,6 +33,7 @@ from .utils import (
 )
 from . import database
 from .summary_profiles import select_profile_from_database
+from .ai_analysis import create_collection_report
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,22 @@ async def api_collection_summary_handler(request):
         selections = await select_profile_from_database(database.db, int(profile_id), requested_at.astimezone(timezone.utc))
         return web.json_response({"success": True, "data": [selection.__dict__ for selection in selections]})
     except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
+async def api_collection_report_handler(request):
+    collection = await database.db.get_collection(request.match_info["key"])
+    if not collection:
+        return web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    try:
+        body = await _json_body(request)
+        profile_id = int(body["profile_id"])
+        if profile_id not in {profile["id"] for profile in collection["profiles"]}:
+            raise ValueError("Profile does not belong to Collection")
+        requested_at = datetime.fromisoformat(body["requested_at"].replace("Z", "+00:00"))
+        report = await create_collection_report(database.db, profile_id, requested_at)
+        return web.json_response({"success": True, "data": report}, status=201)
+    except (KeyError, ValueError, TypeError) as error:
         return _validation_error(error)
 
 
@@ -1534,6 +1551,7 @@ def get_routes():
         web.put("/api/collections/{key}/members", api_collection_members_handler),
         web.post("/api/collections/{key}/profiles", api_collection_profiles_handler),
         web.get("/api/collections/{key}/summary", api_collection_summary_handler),
+        web.post("/api/collections/{key}/reports", api_collection_report_handler),
         web.get("/api/profiles/{profile_id}", api_profile_handler),
         web.put("/api/profiles/{profile_id}", api_profile_handler),
         web.delete("/api/profiles/{profile_id}", api_profile_handler),
