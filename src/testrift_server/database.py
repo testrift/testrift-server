@@ -404,6 +404,76 @@ class TestResultsDatabase:
                 await db.rollback()
                 raise
 
+    async def get_summary_profile_selection_inputs(self, profile_id: int) -> Dict[str, Any]:
+        """Load persisted inputs needed for deterministic Summary selection."""
+        async with self.get_connection() as db:
+            profile_cursor = await db.execute(
+                """SELECT id, collection_id, purpose, window_hours
+                   FROM summary_profiles WHERE id = ?""",
+                (profile_id,),
+            )
+            profile_row = await profile_cursor.fetchone()
+            if not profile_row:
+                raise ValueError(f"Summary profile {profile_id} does not exist")
+            profile = dict(zip([column[0] for column in profile_cursor.description], profile_row))
+
+            members_cursor = await db.execute(
+                """SELECT targets.key
+                   FROM collection_targets
+                   JOIN targets ON targets.id = collection_targets.target_id
+                   WHERE collection_targets.collection_id = ?
+                   ORDER BY targets.key""",
+                (profile["collection_id"],),
+            )
+            target_keys = [row[0] for row in await members_cursor.fetchall()]
+
+            selector_cursor = await db.execute(
+                """SELECT summary_profile_sources.source_role, summary_profile_sources.branch,
+                          targets.key AS target_key
+                   FROM summary_profile_sources
+                   LEFT JOIN targets ON targets.id = summary_profile_sources.target_id
+                   WHERE summary_profile_sources.profile_id = ?""",
+                (profile_id,),
+            )
+            selectors = [
+                dict(zip([column[0] for column in selector_cursor.description], row))
+                for row in await selector_cursor.fetchall()
+            ]
+
+            if not target_keys:
+                return {"profile": profile, "target_keys": [], "selectors": selectors, "runs": []}
+
+            placeholders = ", ".join("?" for _ in target_keys)
+            run_cursor = await db.execute(
+                f"""SELECT run_id, target_key, purpose, status, end_time
+                    FROM test_runs
+                    WHERE status = 'finished' AND target_key IN ({placeholders})""",
+                target_keys,
+            )
+            runs = [dict(zip([column[0] for column in run_cursor.description], row)) for row in await run_cursor.fetchall()]
+            if not runs:
+                return {"profile": profile, "target_keys": target_keys, "selectors": selectors, "runs": []}
+
+            run_ids = [run["run_id"] for run in runs]
+            source_placeholders = ", ".join("?" for _ in run_ids)
+            source_cursor = await db.execute(
+                f"""SELECT run_id, source_role, branch, revision, repository_url, dirty
+                    FROM run_sources WHERE run_id IN ({source_placeholders})""",
+                run_ids,
+            )
+            sources_by_run: Dict[str, Dict[str, Dict[str, Any]]] = {run_id: {} for run_id in run_ids}
+            for row in await source_cursor.fetchall():
+                run_id, role, branch, revision, repository_url, dirty = row
+                sources_by_run[run_id][role] = {
+                    "branch": branch,
+                    "revision": revision,
+                    "repository_url": repository_url,
+                    "dirty": bool(dirty) if dirty is not None else None,
+                }
+            for run in runs:
+                run["sources"] = sources_by_run[run["run_id"]]
+            return {"profile": profile, "target_keys": target_keys, "selectors": selectors, "runs": runs}
+
     async def replace_run_sources(self, run_id: str, sources: Dict[str, Dict[str, Any]]) -> None:
         """Persist the complete structured source snapshot for one Run."""
         async with self.get_connection() as db:
