@@ -656,18 +656,18 @@
                 <tr class="run-item" data-runid="{{ run.run_id }}">
                     <td class="status-column">
                                 {% if run.status.lower() == 'running' %}
-                                <span class="status-badge status-running"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>RUNNING <span class="spinner"></span></span>
+                                <span class="status-badge status-running"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>RUNNING <span class="spinner"></span></span>
                                 {% elif run.status.lower() == 'aborted' %}
-                                <span class="status-badge status-aborted"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>ABORTED</span>
+                                <span class="status-badge status-aborted"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>ABORTED</span>
                                 {% else %}
                                 {% if run.skipped_count > 0 and run.passed_count == 0 and run.failed_count == 0 and (run.error_count is not defined or run.error_count == 0) %}
-                                <span class="status-badge status-skipped"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>SKIPPED</span>
+                                <span class="status-badge status-skipped"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>SKIPPED</span>
                                 {% elif run.error_count is defined and run.error_count > 0 %}
-                                <span class="status-badge status-error"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>ERROR</span>
+                                <span class="status-badge status-error"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>ERROR</span>
                                 {% elif run.failed_count > 0 %}
-                                <span class="status-badge status-finished-failed"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>FAILED</span>
+                                <span class="status-badge status-finished-failed"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>FAILED</span>
                                 {% else %}
-                                <span class="status-badge status-finished-passed"{% if run.group and run.group.hash %} data-group-hash="{{ run.group.hash }}" data-run-id="{{ run.run_id }}"{% endif %}>PASSED</span>
+                                <span class="status-badge status-finished-passed"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>PASSED</span>
                                 {% endif %}
                                 {% endif %}
 
@@ -876,11 +876,11 @@
 
     // Set up hover history for statically rendered status badges
     if (typeof Classifications !== 'undefined') {
-      document.querySelectorAll('.status-badge[data-group-hash]').forEach(badge => {
-        const groupHash = badge.getAttribute('data-group-hash');
+      document.querySelectorAll('.status-badge[data-target-key]').forEach(badge => {
+        const targetKey = badge.getAttribute('data-target-key');
         const runId = badge.getAttribute('data-run-id');
-        if (groupHash && runId) {
-          Classifications.setupRunBadgeHistoryHover(badge, groupHash, runId);
+        if (targetKey && runId) {
+          Classifications.setupRunBadgeHistoryHover(badge, targetKey, runId);
         }
       });
     }
@@ -1126,10 +1126,9 @@
         }
       }
 
-      // Add hover history for run status badge if we have a group
-      const groupHash = run.group_hash || (run.group && run.group.hash);
-      if (statusBadgeEl && groupHash && typeof Classifications !== 'undefined') {
-        Classifications.setupRunBadgeHistoryHover(statusBadgeEl, groupHash, run.run_id);
+      // Add hover history for run status badge if we have a Target
+      if (statusBadgeEl && run.target_key && typeof Classifications !== 'undefined') {
+        Classifications.setupRunBadgeHistoryHover(statusBadgeEl, run.target_key, run.run_id);
       }
 
       // Create result badges container within status column

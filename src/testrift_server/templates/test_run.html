@@ -1408,7 +1408,7 @@
         // Template configuration for JavaScript
         const runConfig = {
             runId: {{ run_id | tojson }},
-            groupHash: {{ (group.hash if group else None) | tojson }},
+            targetKey: {{ target_key | tojson }},
             serverMode: {{ server_mode | tojson if server_mode is defined else 'true' }},
             liveRun: {{ live_run | tojson }}
         };
@@ -3508,7 +3508,7 @@
                     badgeEl.setAttribute('data-tc-id', tcId);
 
                     // Reattach handlers (function handles removing old ones)
-                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, runConfig.groupHash || null, runConfig.runId, tcId);
+                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, null, runConfig.runId, tcId);
                 }
             }
 
@@ -3829,7 +3829,7 @@
                     node.setAttribute('data-storage-id', storageId);
 
                     // Attach handlers (function handles removing old ones)
-                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, runConfig.groupHash || null, runConfig.runId, tcId);
+                    Classifications.setupBadgeHistoryHoverAsync(badgeEl, storageId, null, runConfig.runId, tcId);
                 });
             };
 
@@ -4624,7 +4624,7 @@
                     // Setup history hover on badge using async method
                     if (typeof Classifications !== 'undefined') {
                         const canonicalId = testCase.storageId || testCase.fullName;
-                        Classifications.setupBadgeHistoryHoverAsync(badgeEl, canonicalId, runConfig.groupHash || null, runConfig.runId, testCase.fullName);
+                        Classifications.setupBadgeHistoryHoverAsync(badgeEl, canonicalId, null, runConfig.runId, testCase.fullName);
                     }
                 }
 
@@ -4920,11 +4920,11 @@
                 });
             }
 
-            // Also setup hover on run status badge if we have a group
-            if (runConfig.groupHash) {
+            // Also setup hover on run status badge for this Target
+            if (runConfig.targetKey) {
                 const runStatusBadge = document.querySelector('.status-badge-top .status-badge');
                 if (runStatusBadge && !runStatusBadge.classList.contains('status-badge-with-history')) {
-                    Classifications.setupRunBadgeHistoryHover(runStatusBadge, runConfig.groupHash, runConfig.runId);
+                    Classifications.setupRunBadgeHistoryHover(runStatusBadge, runConfig.targetKey, runConfig.runId);
                 }
             }
 

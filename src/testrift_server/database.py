@@ -403,6 +403,17 @@ class TestResultsDatabase:
             )
             return [row[0] for row in await cursor.fetchall()]
 
+    async def get_run_ids_for_target(self, target_key: str) -> List[str]:
+        """Return all visible Run IDs for a Target in deterministic order."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """SELECT run_id FROM test_runs
+                   WHERE target_key = ? AND status != 'preparing'
+                   ORDER BY start_time DESC, run_id DESC""",
+                (target_key,),
+            )
+            return [row[0] for row in await cursor.fetchall()]
+
     async def create_collection(
         self,
         key: str,
@@ -786,6 +797,7 @@ class TestResultsDatabase:
         start_at: Optional[str] = None,
         end_at: Optional[str] = None,
         collection_key: Optional[str] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get test runs with optional filtering."""
         async with self.get_connection() as db:
@@ -852,6 +864,11 @@ class TestResultsDatabase:
             if collection_key:
                 conditions.append("EXISTS (SELECT 1 FROM collection_targets JOIN collections ON collections.id = collection_targets.collection_id JOIN targets ON targets.id = collection_targets.target_id WHERE targets.key = tr.target_key AND collections.key = ?)")
                 params.append(collection_key)
+            if run_ids is not None:
+                if not run_ids:
+                    return []
+                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
+                params.extend(run_ids)
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
@@ -1080,7 +1097,8 @@ class TestResultsDatabase:
         tc_full_name: str,
         limit: int = 50,
         metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None
+        group_hash: Optional[str] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get execution history for a specific test case."""
         async with self.get_connection() as db:
@@ -1102,6 +1120,11 @@ class TestResultsDatabase:
             if group_hash:
                 conditions.append("tr.group_hash = ?")
                 params.append(group_hash)
+            if run_ids is not None:
+                if not run_ids:
+                    return []
+                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
+                params.extend(run_ids)
 
             query += " WHERE " + " AND ".join(conditions)
             query += " ORDER BY tc.start_time DESC LIMIT ?"
@@ -1299,7 +1322,8 @@ class TestResultsDatabase:
         group_hash: Optional[str] = None,
         limit: int = 10,
         current_run_id: Optional[str] = None,
-        current_run_start_time: Optional[str] = None
+        current_run_start_time: Optional[str] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Get test case history data needed for classification.
 
@@ -1319,6 +1343,11 @@ class TestResultsDatabase:
             if group_hash:
                 query += " AND tr.group_hash = ?"
                 params.append(group_hash)
+            if run_ids is not None:
+                if not run_ids:
+                    return []
+                query += " AND tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")"
+                params.extend(run_ids)
 
             # Exclude current run
             if current_run_id:
@@ -1379,6 +1408,43 @@ class TestResultsDatabase:
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
 
+    async def get_test_run_history(
+        self,
+        run_ids: List[str],
+        limit: int = 10,
+        exclude_run_id: Optional[str] = None,
+        current_run_start_time: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get recent Run summaries constrained to an exact Run set."""
+        if not run_ids:
+            return []
+        async with self.get_connection() as db:
+            placeholders = ", ".join("?" for _ in run_ids)
+            query = f"""
+                SELECT tr.run_id, tr.run_name, tr.status, tr.start_time, tr.end_time,
+                       COUNT(tc.id) as test_case_count,
+                       SUM(CASE WHEN tc.status = 'passed' THEN 1 ELSE 0 END) as passed_count,
+                       SUM(CASE WHEN tc.status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+                       SUM(CASE WHEN tc.status = 'skipped' THEN 1 ELSE 0 END) as skipped_count,
+                       SUM(CASE WHEN tc.status = 'error' THEN 1 ELSE 0 END) as error_count
+                FROM test_runs tr
+                LEFT JOIN test_cases tc ON tr.run_id = tc.run_id
+                WHERE tr.run_id IN ({placeholders})
+            """
+            params = list(run_ids)
+            if exclude_run_id:
+                query += " AND tr.run_id != ?"
+                params.append(exclude_run_id)
+            if current_run_start_time:
+                query += " AND tr.start_time < ?"
+                params.append(current_run_start_time)
+            query += " GROUP BY tr.run_id ORDER BY tr.start_time DESC, tr.run_id DESC LIMIT ?"
+            params.append(limit)
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+
     async def get_previous_run_test_cases(
         self,
         group_hash: str,
@@ -1420,10 +1486,35 @@ class TestResultsDatabase:
             rows = await cursor.fetchall()
             return [r[0] for r in rows]
 
+    async def get_previous_run_test_cases_in_set(
+        self,
+        run_ids: List[str],
+        current_run_id: str,
+    ) -> List[str]:
+        """Get test names from the previous Run in an exact Run set."""
+        if not run_ids:
+            return []
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT start_time FROM test_runs WHERE run_id = ?", (current_run_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return []
+            placeholders = ", ".join("?" for _ in run_ids)
+            cursor = await db.execute(
+                f"SELECT run_id FROM test_runs WHERE run_id IN ({placeholders}) AND start_time < ? ORDER BY start_time DESC, run_id DESC LIMIT 1",
+                [*run_ids, row[0]],
+            )
+            previous = await cursor.fetchone()
+            if not previous:
+                return []
+            cursor = await db.execute("SELECT tc_full_name FROM test_cases WHERE run_id = ?", (previous[0],))
+            return [item[0] for item in await cursor.fetchall()]
+
     async def get_classifications_for_run(
         self,
         run_id: str,
-        group_hash: Optional[str] = None
+        group_hash: Optional[str] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Get classification data for all test cases in a run.
 
@@ -1455,6 +1546,8 @@ class TestResultsDatabase:
             previous_tc_ids = set()
             if group_hash:
                 previous_tc_ids = set(await self.get_previous_run_test_cases(group_hash, run_id))
+            elif run_ids is not None:
+                previous_tc_ids = set(await self.get_previous_run_test_cases_in_set(run_ids, run_id))
 
             result = {}
             for tc_id, current_status in test_cases:
@@ -1464,7 +1557,8 @@ class TestResultsDatabase:
                     group_hash,
                     limit=10,
                     current_run_id=run_id,
-                    current_run_start_time=current_run_start_time
+                    current_run_start_time=current_run_start_time,
+                    run_ids=run_ids,
                 )
 
                 # Calculate classification based on previous runs only
@@ -1476,7 +1570,7 @@ class TestResultsDatabase:
                 # - There were test cases in the previous run
                 # - This TC was not in the previous run
                 is_new = bool(
-                    group_hash
+                    (group_hash or run_ids is not None)
                     and len(previous_tc_ids) > 0
                     and tc_id not in previous_tc_ids
                 )

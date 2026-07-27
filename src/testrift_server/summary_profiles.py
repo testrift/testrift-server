@@ -105,8 +105,7 @@ async def resolve_run_set(
         target = await database.get_target(target_key)
         if not target:
             raise ValueError("Target not found")
-        runs = await database.get_test_runs(limit=1000, target_key=target_key)
-        return {"context": "target", "target_key": target_key, "run_ids": [run["run_id"] for run in runs], "missing_targets": []}
+        return {"context": "target", "target_key": target_key, "run_ids": await database.get_run_ids_for_target(target_key), "missing_targets": []}
 
     collection = await database.get_collection(collection_key)
     if not collection:

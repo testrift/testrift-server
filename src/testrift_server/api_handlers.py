@@ -64,10 +64,13 @@ def _validation_error(error):
     return web.json_response({"success": False, "error": str(error)}, status=400)
 
 
-async def _context_run_ids(request):
+async def _context_run_ids(request, current_run_id=None):
     """Return shared Run-set IDs when a Target or Collection context is requested."""
     target_key = request.query.get("target")
     collection_key = request.query.get("collection")
+    if not target_key and not collection_key and current_run_id:
+        run = await database.db.get_test_run_by_id(current_run_id)
+        target_key = run.get("target_key") if run else None
     if not target_key and not collection_key:
         return None
     requested_at = request.query.get("at")
@@ -75,7 +78,7 @@ async def _context_run_ids(request):
         database.db,
         target_key=target_key,
         collection_key=collection_key,
-        profile_id=int(request.query["profile_id"]) if request.query.get("profile_id") else None,
+        profile_id=int(request.query.get("profile_id") or request.query.get("profile")) if request.query.get("profile_id") or request.query.get("profile") else None,
         requested_at=datetime.fromisoformat(requested_at.replace("Z", "+00:00")) if requested_at else None,
     )
     return run_set["run_ids"]
@@ -275,7 +278,7 @@ async def api_run_set_handler(request):
             database.db,
             target_key=request.query.get("target"),
             collection_key=request.query.get("collection"),
-            profile_id=int(request.query["profile_id"]) if request.query.get("profile_id") else None,
+            profile_id=int(request.query.get("profile_id") or request.query.get("profile")) if request.query.get("profile_id") or request.query.get("profile") else None,
             requested_at=datetime.fromisoformat(requested_at.replace("Z", "+00:00")) if requested_at else None,
         )
         return web.json_response({"success": True, "data": run_set})
@@ -300,6 +303,7 @@ async def api_test_runs_handler(request):
         start_at = request.query.get('start_at')
         end_at = request.query.get('end_at')
         collection_key = request.query.get('collection')
+        run_ids = await _context_run_ids(request)
 
         # Parse metadata filters
         metadata_filters = {}
@@ -330,6 +334,7 @@ async def api_test_runs_handler(request):
             start_at=start_at,
             end_at=end_at,
             collection_key=collection_key,
+            run_ids=run_ids,
         )
 
         return web.json_response({
@@ -342,6 +347,8 @@ async def api_test_runs_handler(request):
             }
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_test_runs_handler: {e}")
         return web.json_response({
@@ -485,6 +492,8 @@ async def api_test_results_over_time_handler(request):
             "data": results
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_test_results_over_time_handler: {e}")
         return web.json_response({
@@ -512,6 +521,7 @@ async def api_test_case_history_handler(request):
                 metadata_key = key[9:]  # Remove 'metadata.' prefix
                 metadata_filters[metadata_key] = value
 
+        run_ids = await _context_run_ids(request, request.query.get('current_run_id'))
         group_hash = request.query.get('group') or request.query.get('group_hash')
         if group_hash and not validate_group_hash_value(group_hash):
             return web.json_response({
@@ -524,7 +534,8 @@ async def api_test_case_history_handler(request):
             tc_full_name=tc_full_name,
             limit=limit,
             metadata_filters=metadata_filters if metadata_filters else None,
-            group_hash=group_hash
+            group_hash=group_hash,
+            run_ids=run_ids,
         )
 
         return web.json_response({
@@ -532,6 +543,8 @@ async def api_test_case_history_handler(request):
             "data": history
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_test_case_history_handler: {e}")
         return web.json_response({
@@ -553,6 +566,7 @@ async def api_test_case_history_with_links_handler(request):
         limit = int(request.query.get('limit', 10))
         current_run_id = request.query.get('current_run_id')  # Exclude current run
 
+        run_ids = await _context_run_ids(request, current_run_id)
         group_hash = request.query.get('group')
         if group_hash and not validate_group_hash_value(group_hash):
             return web.json_response({
@@ -564,7 +578,8 @@ async def api_test_case_history_with_links_handler(request):
         history = await database.db.get_test_case_history(
             tc_full_name=tc_full_name,
             limit=limit + 1,  # Get one extra to account for current run exclusion
-            group_hash=group_hash
+            group_hash=group_hash,
+            run_ids=run_ids,
         )
 
         # Filter out current run and check log existence
@@ -588,6 +603,8 @@ async def api_test_case_history_with_links_handler(request):
             "data": result
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_test_case_history_with_links_handler: {e}")
         import traceback
@@ -872,6 +889,8 @@ async def api_failures_toplist_handler(request):
                 "data": results
             })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_failures_toplist_handler: {e}")
         import traceback
@@ -898,7 +917,6 @@ async def api_classifications_for_run_handler(request):
                 "error": "Invalid run_id"
             }, status=400)
 
-        # Get run details to find group_hash
         run_data = await database.db.get_test_run_by_id(run_id)
         if not run_data:
             return web.json_response({
@@ -906,10 +924,8 @@ async def api_classifications_for_run_handler(request):
                 "error": "Run not found"
             }, status=404)
 
-        group_hash = run_data.get('group_hash')
-
-        # Get classifications for all test cases in the run
-        classifications = await database.db.get_classifications_for_run(run_id, group_hash)
+        run_ids = await _context_run_ids(request, run_id)
+        classifications = await database.db.get_classifications_for_run(run_id, run_ids=run_ids)
 
         # Add has_log info to history items
         for tc_id, class_data in classifications.items():
@@ -924,6 +940,8 @@ async def api_classifications_for_run_handler(request):
             "data": classifications
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_classifications_for_run_handler: {e}")
         import traceback
@@ -944,14 +962,14 @@ async def api_tc_hover_history_handler(request):
                 "error": "tc_full_name is required"
             }, status=400)
 
+        current_run_id = request.query.get('current_run_id')
+        run_ids = await _context_run_ids(request, current_run_id)
         group_hash = request.query.get('group')
         if group_hash and not validate_group_hash_value(group_hash):
             return web.json_response({
                 "success": False,
                 "error": "Invalid group hash"
             }, status=400)
-
-        current_run_id = request.query.get('current_run_id')
 
         # Get current run's start time if we have a run_id
         current_run_start_time = None
@@ -971,14 +989,16 @@ async def api_tc_hover_history_handler(request):
             group_hash=group_hash,
             limit=10,
             current_run_id=current_run_id,
-            current_run_start_time=current_run_start_time
+            current_run_start_time=current_run_start_time,
+            run_ids=run_ids,
         )
 
         # Get latest results (all runs, including current and future)
         latest_history = await database.db.get_test_case_classification_data(
             tc_full_name=tc_full_name,
             group_hash=group_hash,
-            limit=10
+            limit=10,
+            run_ids=run_ids,
         )
 
         # Helper function to add has_log and format
@@ -1007,6 +1027,8 @@ async def api_tc_hover_history_handler(request):
             }
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_tc_hover_history_handler: {e}")
         import traceback
@@ -1018,22 +1040,15 @@ async def api_tc_hover_history_handler(request):
 
 
 async def api_run_hover_history_handler(request):
-    """Get test run history for hover tooltip within a group."""
+    """Get test Run history for hover tooltip within a shared Run set."""
     try:
-        group_hash = request.match_info.get('group_hash')
-        if not group_hash:
-            return web.json_response({
-                "success": False,
-                "error": "group_hash is required"
-            }, status=400)
-
-        if not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         current_run_id = request.query.get('current_run_id')
+        run_ids = await _context_run_ids(request, current_run_id)
+        if run_ids is None:
+            return web.json_response({
+                "success": False,
+                "error": "Target or Collection context is required"
+            }, status=400)
         current_run_start_time = None
         if current_run_id:
             async with database.db.get_connection() as db:
@@ -1046,16 +1061,16 @@ async def api_run_hover_history_handler(request):
                     current_run_start_time = row[0]
 
         # Previous runs: before the current run, exclude current
-        previous_history = await database.db.get_test_run_history_in_group(
-            group_hash=group_hash,
+        previous_history = await database.db.get_test_run_history(
+            run_ids=run_ids,
             limit=10,
             exclude_run_id=current_run_id,
             current_run_start_time=current_run_start_time
         )
 
         # Latest runs: recent runs excluding current
-        latest_history = await database.db.get_test_run_history_in_group(
-            group_hash=group_hash,
+        latest_history = await database.db.get_test_run_history(
+            run_ids=run_ids,
             limit=10,
             exclude_run_id=current_run_id
         )
@@ -1068,6 +1083,8 @@ async def api_run_hover_history_handler(request):
             }
         })
 
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
     except Exception as e:
         logger.error(f"Error in api_run_hover_history_handler: {e}")
         import traceback
@@ -1605,7 +1622,7 @@ def get_routes():
         web.get("/api/failures/toplist", api_failures_toplist_handler),
         web.get("/api/classifications/{run_id}", api_classifications_for_run_handler),
         web.get("/api/tc-hover-history", api_tc_hover_history_handler),
-        web.get("/api/run-hover-history/{group_hash}", api_run_hover_history_handler),
+        web.get("/api/run-hover-history", api_run_hover_history_handler),
         web.post("/api/migrate-data", api_migrate_data_handler),
         web.get("/api/server-info", api_server_info_handler),
         web.post("/api/admin/shutdown", api_admin_shutdown_handler),

@@ -446,19 +446,25 @@ if (typeof document !== 'undefined') {
  * @param {string} currentRunId
  * @returns {Promise<Array>}
  */
-async function fetchTcHistory(testCaseId, groupHash, currentRunId, testCaseFullName) {
+function appendRunSetContext(url) {
+    const pageParams = new URLSearchParams(window.location.search);
+    ['target', 'collection', 'profile', 'profile_id', 'at'].forEach(key => {
+        if (pageParams.has(key)) url.searchParams.set(key, pageParams.get(key));
+    });
+}
+
+async function fetchTcHistory(testCaseId, unusedGroupHash, currentRunId, testCaseFullName) {
     try {
         // Use testCaseFullName if provided, otherwise fall back to testCaseId
         const tcName = testCaseFullName || testCaseId;
-        let url = `/api/tc-hover-history?tc_full_name=${encodeURIComponent(tcName)}`;
-        if (groupHash) {
-            url += `&group=${encodeURIComponent(groupHash)}`;
-        }
+        const url = new URL('/api/tc-hover-history', window.location.origin);
+        url.searchParams.set('tc_full_name', tcName);
+        appendRunSetContext(url);
         if (currentRunId) {
-            url += `&current_run_id=${encodeURIComponent(currentRunId)}`;
+            url.searchParams.set('current_run_id', currentRunId);
         }
 
-        const response = await fetch(url);
+        const response = await fetch(url.toString());
         const data = await response.json();
 
         if (data.success) {
@@ -484,14 +490,18 @@ async function fetchTcHistory(testCaseId, groupHash, currentRunId, testCaseFullN
  * @param {string} currentRunId
  * @returns {Promise<Array>}
  */
-async function fetchRunHistory(groupHash, currentRunId) {
+async function fetchRunHistory(targetKey, currentRunId) {
     try {
-        let url = `/api/run-hover-history/${encodeURIComponent(groupHash)}`;
+        const url = new URL('/api/run-hover-history', window.location.origin);
+        appendRunSetContext(url);
+        if (targetKey && !url.searchParams.has('target') && !url.searchParams.has('collection')) {
+            url.searchParams.set('target', targetKey);
+        }
         if (currentRunId) {
-            url += `?current_run_id=${encodeURIComponent(currentRunId)}`;
+            url.searchParams.set('current_run_id', currentRunId);
         }
 
-        const response = await fetch(url);
+        const response = await fetch(url.toString());
         const data = await response.json();
 
         if (data.success) {
@@ -516,7 +526,9 @@ async function fetchRunHistory(groupHash, currentRunId) {
  */
 async function fetchClassifications(runId) {
     try {
-        const response = await fetch(`/api/classifications/${encodeURIComponent(runId)}`);
+        const url = new URL(`/api/classifications/${encodeURIComponent(runId)}`, window.location.origin);
+        appendRunSetContext(url);
+        const response = await fetch(url.toString());
         const data = await response.json();
 
         if (data.success) {
@@ -691,8 +703,8 @@ function setupBadgeHistoryHoverAsync(badge, testCaseId, groupHash, currentRunId,
  * @param {string} groupHash - The group hash
  * @param {string} currentRunId - Current run ID to exclude (optional)
  */
-function setupRunBadgeHistoryHover(badge, groupHash, currentRunId) {
-    if (!groupHash) return;
+function setupRunBadgeHistoryHover(badge, targetKey, currentRunId) {
+    if (!targetKey && !new URLSearchParams(window.location.search).has('collection')) return;
 
     badge.classList.add('status-badge-with-history');
     let historyCache = null;
@@ -703,7 +715,7 @@ function setupRunBadgeHistoryHover(badge, groupHash, currentRunId) {
             hideTimeout = null;
         }
         if (!historyCache) {
-            historyCache = await fetchRunHistory(groupHash, currentRunId);
+            historyCache = await fetchRunHistory(targetKey, currentRunId);
         }
         showRunHistoryTooltip(badge, historyCache);
     });
