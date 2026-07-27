@@ -6,12 +6,14 @@ Provides functionality to store and query test runs, test cases, and user metada
 import sqlite3
 import json
 import asyncio
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 import aiosqlite
+
+UTC = timezone.utc
 
 
 @dataclass
@@ -26,8 +28,9 @@ class TestRunData:  # pytest: disable=collection
     local_run: bool
     dut: str = "TestDevice-001"
     run_name: Optional[str] = None
-    group_name: Optional[str] = None
-    group_hash: Optional[str] = None
+    target_key: str = ""
+    purpose: str = "manual"
+    parent_run_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -74,10 +77,72 @@ class TestResultsDatabase:
             # Enable foreign key constraints
             await db.execute("PRAGMA foreign_keys = ON")
 
-            # Create test_runs table
+            # Fresh Target/Collection schema. This project intentionally has no
+            # migration path from the retired group-based database.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    setup_state TEXT NOT NULL CHECK (setup_state IN ('needs_setup', 'ready')),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS collections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    description TEXT,
+                    ai_summary_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    email_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    recipients_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS collection_targets (
+                    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+                    target_id INTEGER NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
+                    PRIMARY KEY (collection_id, target_id)
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS summary_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    is_primary BOOLEAN NOT NULL DEFAULT 0,
+                    purpose TEXT NOT NULL,
+                    window_hours INTEGER NOT NULL CHECK (window_hours > 0),
+                    selection_policy TEXT NOT NULL CHECK (selection_policy = 'latest-completed-per-target'),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (collection_id, name)
+                )
+            """)
+            await db.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_summary_profiles_one_primary
+                ON summary_profiles(collection_id) WHERE is_primary = 1
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS summary_profile_sources (
+                    profile_id INTEGER NOT NULL REFERENCES summary_profiles(id) ON DELETE CASCADE,
+                    source_role TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    target_id INTEGER REFERENCES targets(id) ON DELETE CASCADE,
+                    PRIMARY KEY (profile_id, source_role, target_id)
+                )
+            """)
+
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS test_runs (
                     run_id TEXT PRIMARY KEY,
+                    target_key TEXT NOT NULL REFERENCES targets(key),
+                    purpose TEXT NOT NULL,
+                    parent_run_id TEXT REFERENCES test_runs(run_id),
                     status TEXT NOT NULL,
                     start_time TEXT NOT NULL,
                     end_time TEXT,
@@ -85,23 +150,10 @@ class TestResultsDatabase:
                     local_run BOOLEAN NOT NULL DEFAULT 0,
                     dut TEXT NOT NULL DEFAULT 'TestDevice-001',
                     run_name TEXT,
-                    group_name TEXT,
-                    group_hash TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Ensure new columns exist for legacy databases
-            cursor = await db.execute("PRAGMA table_info(test_runs)")
-            columns = await cursor.fetchall()
-            column_names = {col[1] for col in columns}
-            if "run_name" not in column_names:
-                await db.execute("ALTER TABLE test_runs ADD COLUMN run_name TEXT")
-            if "group_name" not in column_names:
-                await db.execute("ALTER TABLE test_runs ADD COLUMN group_name TEXT")
-            if "group_hash" not in column_names:
-                await db.execute("ALTER TABLE test_runs ADD COLUMN group_hash TEXT")
 
             # Create test_cases table
             await db.execute("""
@@ -134,37 +186,34 @@ class TestResultsDatabase:
                 )
             """)
 
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS group_metadata (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    run_id TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    url TEXT,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE,
-                    UNIQUE (run_id, key)
-                )
-            """)
-
             # Create indexes for better query performance
             await db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs (status)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_start_time ON test_runs (start_time)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_group_hash ON test_runs (group_hash)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_test_runs_target_purpose ON test_runs (target_key, purpose)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_test_cases_run_id ON test_cases (run_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_test_cases_status ON test_cases (status)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_user_metadata_run_id ON user_metadata (run_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_user_metadata_key ON user_metadata (key)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_group_metadata_run_id ON group_metadata (run_id)")
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_group_metadata_key ON group_metadata (key)")
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS run_sources (
+                    run_id TEXT NOT NULL REFERENCES test_runs(run_id) ON DELETE CASCADE,
+                    source_role TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    revision TEXT NOT NULL,
+                    repository_url TEXT,
+                    dirty BOOLEAN,
+                    PRIMARY KEY (run_id, source_role)
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_run_sources_branch ON run_sources (source_role, branch)")
 
-            # Create run_commits table for tracking commit SHAs per repo per run
+            # Commit details remain in per-Run artifacts; revision ownership is run_sources.
+            # This table preserves commit/file-level details without duplicating current SHA state.
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS run_commits (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
                     repo_name TEXT NOT NULL,
-                    commit_sha TEXT NOT NULL,
                     repo_url TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE,
@@ -250,11 +299,129 @@ class TestResultsDatabase:
             await db.execute("PRAGMA foreign_keys = ON")
             yield db
 
+    async def get_or_create_target(self, key: str, display_name: Optional[str] = None) -> Dict[str, Any]:
+        """Return a Target, creating an unconfigured Target when it is first reported."""
+        async with self.get_connection() as db:
+            await db.execute(
+                """INSERT INTO targets (key, display_name, setup_state)
+                   VALUES (?, ?, 'needs_setup')
+                   ON CONFLICT(key) DO NOTHING""",
+                (key, display_name or key),
+            )
+            await db.commit()
+            cursor = await db.execute("SELECT * FROM targets WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            return dict(zip([column[0] for column in cursor.description], row))
+
+    async def create_collection(
+        self,
+        key: str,
+        display_name: str,
+        description: Optional[str] = None,
+        ai_summary_enabled: bool = False,
+        email_enabled: bool = False,
+        recipients: Optional[List[str]] = None,
+    ) -> int:
+        """Create a Collection and return its stable database ID."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """INSERT INTO collections
+                   (key, display_name, description, ai_summary_enabled, email_enabled, recipients_json)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (key, display_name, description, ai_summary_enabled, email_enabled, json.dumps(recipients or [])),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def replace_collection_membership(self, collection_id: int, target_ids: List[int]) -> None:
+        """Atomically replace a Collection's explicitly managed Target membership."""
+        if len(target_ids) != len(set(target_ids)):
+            raise ValueError("Collection membership cannot contain duplicate Targets")
+        async with self.get_connection() as db:
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM collection_targets WHERE collection_id = ?", (collection_id,))
+                await db.executemany(
+                    "INSERT INTO collection_targets (collection_id, target_id) VALUES (?, ?)",
+                    [(collection_id, target_id) for target_id in target_ids],
+                )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+    async def create_summary_profile(
+        self,
+        collection_id: int,
+        name: str,
+        purpose: str,
+        window_hours: int,
+        is_primary: bool = False,
+        selection_policy: str = "latest-completed-per-target",
+    ) -> int:
+        """Create a deterministic Collection Summary profile."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """INSERT INTO summary_profiles
+                   (collection_id, name, is_primary, purpose, window_hours, selection_policy)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (collection_id, name, is_primary, purpose, window_hours, selection_policy),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def replace_summary_profile_sources(
+        self,
+        profile_id: int,
+        selectors: List[Tuple[str, str, Optional[int]]],
+    ) -> None:
+        """Atomically replace source-role/branch selectors for a Summary profile."""
+        async with self.get_connection() as db:
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM summary_profile_sources WHERE profile_id = ?", (profile_id,))
+                await db.executemany(
+                    """INSERT INTO summary_profile_sources (profile_id, source_role, branch, target_id)
+                       VALUES (?, ?, ?, ?)""",
+                    [(profile_id, role, branch, target_id) for role, branch, target_id in selectors],
+                )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+    async def replace_run_sources(self, run_id: str, sources: Dict[str, Dict[str, Any]]) -> None:
+        """Persist the complete structured source snapshot for one Run."""
+        async with self.get_connection() as db:
+            try:
+                await db.execute("BEGIN")
+                await db.execute("DELETE FROM run_sources WHERE run_id = ?", (run_id,))
+                await db.executemany(
+                    """INSERT INTO run_sources
+                       (run_id, source_role, branch, revision, repository_url, dirty)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    [
+                        (
+                            run_id,
+                            role,
+                            source["branch"],
+                            source["revision"],
+                            source.get("repository_url"),
+                            source.get("dirty"),
+                        )
+                        for role, source in sources.items()
+                    ],
+                )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
     async def insert_test_run(
         self,
         test_run: TestRunData,
         user_metadata: Dict[str, Any] = None,
-        group_metadata: Dict[str, Any] = None
+        sources: Dict[str, Dict[str, Any]] = None,
     ) -> bool:
         """Insert a new test run into the database."""
         async with self.get_connection() as db:
@@ -262,10 +429,13 @@ class TestResultsDatabase:
                 # Insert test run
                 await db.execute("""
                     INSERT OR REPLACE INTO test_runs
-                    (run_id, status, start_time, end_time, retention_days, local_run, dut, run_name, group_name, group_hash, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (run_id, target_key, purpose, parent_run_id, status, start_time, end_time, retention_days, local_run, dut, run_name, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     test_run.run_id,
+                    test_run.target_key,
+                    test_run.purpose,
+                    test_run.parent_run_id,
                     test_run.status,
                     test_run.start_time,
                     test_run.end_time,
@@ -273,8 +443,6 @@ class TestResultsDatabase:
                     test_run.local_run,
                     test_run.dut,
                     test_run.run_name,
-                    test_run.group_name,
-                    test_run.group_hash,
                     datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
                 ))
 
@@ -289,16 +457,23 @@ class TestResultsDatabase:
                             VALUES (?, ?, ?, ?)
                         """, (test_run.run_id, key, value, url))
 
-                # Insert group metadata if provided
-                if group_metadata:
-                    for key, meta_value in group_metadata.items():
-                        value = meta_value.get("value", "") if isinstance(meta_value, dict) else str(meta_value)
-                        url = meta_value.get("url") if isinstance(meta_value, dict) else None
-
-                        await db.execute("""
-                            INSERT OR REPLACE INTO group_metadata (run_id, key, value, url)
-                            VALUES (?, ?, ?, ?)
-                        """, (test_run.run_id, key, value, url))
+                if sources:
+                    await db.executemany(
+                        """INSERT INTO run_sources
+                           (run_id, source_role, branch, revision, repository_url, dirty)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        [
+                            (
+                                test_run.run_id,
+                                role,
+                                source["branch"],
+                                source["revision"],
+                                source.get("repository_url"),
+                                source.get("dirty"),
+                            )
+                            for role, source in sources.items()
+                        ],
+                    )
 
                 await db.commit()
                 return True
