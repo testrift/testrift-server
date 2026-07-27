@@ -6,7 +6,8 @@ Tests for database schema and migration functionality.
 import asyncio
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from pathlib import Path
 
 import pytest

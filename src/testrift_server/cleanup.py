@@ -7,7 +7,8 @@ Handles retention-based cleanup and abandoned run detection.
 import asyncio
 import logging
 import shutil
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 from .config import DATA_DIR
 from .utils import get_run_path, now_utc_iso

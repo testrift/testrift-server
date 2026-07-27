@@ -3,7 +3,8 @@
 Tests for timestamp handling and formatting in the server.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 import pytest
 

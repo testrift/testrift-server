@@ -7,7 +7,8 @@ Page handlers, static file handlers, attachment handlers, and ZIP export.
 import json
 import logging
 import zipfile
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 import aiofiles
 import msgpack

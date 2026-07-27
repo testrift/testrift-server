@@ -5,7 +5,8 @@ Tests for database functions and operations.
 
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from pathlib import Path
 
 import pytest

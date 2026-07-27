@@ -1443,10 +1443,9 @@ async def api_email_recipients_delete_handler(request):
 async def api_ai_usage_handler(request):
     """Get AI usage and budget status. GET /api/settings/ai-usage"""
     try:
-        from datetime import datetime, UTC
         from .config import AI_ANALYSIS_CONFIG
 
-        month = datetime.now(UTC).strftime("%Y-%m")
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
         usage = await database.db.get_ai_usage_for_month(month)
 
         budget = AI_ANALYSIS_CONFIG.get("monthly_budget_usd", 0)

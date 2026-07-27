@@ -7,7 +7,8 @@ Captures recent log records so they can be served via the /api/logs endpoint.
 import logging
 import threading
 from collections import deque
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 
 class RingBufferHandler(logging.Handler):

@@ -11,7 +11,8 @@ import asyncio
 import msgpack
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 

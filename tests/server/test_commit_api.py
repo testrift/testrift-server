@@ -6,7 +6,8 @@ Tests for commit diff API endpoints and database functions.
 import json
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 

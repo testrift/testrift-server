@@ -9,7 +9,8 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

@@ -8,7 +8,8 @@ import msgpack
 import shutil
 import tempfile
 from pathlib import Path
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

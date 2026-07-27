@@ -5,7 +5,8 @@ Tests for WebSocket protocol functionality using optimized binary format.
 
 import asyncio
 import msgpack
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

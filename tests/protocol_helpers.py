@@ -7,7 +7,8 @@ to easily send messages in the optimized binary protocol format.
 
 import msgpack
 import time
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 from typing import Any
 
 from testrift_server.protocol import (

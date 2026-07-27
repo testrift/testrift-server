@@ -22,7 +22,8 @@ import time
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 
 # Add the server package source directory to the path
 repo_root = Path(__file__).resolve().parent.parent

@@ -5,7 +5,8 @@ Tests for live log streaming functionality.
 
 import asyncio
 import json
-from datetime import datetime, UTC
+from datetime import datetime, timezone
+UTC = timezone.utc
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
