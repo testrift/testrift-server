@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ collection_key }} Summary - TestRift</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f3f6f5; color: #172b2d; }
+    main { max-width: 1180px; margin: 24px auto; padding: 0 16px; }
+    .summary-head { display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 20px; }
+    .tile { background: white; border: 1px solid #d7e0df; border-radius: 6px; padding: 16px; min-height: 132px; }
+    .tile.no-match { border-left: 4px solid #b54708; }
+    .tile.match { border-left: 4px solid #16803c; }
+    .detail { color: #526260; font-size: .9rem; margin-top: 8px; overflow-wrap: anywhere; }
+    @media (max-width: 390px) { main { margin-top: 12px; padding: 0 10px; } .summary-head { align-items: stretch; } }
+  </style>
+</head>
+<body>
+<main>
+  <a href="/">All Runs</a>
+  <div class="summary-head mt-3">
+    <div><h1>{{ collection_key }}</h1><div id="profile-details" class="text-muted"></div></div>
+    <label>Summary profile <select id="profile" class="form-select"></select></label>
+  </div>
+  <div id="summary-time" class="text-muted mt-3"></div>
+  <div id="tiles" class="tiles"></div>
+</main>
+<script>
+const collectionKey = {{ collection_key | tojson }};
+const api = async url => { const response = await fetch(url); const body = await response.json(); if (!response.ok || !body.success) throw new Error(body.error || 'Request failed'); return body.data; };
+async function load() {
+  const collection = await api(`/api/collections/${collectionKey}`);
+  const select = document.getElementById('profile');
+  select.innerHTML = collection.profiles.map(profile => `<option value="${profile.id}">${profile.name}</option>`).join('');
+  select.value = collection.profiles.find(profile => profile.is_primary)?.id || collection.profiles[0]?.id || '';
+  select.onchange = render;
+  await render();
+}
+async function render() {
+  const profileId = document.getElementById('profile').value;
+  if (!profileId) { document.getElementById('tiles').textContent = 'No Summary profile configured.'; return; }
+  const at = new Date().toISOString();
+  const [collection, selections] = await Promise.all([api(`/api/collections/${collectionKey}`), api(`/api/collections/${collectionKey}/summary?profile_id=${profileId}&at=${encodeURIComponent(at)}`)]);
+  const profile = collection.profiles.find(item => String(item.id) === profileId);
+  document.getElementById('summary-time').textContent = `Requested at ${at}`;
+  document.getElementById('profile-details').textContent = `${profile.purpose}, ${profile.window_hours}h window`;
+  document.getElementById('tiles').innerHTML = selections.map(selection => selection.run_id
+    ? `<article class="tile match"><strong>${selection.target_key}</strong><div class="detail">Selected Run</div><a href="/testRun/${selection.run_id}/index.html">${selection.run_id}</a><div class="detail"><a href="/api/test-runs?target=${selection.target_key}">Target history</a></div></article>`
+    : `<article class="tile no-match"><strong>${selection.target_key}</strong><div class="detail">No matching run</div></article>`).join('');
+}
+load().catch(error => document.getElementById('tiles').textContent = error.message);
+</script>
+</body>
+</html>

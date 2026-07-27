@@ -907,6 +907,19 @@ async def settings_handler(request):
         return web.Response(status=500, text=f"Error loading settings page: {str(e)}")
 
 
+async def collection_summary_handler(request):
+    """Serve the deterministic Collection Summary page."""
+    try:
+        return web.Response(
+            text=render_template("collection_summary.html", collection_key=request.match_info["key"]),
+            content_type="text/html",
+            headers=NO_CACHE_HEADERS,
+        )
+    except Exception as e:
+        logger.error(f"Error in collection_summary_handler: {e}")
+        return web.Response(status=500, text=f"Error loading Collection summary: {str(e)}")
+
+
 async def server_log_handler(request):
     """Serve the server log page."""
     try:
@@ -935,6 +948,7 @@ def get_routes():
         web.get("/matrix", matrix_handler),
         web.get("/failures", failures_handler),
         web.get("/settings", settings_handler),
+        web.get("/collections/{key}", collection_summary_handler),
         web.get("/logs", server_log_handler),
     ]
 
