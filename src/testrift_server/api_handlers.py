@@ -1078,6 +1078,14 @@ async def api_group_last_commits_handler(request):
         }, status=500)
 
 
+async def api_run_commit_baselines_handler(request):
+    try:
+        baselines = await database.db.get_commit_baselines_for_run(request.match_info["run_id"])
+        return web.json_response({"success": True, "baselines": baselines})
+    except ValueError as error:
+        return web.json_response({"success": False, "error": str(error)}, status=404)
+
+
 async def api_run_commits_upload_handler(request):
     """Upload commit diffs for a run."""
     try:
@@ -1104,6 +1112,11 @@ async def api_run_commits_upload_handler(request):
                 "success": False,
                 "error": "'diffs' must be an array"
             }, status=400)
+
+        expected_sources = await database.db.get_run_sources(run_id)
+        for diff in diffs:
+            if diff.get("name") not in expected_sources or diff.get("current_sha") != expected_sources[diff["name"]]:
+                return web.json_response({"success": False, "error": "Diff SHA does not match prepared Run source"}, status=400)
 
         # Store commit SHAs in database for future queries
         commits_to_store = []
@@ -1513,6 +1526,7 @@ def get_routes():
         web.post("/api/admin/shutdown", api_admin_shutdown_handler),
         web.post("/api/runs/{run_id}/commits", api_run_commits_upload_handler),
         web.get("/api/runs/{run_id}/commits", api_run_commits_get_handler),
+        web.get("/api/runs/{run_id}/commit-baselines", api_run_commit_baselines_handler),
         # AI analysis endpoints
         web.post("/api/runs/{run_id}/analyze", api_trigger_analysis_handler),
         web.get("/api/runs/{run_id}/analysis", api_analysis_status_handler),

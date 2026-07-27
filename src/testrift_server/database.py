@@ -1518,6 +1518,40 @@ class TestResultsDatabase:
 
             return {row[0]: row[1] for row in rows}
 
+    async def get_commit_baselines_for_run(self, run_id: str) -> Dict[str, Dict[str, str]]:
+        """Find earlier finished exact-Target/purpose/branch source baselines."""
+        async with self.get_connection() as db:
+            current_cursor = await db.execute(
+                "SELECT target_key, purpose, start_time FROM test_runs WHERE run_id = ?", (run_id,)
+            )
+            current = await current_cursor.fetchone()
+            if not current:
+                raise ValueError("Run not found")
+            target_key, purpose, start_time = current
+            source_cursor = await db.execute(
+                "SELECT source_role, branch FROM run_sources WHERE run_id = ?", (run_id,)
+            )
+            baselines = {}
+            for role, branch in await source_cursor.fetchall():
+                candidate_cursor = await db.execute(
+                    """SELECT runs.run_id, sources.revision
+                       FROM test_runs AS runs
+                       JOIN run_sources AS sources ON sources.run_id = runs.run_id
+                       WHERE runs.target_key = ? AND runs.purpose = ? AND runs.status = 'finished'
+                         AND runs.start_time < ? AND sources.source_role = ? AND sources.branch = ?
+                       ORDER BY runs.end_time DESC, runs.run_id DESC LIMIT 1""",
+                    (target_key, purpose, start_time, role, branch),
+                )
+                candidate = await candidate_cursor.fetchone()
+                if candidate:
+                    baselines[role] = {"run_id": candidate[0], "revision": candidate[1]}
+            return baselines
+
+    async def get_run_sources(self, run_id: str) -> Dict[str, str]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT source_role, revision FROM run_sources WHERE run_id = ?", (run_id,))
+            return {role: revision for role, revision in await cursor.fetchall()}
+
     async def get_commits_for_run(self, run_id: str) -> List[Dict[str, str]]:
         """
         Get all commit records for a run.
