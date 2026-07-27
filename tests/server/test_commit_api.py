@@ -127,7 +127,13 @@ class TestCommitDiffAPI:
             local_run=False,
             dut="TestDevice-001"
         )
-        await initialized_db.insert_test_run(test_run, {})
+        await initialized_db.insert_test_run(test_run, {}, {
+            "sample-repo": {
+                "branch": "main",
+                "revision": "abc123",
+                "repository_url": "https://example.com/sample-repo",
+            }
+        })
 
         payload = {
             "diffs": [

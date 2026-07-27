@@ -214,6 +214,7 @@ class TestResultsDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
                     repo_name TEXT NOT NULL,
+                    commit_sha TEXT,
                     repo_url TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE,
@@ -272,6 +273,11 @@ class TestResultsDatabase:
                 await db.execute("ALTER TABLE ai_analyses ADD COLUMN summary_html TEXT")
             if "deep_html" not in ai_col_names:
                 await db.execute("ALTER TABLE ai_analyses ADD COLUMN deep_html TEXT")
+
+            cursor = await db.execute("PRAGMA table_info(run_commits)")
+            columns = await cursor.fetchall()
+            if "commit_sha" not in {col[1] for col in columns}:
+                await db.execute("ALTER TABLE run_commits ADD COLUMN commit_sha TEXT")
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS test_case_analyses (
@@ -667,6 +673,12 @@ class TestResultsDatabase:
         """Insert a new test run into the database."""
         async with self.get_connection() as db:
             try:
+                target_key = test_run.target_key or "unknown-target"
+                await db.execute(
+                    """INSERT INTO targets (key, display_name, setup_state)
+                       VALUES (?, ?, 'needs_setup') ON CONFLICT(key) DO NOTHING""",
+                    (target_key, target_key),
+                )
                 # Insert test run
                 await db.execute("""
                     INSERT OR REPLACE INTO test_runs
@@ -674,7 +686,7 @@ class TestResultsDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     test_run.run_id,
-                    test_run.target_key,
+                    target_key,
                     test_run.purpose,
                     test_run.parent_run_id,
                     test_run.status,

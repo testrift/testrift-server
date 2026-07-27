@@ -467,7 +467,9 @@ async def zip_export_handler(request):
                 error_count=0,
                 abort_reason=None,
                 files_exist=True,  # Files always exist for ZIP export
-                group=None  # No group info needed for static ZIP export
+                target_key=meta.get("target_key"),
+                collection_keys=[],
+                metrics=run.metrics or [],
             )
             zf.writestr("index.html", run_html)
 

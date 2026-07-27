@@ -43,6 +43,9 @@ from testrift_server.protocol import (
     F_USER_METADATA,
     F_RETENTION_DAYS,
     F_LOCAL_RUN,
+    F_TARGET_KEY,
+    F_PURPOSE,
+    F_SOURCES,
 )
 
 
@@ -454,6 +457,9 @@ class TestWebSocketServerIntegration:
         mock_msg.type = WSMsgType.BINARY
         mock_msg.data = msgpack.packb({
             F_TYPE: MSG_RUN_STARTED,
+            F_TARGET_KEY: "test-device",
+            F_PURPOSE: "manual",
+            F_SOURCES: {},
             F_USER_METADATA: {"DUT": {"value": "TestDevice"}},
             F_RETENTION_DAYS: 7,
             F_LOCAL_RUN: False
