@@ -6,6 +6,7 @@
     <title>Settings - TestRift</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/target_collections.css" rel="stylesheet">
     <style>
         :root {
             font-size: 14px;
@@ -230,6 +231,26 @@
                     </div>
                 </div>
             </div>
+
+            <div class="settings-card target-collections">
+                <h3><i class="fas fa-layer-group"></i> Targets & Collections</h3>
+                <div class="target-collections-grid">
+                    <div class="panel">
+                        <h4>Targets</h4>
+                        <table><thead><tr><th>Key</th><th>Name</th><th>Setup</th></tr></thead><tbody id="targets-body"></tbody></table>
+                    </div>
+                    <div class="panel">
+                        <h4>Create Collection</h4>
+                        <label for="collection-key">Key</label><input id="collection-key" class="form-control" placeholder="uconnectxpress">
+                        <label for="collection-name">Display name</label><input id="collection-name" class="form-control" placeholder="u-connectXpress">
+                        <label for="collection-description">Description</label><textarea id="collection-description" class="form-control" rows="2"></textarea>
+                        <label>Members</label><div id="collection-members" class="members"></div>
+                        <button id="create-collection" class="btn btn-primary-custom mt-3"><i class="fas fa-plus"></i> Create</button>
+                        <div id="target-collections-status" class="status" role="alert"></div>
+                    </div>
+                </div>
+                <div class="panel mt-3"><h4>Collections</h4><table><thead><tr><th>Key</th><th>Name</th><th>Description</th></tr></thead><tbody id="collections-body"></tbody></table></div>
+            </div>
         </div>
     </div>
 
@@ -331,5 +352,6 @@
     loadEmailRecipients();
     loadAiUsage();
     </script>
+    <script src="/static/target_collections.js"></script>
 </body>
 </html>

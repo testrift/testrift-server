@@ -1,0 +1,12 @@
+.target-collections { margin-top: 24px; }
+.target-collections-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 18px; }
+.target-collections table { width: 100%; font-size: .9rem; }
+.target-collections th, .target-collections td { padding: 8px; border-bottom: 1px solid #dfe3e8; overflow-wrap: anywhere; }
+.target-collections .panel { background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; padding: 16px; }
+.target-collections .status { min-height: 1.4rem; margin-top: 10px; color: #b42318; }
+.target-collections .status.ok { color: #067647; }
+.target-collections label { display: block; margin: 8px 0 4px; font-weight: 600; }
+.target-collections input, .target-collections textarea, .target-collections select { width: 100%; max-width: 100%; }
+.target-collections .members { max-height: 140px; overflow: auto; border: 1px solid #dfe3e8; padding: 6px; }
+.target-collections .members label { font-weight: 400; margin: 3px 0; }
+@media (max-width: 680px) { .target-collections-grid { grid-template-columns: 1fr; } .content-section { padding-left: 15px; padding-right: 15px; } }
