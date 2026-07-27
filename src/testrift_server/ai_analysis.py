@@ -154,7 +154,6 @@ async def build_analysis_context(run_id: str, tc_info: dict, db_instance) -> Ana
     """Gather and compress all relevant context for a single TC failure."""
     tc_full_name = tc_info["tc_full_name"]
     tc_id = tc_info.get("tc_id", "")
-    group_hash = tc_info.get("group_hash")
 
     context = AnalysisContext(
         run_id=run_id,
@@ -201,9 +200,11 @@ async def build_analysis_context(run_id: str, tc_info: dict, db_instance) -> Ana
 
     # Load test history
     try:
-        history = await db_instance.get_test_case_history(tc_full_name, limit=5, group_hash=group_hash)
+        run_info = await db_instance.get_run_info(run_id) or {}
+        run_ids = await db_instance.get_run_ids_for_target(run_info["target_key"]) if run_info.get("target_key") else []
+        history = await db_instance.get_test_case_history(tc_full_name, limit=5, run_ids=run_ids)
         context.test_history = history
-        context.classification = await db_instance.classify_test_case(tc_full_name, group_hash=group_hash)
+        context.classification = await db_instance.classify_test_case(tc_full_name, run_ids=run_ids)
     except Exception as e:
         logger.warning(f"Failed to load test history for {tc_full_name}: {e}")
 
@@ -656,8 +657,6 @@ async def run_deep_analysis(run_id: str, tc_full_name: str):
         if not tc_info:
             _deep_analysis_tasks[key] = {"status": "failed", "error": "Test case not found"}
             return
-
-        tc_info["group_hash"] = (await db_instance.get_run_info(run_id) or {}).get("group_hash")
 
         # Build full context (with maximum detail for logs)
         context = await build_analysis_context(run_id, tc_info, db_instance)

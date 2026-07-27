@@ -319,26 +319,6 @@
         </div>
 
         <div class="content-section">
-        <div id="groupContextBanner" class="group-banner" style="display: none;">
-            <div class="group-banner-header">
-                <div>
-                    <div class="group-title-label">Group</div>
-                    <h2 id="groupBannerTitle"></h2>
-                </div>
-                <div class="group-banner-links">
-                    <a id="groupRunsLink" href="#" class="btn btn-outline-primary btn-sm">
-                        <i class="fa fa-list"></i> Test Runs
-                    </a>
-                    <a id="groupMatrixLink" href="#" class="btn btn-outline-primary btn-sm">
-                        <i class="fa fa-table"></i> Matrix
-                    </a>
-                    <a id="groupFailuresLink" href="#" class="btn btn-outline-primary btn-sm">
-                        <i class="fa fa-bug"></i> Failures
-                    </a>
-                </div>
-            </div>
-            <div class="group-info-grid" id="groupBannerMetadata"></div>
-        </div>
         <div class="row">
             <div class="col-12">
                 <div class="filter-section">
@@ -493,8 +473,6 @@
         let trendsChart = null;
         let distributionChart = null;
         let metadataKeys = [];
-        let groupHash = null;
-        let groupDetails = null;
         const contextParams = new URLSearchParams(window.location.search);
 
         // Initialize the page
@@ -625,63 +603,6 @@
                 }
             } catch (error) {
                 console.error('Error loading metadata keys:', error);
-            }
-        }
-
-        async function loadGroupContext(hash) {
-            try {
-                const response = await fetch(`/api/groups/${hash}`);
-                const result = await response.json();
-                if (!result.success) {
-                    console.warn('Group lookup failed:', result.error);
-                    return;
-                }
-                groupDetails = result.data;
-                const banner = document.getElementById('groupContextBanner');
-                const title = document.getElementById('groupBannerTitle');
-                const metaContainer = document.getElementById('groupBannerMetadata');
-                const runsLink = document.getElementById('groupRunsLink');
-                const matrixLink = document.getElementById('groupMatrixLink');
-                const failuresLink = document.getElementById('groupFailuresLink');
-
-                if (!banner || !title || !metaContainer) return;
-
-                const name = groupDetails.name || `Group ${groupDetails.hash}`;
-                title.innerText = name;
-                runsLink.href = `/groups/${groupDetails.hash}`;
-                matrixLink.href = `/matrix?group=${groupDetails.hash}`;
-                if (failuresLink) failuresLink.href = `/failures?group=${groupDetails.hash}`;
-
-                const metadata = groupDetails.metadata || {};
-                metaContainer.innerHTML = '';
-                const entries = Object.entries(metadata);
-                if (entries.length === 0) {
-                    metaContainer.innerHTML = '<div class="group-info-item"><span>No metadata defined for this group.</span></div>';
-                } else {
-                    entries.forEach(([key, value]) => {
-                        const item = document.createElement('div');
-                        item.className = 'group-info-item';
-                        const label = document.createElement('strong');
-                        label.textContent = key;
-                        const span = document.createElement('span');
-                        if (value && value.url) {
-                            const link = document.createElement('a');
-                            link.href = value.url;
-                            link.target = '_blank';
-                            link.textContent = value.value;
-                            span.appendChild(link);
-                        } else {
-                            span.textContent = value ? value.value : '';
-                        }
-                        item.appendChild(label);
-                        item.appendChild(span);
-                        metaContainer.appendChild(item);
-                    });
-                }
-
-                banner.style.display = 'block';
-            } catch (error) {
-                console.error('Error loading group context:', error);
             }
         }
 
@@ -985,7 +906,6 @@
 
                 if (result.success) {
                     const metadata = result.data.user_metadata || {};
-                    const group = result.data.group || {};
                     let metadataHtml = '<div class="row">';
 
                     if (Object.keys(metadata).length === 0) {
@@ -1003,28 +923,6 @@
                     }
 
                     metadataHtml += '</div>';
-
-                    if (group && (group.name || (group.metadata && Object.keys(group.metadata).length > 0))) {
-                        metadataHtml += '<hr>';
-                        const groupLabel = group.name || `Group ${group.hash || ''}`;
-                        metadataHtml += `<p><strong>Group:</strong> ${group.hash ? `<a href="/groups/${group.hash}" target="_blank">${groupLabel}</a>` : groupLabel}</p>`;
-                        const groupMetadata = group.metadata || {};
-                        if (Object.keys(groupMetadata).length === 0) {
-                            metadataHtml += '<p class="text-muted">No group metadata defined.</p>';
-                        } else {
-                            metadataHtml += '<div class="row">';
-                            Object.entries(groupMetadata).forEach(([key, value]) => {
-                                metadataHtml += `
-                                    <div class="col-md-6 mb-3">
-                                        <strong>${key}:</strong><br>
-                                        <span>${value.value || value}</span>
-                                        ${value.url ? `<br><a href="${value.url}" target="_blank" class="btn btn-sm btn-outline-primary mt-1">View</a>` : ''}
-                                    </div>
-                                `;
-                            });
-                            metadataHtml += '</div>';
-                        }
-                    }
 
                     // Create and show modal
                     const runName = result.data.run.run_name;

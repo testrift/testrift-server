@@ -31,7 +31,6 @@ from .utils import (
     sanitize_filename,
     validate_run_id,
     validate_test_case_id,
-    validate_group_hash_value,
     find_test_case_by_tc_id,
     get_run_and_test_case_by_tc_id,
     META_FILE,
@@ -79,16 +78,6 @@ async def build_run_index_entries(runs_from_db):
 
         # Get user metadata for this run (already in correct format)
         user_metadata = await database.db.get_user_metadata_for_run(run_id)
-        group_metadata = await database.db.get_group_metadata_for_run(run_id)
-        group_name = run.get('group_name')
-        group_hash = run.get('group_hash')
-        group_info = None
-        if group_name or group_hash or group_metadata:
-            group_info = {
-                'name': group_name,
-                'hash': group_hash,
-                'metadata': group_metadata
-            }
 
         # Check if files exist on disk
         run_path = get_run_path(run_id)
@@ -111,8 +100,6 @@ async def build_run_index_entries(runs_from_db):
             'aborted_count': aborted_count,  # Keep for template logic that combines it
             'error_count': error_count + aborted_count,  # Combine aborted into error
             'user_metadata': user_metadata,
-            'group': group_info,
-            'group_hash': group_hash,  # Also include at top level for easy access
             'target_key': target_key,
             'collection_keys': collection_keys,
             'files_exist': files_exist
@@ -144,32 +131,7 @@ async def index_handler(request):
     runs_from_db = await database.db.get_test_runs(limit=1000)
     runs_index = await build_run_index_entries(runs_from_db)
 
-    html = render_template('index.html', runs_index=runs_index, group_context=None)
-
-    return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
-
-
-async def group_runs_handler(request):
-    """Serve runs filtered by group hash."""
-    group_hash = request.match_info.get("group_hash")
-    if not validate_group_hash_value(group_hash):
-        return web.Response(status=400, text="Invalid group hash")
-
-    runs_from_db = await database.db.get_test_runs(limit=1000, group_hash=group_hash)
-    if not runs_from_db:
-        return web.Response(status=404, text="No runs found for this group")
-
-    runs_index = await build_run_index_entries(runs_from_db)
-    first_run_id = runs_from_db[0]['run_id']
-    group_metadata = await database.db.get_group_metadata_for_run(first_run_id)
-    group_name = runs_from_db[0].get('group_name')
-    group_context = {
-        "hash": group_hash,
-        "name": group_name,
-        "metadata": group_metadata
-    }
-
-    html = render_template('index.html', runs_index=runs_index, group_context=group_context)
+    html = render_template('index.html', runs_index=runs_index)
 
     return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
 
@@ -190,7 +152,6 @@ async def test_run_index_handler(request):
     run = ws_server.test_runs.get(run_id)
     live_run = False
 
-    group_info = None
     target_key = None
     collection_keys = []
 
@@ -243,12 +204,6 @@ async def test_run_index_handler(request):
         abort_reason = run.abort_reason
         metrics = run.metrics or []
         target_key = getattr(run, "target_key", None)
-        if run.group or run.group_hash:
-            group_info = {
-                "name": run.group.get("name") if run.group else None,
-                "hash": run.group_hash,
-                "metadata": (run.group or {}).get("metadata", {}) if run.group else {}
-            }
     else:
         # Fall back to database for completed runs
         run_data = await database.db.get_test_run_by_id(run_id)
@@ -261,15 +216,6 @@ async def test_run_index_handler(request):
 
         # Get user metadata from database (already in correct format)
         user_metadata = await database.db.get_user_metadata_for_run(run_id)
-        group_metadata = await database.db.get_group_metadata_for_run(run_id)
-        group_name = run_data.get("group_name")
-        group_hash = run_data.get("group_hash")
-        if group_name or group_hash or group_metadata:
-            group_info = {
-                "name": group_name,
-                "hash": group_hash,
-                "metadata": group_metadata
-            }
 
         # Convert test cases list to dict format expected by template
         storage_lookup = {}
@@ -335,7 +281,6 @@ async def test_run_index_handler(request):
         start_time=start_time,
         end_time=end_time,
         user_metadata=user_metadata,
-        group=group_info,
         target_key=target_key,
         collection_keys=collection_keys,
         retention_days=retention_days,
@@ -419,13 +364,7 @@ async def test_case_log_handler(request):
         else:
             logger.debug(f"Live run detection - Run from disk: {run_id}, Test case status: {test_case.status}, Live: {live_run}")
 
-    # Get group_hash for history feature
-    group_hash = None
     run_dict = run.to_dict()
-    if hasattr(run, 'group_hash'):
-        group_hash = run.group_hash
-    elif 'group_hash' in run_dict:
-        group_hash = run_dict.get('group_hash')
 
     # For non-live runs, decode compact protocol entries for template embedding
     # Live runs send raw entries via WebSocket where JS decodes them
@@ -453,7 +392,6 @@ async def test_case_log_handler(request):
         live_run=live_run,
         server_mode=True,  # Always True when served from live server
         attachments=None,  # Attachments loaded via API in server mode
-        group_hash=group_hash,
         metrics=metrics
     )
 

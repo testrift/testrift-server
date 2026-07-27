@@ -1222,26 +1222,6 @@
                         {% endfor %}
                     </div>
                     {% endif %}
-                    {% if group %}
-                    <div class="info-item">
-                        <strong>Group</strong>
-                        {% if group.hash %}
-                            <a href="/groups/{{ group.hash }}" class="group-link">{{ group.name or ('Group ' ~ group.hash) }}</a>
-                        {% else %}
-                            {{ group.name }}
-                        {% endif %}
-                    </div>
-                    {% for name, metadata in (group.metadata or {}).items() %}
-                    <div class="info-item">
-                        <strong>{{ name }}</strong>
-                        {% if metadata.url %}
-                            <a href="{{ metadata.url }}" target="_blank">{{ metadata.value }}</a>
-                        {% else %}
-                            {{ metadata.value }}
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                    {% endif %}
                     {% for name, metadata in user_metadata.items() %}
                     <div class="info-item">
                         <strong>{{ name }}</strong>

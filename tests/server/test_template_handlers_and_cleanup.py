@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for template rendering handlers (index, group_runs, test_run_index, test_case_log)
+Tests for template rendering handlers (index, test_run_index, test_case_log)
 and cleanup functions.
 """
 
@@ -18,7 +18,6 @@ import pytest_asyncio
 from testrift_server import database
 from testrift_server.handlers import (
     index_handler,
-    group_runs_handler,
     test_run_index_handler as handle_test_run_index,
     test_case_log_handler as handle_test_case_log,
 )
@@ -100,62 +99,6 @@ class TestTemplateHandlers:
         assert "Cache-Control" in response.headers
         assert "no-cache" in response.headers["Cache-Control"]
         assert "runs" in response.text.lower() or "test" in response.text.lower()
-
-    @pytest.mark.asyncio
-    async def test_group_runs_handler_valid(self, temp_data_dir, mock_app):
-        """Test group runs handler with valid group hash."""
-        # Create a run with a group
-        run_id = "test-run-group"
-        test_run = database.TestRunData(
-            run_id=run_id,
-            status="finished",
-            start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            end_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            retention_days=7,
-            local_run=False,
-            dut="TestDevice"
-        )
-
-        user_metadata = {"DUT": {"value": "TestDevice"}}
-        await database.db.insert_test_run(test_run, user_metadata)
-
-        # Get the group hash from the database
-        run_data = await database.db.get_test_run_by_id(run_id)
-        group_hash = run_data.get("group_hash")
-
-        if group_hash:
-            request = MagicMock()
-            request.app = mock_app
-            request.match_info = {"group_hash": group_hash}
-
-            response = await group_runs_handler(request)
-
-            assert response.status == 200
-            assert response.content_type == "text/html"
-
-    @pytest.mark.asyncio
-    async def test_group_runs_handler_invalid_hash(self, temp_data_dir, mock_app):
-        """Test group runs handler with invalid group hash."""
-        request = MagicMock()
-        request.app = mock_app
-        request.match_info = {"group_hash": "invalid-hash"}
-
-        response = await group_runs_handler(request)
-
-        assert response.status == 400
-        assert "invalid" in response.text.lower()
-
-    @pytest.mark.asyncio
-    async def test_group_runs_handler_not_found(self, temp_data_dir, mock_app):
-        """Test group runs handler when group doesn't exist."""
-        # Use a valid format but non-existent hash
-        request = MagicMock()
-        request.app = mock_app
-        request.match_info = {"group_hash": "a" * 16}  # Valid format, but doesn't exist
-
-        response = await group_runs_handler(request)
-
-        assert response.status == 404
 
     @pytest.mark.asyncio
     async def test_test_run_index_handler_from_db(self, temp_data_dir, mock_app, sample_run_in_db):

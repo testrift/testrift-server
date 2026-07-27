@@ -561,58 +561,11 @@
 <body>
     <div class="main-container">
         <div class="header-section">
-            {% if group_context %}
-            <h1>{{ group_context.name or ('Group ' ~ group_context.hash) }} Test Runs</h1>
-            <div class="subtitle">Monitor and manage your test executions</div>
-            {% else %}
             <h1>Test Runs</h1>
             <div class="subtitle">Monitor and manage your test executions</div>
-            {% endif %}
         </div>
 
         <div class="content-section">
-            {% if group_context %}
-            <div class="group-banner">
-                <div class="group-banner-header">
-                    <div>
-                        <div class="group-title-label">Group</div>
-                        <h2>{{ group_context.name or ('Group ' ~ group_context.hash) }}</h2>
-                    </div>
-                        <div class="group-banner-links">
-                            <a href="/analyzer?group={{ group_context.hash }}" class="btn btn-outline-primary btn-sm">
-                                <i class="fas fa-chart-line"></i> Analyzer
-                            </a>
-                            <a href="/matrix?group={{ group_context.hash }}" class="btn btn-outline-primary btn-sm">
-                                <i class="fas fa-table"></i> Matrix
-                            </a>
-                            <a href="/failures?group={{ group_context.hash }}" class="btn btn-outline-primary btn-sm">
-                                <i class="fas fa-bug"></i> Failures
-                            </a>
-                        </div>
-                </div>
-                <div class="group-info-grid">
-                    {% set group_meta = group_context.metadata or {} %}
-                    {% if group_meta %}
-                        {% for name, metadata in group_meta.items() %}
-                        <div class="group-info-item">
-                            <strong>{{ name }}</strong>
-                            <span>
-                                {% if metadata.url %}
-                                    <a href="{{ metadata.url }}" target="_blank">{{ metadata.value }}</a>
-                                {% else %}
-                                    {{ metadata.value }}
-                                {% endif %}
-                            </span>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <div class="group-info-item">
-                            <span>No metadata defined for this group.</span>
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
-            {% else %}
             <div class="tools-bar">
                 <a href="/analyzer" class="btn btn-outline-primary btn-sm">
                     <i class="fas fa-chart-line"></i> Analyzer
@@ -630,7 +583,6 @@
                     <i class="fas fa-terminal"></i> Server Log
                 </a>
             </div>
-            {% endif %}
             <form id="run-filters" class="d-flex flex-wrap gap-2 mb-3" aria-label="Run filters">
               <input class="form-control form-control-sm" name="target" placeholder="Target" style="max-width: 150px">
               <select class="form-select form-select-sm" name="purpose" style="max-width: 130px"><option value="">All purposes</option><option>nightly</option><option>release</option><option>feature</option><option>manual</option><option>sanity</option><option>rerun</option></select>
@@ -719,20 +671,6 @@
                     </td>
 
                     <td class="metadata-column">
-                        {% if run.group and not group_context %}
-                        {% for name, metadata in (run.group.metadata or {}).items() %}
-                        <div class="meta-item">
-                            <span class="meta-label">{{ name }}:</span>
-                            <span class="meta-value">
-                                {% if metadata.url %}
-                                    <a href="{{ metadata.url }}" target="_blank">{{ metadata.value }}</a>
-                                {% else %}
-                                    {{ metadata.value }}
-                                {% endif %}
-                            </span>
-                        </div>
-                        {% endfor %}
-                        {% endif %}
                         {% for name, metadata in (run.user_metadata or {}).items() %}
                         <div class="meta-item">
                             <span class="meta-label">{{ name }}:</span>
@@ -1012,7 +950,6 @@
       if (!run || !run.run_id) { console.warn('Missing run or run_id', run); return; }
       const tbody = document.getElementById('runs-list');
       if (!tbody) { console.error('runs-list element not found'); return; }
-      const isGroupContext = window.location.pathname.startsWith('/groups/');
       let tr = document.querySelector('tr[data-runid="' + run.run_id + '"]');
       let daysLeft = '';
       if (run.retention_days && run.start_time) {
@@ -1245,36 +1182,14 @@
       executionTimeItem.appendChild(executionTimeSpan);
       runMetaSection.appendChild(executionTimeItem);
 
-      // Add title, then group pill, then meta section to title column (matching template order)
+      // Add title, then meta section to title column (matching template order)
       titleColumn.appendChild(title);
-
-      // Add group pill if group exists and we're not in a group context (similar to template)
-      if (run.group && (run.group.name || run.group.hash) && !isGroupContext) {
-        const groupPill = document.createElement('div');
-        groupPill.className = 'group-pill';
-        const groupLabel = document.createElement('span');
-        groupLabel.textContent = 'Group:';
-        groupPill.appendChild(groupLabel);
-        if (run.group.hash) {
-          const groupLink = document.createElement('a');
-          groupLink.href = `/groups/${run.group.hash}`;
-          groupLink.className = 'group-link';
-          groupLink.textContent = run.group.name || `Group ${run.group.hash}`;
-          groupPill.appendChild(groupLink);
-        } else {
-          const groupSpan = document.createElement('span');
-          groupSpan.className = 'group-link';
-          groupSpan.textContent = run.group.name;
-          groupPill.appendChild(groupSpan);
-        }
-        titleColumn.appendChild(groupPill);
-      }
 
       if (runMetaSection.children.length > 0) {
         titleColumn.appendChild(runMetaSection);
       }
 
-      // Create metadata column for group + user metadata
+      // Create metadata column for user metadata
       const metadataColumn = document.createElement('td');
       metadataColumn.className = 'metadata-column';
 
@@ -1301,14 +1216,6 @@
         metaItem.appendChild(metaValue);
         metadataColumn.appendChild(metaItem);
       };
-
-      // Only show group metadata items (not the group name itself) in metadata column if we're not in a group context
-      // The group name is shown as a pill in the title column, not here
-      if (run.group && !isGroupContext && run.group.metadata) {
-        for (const [name, metadata] of Object.entries(run.group.metadata)) {
-          appendMetadataItem(name, metadata);
-        }
-      }
 
       if (run.user_metadata) {
         for (const [name, metadata] of Object.entries(run.user_metadata)) {

@@ -49,8 +49,9 @@ class TestCommitDiffAPI:
         return database.db
 
     @pytest_asyncio.fixture
-    async def sample_run_with_group(self, initialized_db):
-        """Create a sample test run with a group in the database."""
+    async def sample_run(self, initialized_db):
+        """Create a sample Target Run in the database."""
+        await initialized_db.get_or_create_target("test-target")
         test_run = TestRunData(
             run_id="run-with-commits",
             status="finished",
@@ -58,16 +59,15 @@ class TestCommitDiffAPI:
             end_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
             retention_days=7,
             local_run=False,
-            dut="TestDevice-001",
-            group_name="TestGroup",
-            group_hash="abc123def4567890"
+            target_key="test-target",
+            purpose="manual",
         )
 
         await initialized_db.insert_test_run(test_run, {})
         return test_run
 
     @pytest.mark.asyncio
-    async def test_insert_run_commits(self, initialized_db, sample_run_with_group):
+    async def test_insert_run_commits(self, initialized_db, sample_run):
         """Test inserting commit SHAs for a run."""
         commits = [
             {
@@ -94,64 +94,7 @@ class TestCommitDiffAPI:
         assert "firmware" in repo_names
 
     @pytest.mark.asyncio
-    async def test_get_last_commits_for_group(self, initialized_db, sample_run_with_group):
-        """Test retrieving last commit SHAs for a group."""
-        # Insert commits for the run
-        commits = [
-            {
-                "repo_name": "my-app",
-                "commit_sha": "abc123def456789",
-                "repo_url": "https://github.com/org/my-app"
-            },
-            {
-                "repo_name": "firmware",
-                "commit_sha": "xyz789abc123456",
-                "repo_url": None
-            }
-        ]
-        await initialized_db.insert_run_commits("run-with-commits", commits)
-
-        # Get last commits for the group
-        last_commits = await initialized_db.get_last_commits_for_group("abc123def4567890")
-
-        assert len(last_commits) == 2
-        assert last_commits["my-app"] == "abc123def456789"
-        assert last_commits["firmware"] == "xyz789abc123456"
-
-    @pytest.mark.asyncio
-    async def test_get_last_commits_for_nonexistent_group(self, initialized_db):
-        """Test retrieving last commits for a group that doesn't exist."""
-        last_commits = await initialized_db.get_last_commits_for_group("nonexistent")
-        assert last_commits == {}
-
-    @pytest.mark.asyncio
-    async def test_get_last_commits_skips_running_runs(self, initialized_db):
-        """Test that running runs are INCLUDED when querying last commits (only 'preparing' is excluded)."""
-        # Create a running run
-        running_run = TestRunData(
-            run_id="running-run",
-            status="running",
-            start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            end_time=None,
-            retention_days=7,
-            local_run=False,
-            dut="TestDevice-001",
-            group_name="TestGroup",
-            group_hash="skiprunning123"
-        )
-        await initialized_db.insert_test_run(running_run, {})
-
-        # Insert commits for running run
-        await initialized_db.insert_run_commits("running-run", [
-            {"repo_name": "my-app", "commit_sha": "running-sha", "repo_url": None}
-        ])
-
-        # Running runs should be included (only 'preparing' runs are excluded)
-        last_commits = await initialized_db.get_last_commits_for_group("skiprunning123")
-        assert last_commits == {"my-app": "running-sha"}
-
-    @pytest.mark.asyncio
-    async def test_commit_update_on_reinsert(self, initialized_db, sample_run_with_group):
+    async def test_commit_update_on_reinsert(self, initialized_db, sample_run):
         """Test that reinserting commits updates existing records."""
         # Insert initial commit
         await initialized_db.insert_run_commits("run-with-commits", [

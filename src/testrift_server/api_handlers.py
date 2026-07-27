@@ -27,7 +27,6 @@ from .utils import (
     read_jsonl,
     read_mplog,
     validate_run_id,
-    validate_group_hash_value,
     TC_ID_FIELD,
     TC_FULL_NAME_FIELD,
 )
@@ -312,20 +311,12 @@ async def api_test_runs_handler(request):
                 metadata_key = key[9:]  # Remove 'metadata.' prefix
                 metadata_filters[metadata_key] = value
 
-        group_hash = request.query.get('group') or request.query.get('group_hash')
-        if group_hash and not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         # Get test runs from database
         runs = await database.db.get_test_runs(
             limit=limit,
             offset=offset,
             status_filter=status,
             metadata_filters=metadata_filters if metadata_filters else None,
-            group_hash=group_hash,
             target_key=target_key,
             purpose=purpose,
             source_role=source_role,
@@ -375,19 +366,12 @@ async def api_test_run_details_handler(request):
 
         # Get metadata for this run
         user_metadata = await database.db.get_user_metadata_for_run(run_id)
-        group_metadata = await database.db.get_group_metadata_for_run(run_id)
-
         return web.json_response({
             "success": True,
             "data": {
                 "run": run,
                 "test_cases": test_cases,
                 "user_metadata": user_metadata,
-                "group": {
-                    "name": run.get("group_name"),
-                    "hash": run.get("group_hash"),
-                    "metadata": group_metadata
-                }
             }
         })
 
@@ -467,18 +451,10 @@ async def api_test_results_over_time_handler(request):
                 metadata_filters[metadata_key] = value
 
         run_ids = await _context_run_ids(request)
-        group_hash = request.query.get('group') or request.query.get('group_hash')
-        if group_hash and not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         # Get test runs over time (individual runs, not aggregated by date)
         results = await database.db.get_test_runs_over_time(
             days_back=days_back,
             metadata_filters=metadata_filters if metadata_filters else None,
-            group_hash=group_hash,
             run_ids=run_ids,
         )
 
@@ -522,19 +498,11 @@ async def api_test_case_history_handler(request):
                 metadata_filters[metadata_key] = value
 
         run_ids = await _context_run_ids(request, request.query.get('current_run_id'))
-        group_hash = request.query.get('group') or request.query.get('group_hash')
-        if group_hash and not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         # Get test case history
         history = await database.db.get_test_case_history(
             tc_full_name=tc_full_name,
             limit=limit,
             metadata_filters=metadata_filters if metadata_filters else None,
-            group_hash=group_hash,
             run_ids=run_ids,
         )
 
@@ -567,18 +535,10 @@ async def api_test_case_history_with_links_handler(request):
         current_run_id = request.query.get('current_run_id')  # Exclude current run
 
         run_ids = await _context_run_ids(request, current_run_id)
-        group_hash = request.query.get('group')
-        if group_hash and not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         # Get test case history
         history = await database.db.get_test_case_history(
             tc_full_name=tc_full_name,
             limit=limit + 1,  # Get one extra to account for current run exclusion
-            group_hash=group_hash,
             run_ids=run_ids,
         )
 
@@ -656,35 +616,6 @@ async def api_metadata_values_handler(request):
         }, status=500)
 
 
-async def api_group_details_handler(request):
-    """Return metadata for a specific group hash."""
-    group_hash = request.match_info.get("group_hash")
-    if not validate_group_hash_value(group_hash):
-        return web.json_response({
-            "success": False,
-            "error": "Invalid group hash"
-        }, status=400)
-
-    runs = await database.db.get_test_runs(limit=1, group_hash=group_hash)
-    if not runs:
-        return web.json_response({
-            "success": False,
-            "error": "Group not found"
-        }, status=404)
-
-    run = runs[0]
-    metadata = await database.db.get_group_metadata_for_run(run["run_id"])
-
-    return web.json_response({
-        "success": True,
-        "data": {
-            "hash": group_hash,
-            "name": run.get("group_name"),
-            "metadata": metadata
-        }
-    })
-
-
 async def api_failures_toplist_handler(request):
     """Get top failing test cases or symptoms."""
     try:
@@ -700,19 +631,11 @@ async def api_failures_toplist_handler(request):
                 metadata_filters[metadata_key] = value
 
         run_ids = await _context_run_ids(request)
-        group_hash = request.query.get('group')
-        if group_hash and not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         if mode == 'by_symptom':
             # Get failed test cases and analyze by stack trace
             failed_cases = await database.db.get_failed_test_cases(
                 days_back=days_back,
                 limit=1000,  # Get more to analyze symptoms
-                group_hash=group_hash,
                 metadata_filters=metadata_filters if metadata_filters else None,
                 run_ids=run_ids,
             )
@@ -863,7 +786,6 @@ async def api_failures_toplist_handler(request):
             results = await database.db.get_failure_counts_by_test_case(
                 days_back=days_back,
                 top_n=top_n,
-                group_hash=group_hash,
                 metadata_filters=metadata_filters if metadata_filters else None,
                 run_ids=run_ids,
             )
@@ -964,13 +886,6 @@ async def api_tc_hover_history_handler(request):
 
         current_run_id = request.query.get('current_run_id')
         run_ids = await _context_run_ids(request, current_run_id)
-        group_hash = request.query.get('group')
-        if group_hash and not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
         # Get current run's start time if we have a run_id
         current_run_start_time = None
         if current_run_id:
@@ -986,7 +901,6 @@ async def api_tc_hover_history_handler(request):
         # Get previous results (before current run)
         previous_history = await database.db.get_test_case_classification_data(
             tc_full_name=tc_full_name,
-            group_hash=group_hash,
             limit=10,
             current_run_id=current_run_id,
             current_run_start_time=current_run_start_time,
@@ -996,7 +910,6 @@ async def api_tc_hover_history_handler(request):
         # Get latest results (all runs, including current and future)
         latest_history = await database.db.get_test_case_classification_data(
             tc_full_name=tc_full_name,
-            group_hash=group_hash,
             limit=10,
             run_ids=run_ids,
         )
@@ -1153,32 +1066,6 @@ async def api_admin_shutdown_handler(request):
 
 
 # --- Commit/Diff Endpoints for testrift-collector ---
-
-async def api_group_last_commits_handler(request):
-    """Get last commit SHAs for all repos from the most recent run in a group."""
-    try:
-        group_hash = request.match_info["group_hash"]
-
-        if not validate_group_hash_value(group_hash):
-            return web.json_response({
-                "success": False,
-                "error": "Invalid group hash"
-            }, status=400)
-
-        commits = await database.db.get_last_commits_for_group(group_hash)
-
-        return web.json_response({
-            "success": True,
-            "commits": commits
-        })
-
-    except Exception as e:
-        logger.error(f"Error in api_group_last_commits_handler: {e}")
-        return web.json_response({
-            "success": False,
-            "error": str(e)
-        }, status=500)
-
 
 async def api_run_commit_baselines_handler(request):
     try:

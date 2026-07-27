@@ -190,37 +190,6 @@ class TestHTTPAPI:
         assert hasattr(response, 'content_type')
 
     @pytest.mark.asyncio
-    async def test_api_group_details_handler(self, initialized_db):
-        """Test group details endpoint."""
-        from testrift_server.api_handlers import api_group_details_handler
-
-        grouped_run = TestRunData(
-            run_id="group-run-1",
-            status="finished",
-            start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            end_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            retention_days=7,
-            local_run=False,
-            dut="TestDevice-001",
-            group_name="Release Builds",
-            group_hash="abc123def456"
-        )
-        await initialized_db.insert_test_run(
-            grouped_run,
-            {},
-            {"Branch": {"value": "release/v2"}}
-        )
-
-        request = MagicMock()
-        request.match_info = {'group_hash': 'abc123def456'}
-
-        response = await api_group_details_handler(request)
-
-        assert response is not None
-        assert hasattr(response, 'status')
-        assert response.status == 200
-
-    @pytest.mark.asyncio
     async def test_api_test_results_for_runs_handler_basic(self, initialized_db, sample_test_run):
         """Test the API test results for runs endpoint basic functionality."""
         from testrift_server.api_handlers import api_test_results_for_runs_handler
@@ -440,29 +409,6 @@ class TestDatabaseAPI:
         assert isinstance(metadata, dict)
         assert "DUT" in metadata
         assert "Environment" in metadata
-
-    @pytest.mark.asyncio
-    async def test_get_group_metadata_for_run(self, initialized_db):
-        """Test get_group_metadata_for_run function."""
-        test_run = TestRunData(
-            run_id="group-meta-run",
-            status="finished",
-            start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            end_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-            retention_days=7,
-            local_run=False,
-            dut="TestDevice-001",
-            group_name="Nightly",
-            group_hash="fedcba987654"
-        )
-        await initialized_db.insert_test_run(
-            test_run,
-            {},
-            {"Branch": {"value": "nightly"}, "Env": {"value": "lab"}}
-        )
-        metadata = await initialized_db.get_group_metadata_for_run("group-meta-run")
-        assert isinstance(metadata, dict)
-        assert metadata["Branch"]["value"] == "nightly"
 
     @pytest.mark.asyncio
     async def test_get_all_metadata_keys(self, initialized_db, sample_test_run):

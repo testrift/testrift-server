@@ -602,23 +602,21 @@ class TestResultsDatabase:
             if not target_keys:
                 return {"profile": profile, "target_keys": [], "selectors": selectors, "runs": []}
 
-            placeholders = ", ".join("?" for _ in target_keys)
             run_cursor = await db.execute(
-                f"""SELECT run_id, target_key, purpose, status, end_time
+                """SELECT run_id, target_key, purpose, status, end_time
                     FROM test_runs
-                    WHERE status = 'finished' AND target_key IN ({placeholders})""",
-                target_keys,
+                    WHERE status = 'finished' AND target_key IN (SELECT value FROM json_each(?))""",
+                (json.dumps(target_keys),),
             )
             runs = [dict(zip([column[0] for column in run_cursor.description], row)) for row in await run_cursor.fetchall()]
             if not runs:
                 return {"profile": profile, "target_keys": target_keys, "selectors": selectors, "runs": []}
 
             run_ids = [run["run_id"] for run in runs]
-            source_placeholders = ", ".join("?" for _ in run_ids)
             source_cursor = await db.execute(
-                f"""SELECT run_id, source_role, branch, revision, repository_url, dirty
-                    FROM run_sources WHERE run_id IN ({source_placeholders})""",
-                run_ids,
+                """SELECT run_id, source_role, branch, revision, repository_url, dirty
+                    FROM run_sources WHERE run_id IN (SELECT value FROM json_each(?))""",
+                (json.dumps(run_ids),),
             )
             sources_by_run: Dict[str, Dict[str, Dict[str, Any]]] = {run_id: {} for run_id in run_ids}
             for row in await source_cursor.fetchall():
@@ -788,7 +786,6 @@ class TestResultsDatabase:
         offset: int = 0,
         status_filter: Optional[str] = None,
         metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None,
         target_key: Optional[str] = None,
         purpose: Optional[str] = None,
         source_role: Optional[str] = None,
@@ -831,10 +828,6 @@ class TestResultsDatabase:
                     conditions.append("EXISTS (SELECT 1 FROM user_metadata um2 WHERE um2.run_id = tr.run_id AND um2.key = ? AND um2.value = ?)")
                     params.extend([key, value])
 
-            if group_hash:
-                conditions.append("tr.group_hash = ?")
-                params.append(group_hash)
-
             if target_key:
                 conditions.append("tr.target_key = ?")
                 params.append(target_key)
@@ -867,8 +860,8 @@ class TestResultsDatabase:
             if run_ids is not None:
                 if not run_ids:
                     return []
-                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
-                params.extend(run_ids)
+                conditions.append("tr.run_id IN (SELECT value FROM json_each(?))")
+                params.append(json.dumps(run_ids))
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
@@ -938,13 +931,12 @@ class TestResultsDatabase:
         if not run_ids:
             return {}
 
-        placeholders = ','.join('?' * len(run_ids))
         async with self.get_connection() as db:
-            cursor = await db.execute(f"""
+            cursor = await db.execute("""
                 SELECT * FROM test_cases
-                WHERE run_id IN ({placeholders})
+                WHERE run_id IN (SELECT value FROM json_each(?))
                 ORDER BY run_id, start_time
-            """, run_ids)
+            """, (json.dumps(run_ids),))
 
             rows = await cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
@@ -974,73 +966,10 @@ class TestResultsDatabase:
                 metadata[key] = {"value": value, "url": url}
             return metadata
 
-    async def get_group_metadata_for_run(self, run_id: str) -> Dict[str, Any]:
-        """Get group metadata for a specific run."""
-        async with self.get_connection() as db:
-            cursor = await db.execute("""
-                SELECT key, value, url FROM group_metadata
-                WHERE run_id = ?
-            """, (run_id,))
-
-            rows = await cursor.fetchall()
-            metadata = {}
-            for key, value, url in rows:
-                metadata[key] = {"value": value, "url": url}
-            return metadata
-
-    async def get_test_results_over_time(
-        self,
-        days_back: int = 30,
-        metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Get test results aggregated over time for trending analysis."""
-        async with self.get_connection() as db:
-            # Calculate date threshold
-            cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_back)
-            cutoff_str = cutoff_date.isoformat() + "Z"
-
-            query = """
-                SELECT
-                    SUBSTR(tr.start_time, 1, 10) as date,
-                    COUNT(DISTINCT tr.run_id) as total_runs,
-                    SUM(CASE WHEN tc.status = 'passed' THEN 1 ELSE 0 END) as passed_tests,
-                    SUM(CASE WHEN tc.status = 'failed' THEN 1 ELSE 0 END) as failed_tests,
-                    SUM(CASE WHEN tc.status = 'skipped' THEN 1 ELSE 0 END) as skipped_tests,
-                    SUM(CASE WHEN tc.status = 'aborted' THEN 1 ELSE 0 END) as aborted_tests,
-                    SUM(CASE WHEN tc.status = 'error' THEN 1 ELSE 0 END) as error_tests,
-                    SUM(CASE WHEN tc.status IN ('passed', 'failed', 'skipped', 'aborted', 'error') THEN 1 ELSE 0 END) as total_tests
-                FROM test_runs tr
-                LEFT JOIN test_cases tc ON tr.run_id = tc.run_id
-                LEFT JOIN user_metadata um ON tr.run_id = um.run_id
-            """
-
-            conditions = ["tr.start_time >= ?"]
-            params = [cutoff_str]
-
-            if metadata_filters:
-                for key, value in metadata_filters.items():
-                    conditions.append("EXISTS (SELECT 1 FROM user_metadata um2 WHERE um2.run_id = tr.run_id AND um2.key = ? AND um2.value = ?)")
-                    params.extend([key, value])
-
-            if group_hash:
-                conditions.append("tr.group_hash = ?")
-                params.append(group_hash)
-
-            query += " WHERE " + " AND ".join(conditions)
-            query += " GROUP BY DATE(tr.start_time) ORDER BY date DESC"
-
-            cursor = await db.execute(query, params)
-            rows = await cursor.fetchall()
-
-            columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-
     async def get_test_runs_over_time(
         self,
         days_back: int = 30,
         metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None,
         run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get individual test runs over time for trending analysis."""
@@ -1074,14 +1003,11 @@ class TestResultsDatabase:
                     conditions.append("EXISTS (SELECT 1 FROM user_metadata um WHERE um.run_id = tr.run_id AND um.key = ? AND um.value = ?)")
                     params.extend([key, value])
 
-            if group_hash:
-                conditions.append("tr.group_hash = ?")
-                params.append(group_hash)
             if run_ids is not None:
                 if not run_ids:
                     return []
-                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
-                params.extend(run_ids)
+                conditions.append("tr.run_id IN (SELECT value FROM json_each(?))")
+                params.append(json.dumps(run_ids))
 
             query += " WHERE " + " AND ".join(conditions)
             query += " GROUP BY tr.run_id, tr.start_time, tr.end_time, tr.status ORDER BY tr.start_time ASC"
@@ -1097,7 +1023,6 @@ class TestResultsDatabase:
         tc_full_name: str,
         limit: int = 50,
         metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None,
         run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get execution history for a specific test case."""
@@ -1117,14 +1042,11 @@ class TestResultsDatabase:
                     conditions.append("EXISTS (SELECT 1 FROM user_metadata um2 WHERE um2.run_id = tr.run_id AND um2.key = ? AND um2.value = ?)")
                     params.extend([key, value])
 
-            if group_hash:
-                conditions.append("tr.group_hash = ?")
-                params.append(group_hash)
             if run_ids is not None:
                 if not run_ids:
                     return []
-                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
-                params.extend(run_ids)
+                conditions.append("tr.run_id IN (SELECT value FROM json_each(?))")
+                params.append(json.dumps(run_ids))
 
             query += " WHERE " + " AND ".join(conditions)
             query += " ORDER BY tc.start_time DESC LIMIT ?"
@@ -1139,7 +1061,7 @@ class TestResultsDatabase:
     async def classify_test_case(
         self,
         tc_full_name: str,
-        group_hash: Optional[str] = None
+        run_ids: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Classify a test case based on recent history.
 
@@ -1149,7 +1071,7 @@ class TestResultsDatabase:
         - "persistent_failure": has been failing consistently
         - "flaky": intermittent pass/fail pattern
         """
-        history = await self.get_test_case_history(tc_full_name, limit=10, group_hash=group_hash)
+        history = await self.get_test_case_history(tc_full_name, limit=10, run_ids=run_ids)
         if not history:
             return "new_failure"
 
@@ -1196,7 +1118,6 @@ class TestResultsDatabase:
         self,
         days_back: int = 30,
         limit: int = 100,
-        group_hash: Optional[str] = None,
         metadata_filters: Optional[Dict[str, str]] = None,
         run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
@@ -1204,7 +1125,7 @@ class TestResultsDatabase:
         async with self.get_connection() as db:
             query = """
                 SELECT tc.run_id, tc.tc_full_name, tc.tc_id, tc.status, tc.start_time, tc.end_time,
-                       tr.start_time as run_start_time, tr.group_hash, tr.group_name
+                       tr.start_time as run_start_time, tr.target_key
                 FROM test_cases tc
                 JOIN test_runs tr ON tc.run_id = tr.run_id
             """
@@ -1215,15 +1136,11 @@ class TestResultsDatabase:
             ]
             params = [f"-{days_back} days"]
 
-            if group_hash:
-                conditions.append("tr.group_hash = ?")
-                params.append(group_hash)
-
             if run_ids is not None:
                 if not run_ids:
                     return []
-                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
-                params.extend(run_ids)
+                conditions.append("tr.run_id IN (SELECT value FROM json_each(?))")
+                params.append(json.dumps(run_ids))
 
             if metadata_filters:
                 for key, value in metadata_filters.items():
@@ -1247,7 +1164,6 @@ class TestResultsDatabase:
         self,
         days_back: int = 30,
         top_n: int = 20,
-        group_hash: Optional[str] = None,
         metadata_filters: Optional[Dict[str, str]] = None,
         run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
@@ -1260,15 +1176,11 @@ class TestResultsDatabase:
             ]
             params = [f"-{days_back} days"]
 
-            if group_hash:
-                base_conditions.append("tr.group_hash = ?")
-                params.append(group_hash)
-
             if run_ids is not None:
                 if not run_ids:
                     return []
-                base_conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
-                params.extend(run_ids)
+                base_conditions.append("tr.run_id IN (SELECT value FROM json_each(?))")
+                params.append(json.dumps(run_ids))
 
             if metadata_filters:
                 for key, value in metadata_filters.items():
@@ -1319,7 +1231,6 @@ class TestResultsDatabase:
     async def get_test_case_classification_data(
         self,
         tc_full_name: str,
-        group_hash: Optional[str] = None,
         limit: int = 10,
         current_run_id: Optional[str] = None,
         current_run_start_time: Optional[str] = None,
@@ -1340,14 +1251,11 @@ class TestResultsDatabase:
             """
             params = [tc_full_name]
 
-            if group_hash:
-                query += " AND tr.group_hash = ?"
-                params.append(group_hash)
             if run_ids is not None:
                 if not run_ids:
                     return []
-                query += " AND tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")"
-                params.extend(run_ids)
+                query += " AND tr.run_id IN (SELECT value FROM json_each(?))"
+                params.append(json.dumps(run_ids))
 
             # Exclude current run
             if current_run_id:
@@ -1367,47 +1275,6 @@ class TestResultsDatabase:
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
 
-    async def get_test_run_history_in_group(
-        self,
-        group_hash: str,
-        limit: int = 10,
-        exclude_run_id: Optional[str] = None,
-        current_run_start_time: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Get recent test runs within a group for hover history.
-
-        Returns summary info for last N runs in the group.
-        """
-        async with self.get_connection() as db:
-            query = """
-                SELECT tr.run_id, tr.run_name, tr.status, tr.start_time, tr.end_time,
-                       COUNT(tc.id) as test_case_count,
-                       SUM(CASE WHEN tc.status = 'passed' THEN 1 ELSE 0 END) as passed_count,
-                       SUM(CASE WHEN tc.status = 'failed' THEN 1 ELSE 0 END) as failed_count,
-                       SUM(CASE WHEN tc.status = 'skipped' THEN 1 ELSE 0 END) as skipped_count,
-                       SUM(CASE WHEN tc.status = 'error' THEN 1 ELSE 0 END) as error_count
-                FROM test_runs tr
-                LEFT JOIN test_cases tc ON tr.run_id = tc.run_id
-                WHERE tr.group_hash = ?
-            """
-            params = [group_hash]
-
-            if exclude_run_id:
-                query += " AND tr.run_id != ?"
-                params.append(exclude_run_id)
-
-            if current_run_start_time:
-                query += " AND tr.start_time < ?"
-                params.append(current_run_start_time)
-
-            query += " GROUP BY tr.run_id ORDER BY tr.start_time DESC LIMIT ?"
-            params.append(limit)
-
-            cursor = await db.execute(query, params)
-            rows = await cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-
     async def get_test_run_history(
         self,
         run_ids: List[str],
@@ -1419,8 +1286,7 @@ class TestResultsDatabase:
         if not run_ids:
             return []
         async with self.get_connection() as db:
-            placeholders = ", ".join("?" for _ in run_ids)
-            query = f"""
+            query = """
                 SELECT tr.run_id, tr.run_name, tr.status, tr.start_time, tr.end_time,
                        COUNT(tc.id) as test_case_count,
                        SUM(CASE WHEN tc.status = 'passed' THEN 1 ELSE 0 END) as passed_count,
@@ -1429,9 +1295,9 @@ class TestResultsDatabase:
                        SUM(CASE WHEN tc.status = 'error' THEN 1 ELSE 0 END) as error_count
                 FROM test_runs tr
                 LEFT JOIN test_cases tc ON tr.run_id = tc.run_id
-                WHERE tr.run_id IN ({placeholders})
+                WHERE tr.run_id IN (SELECT value FROM json_each(?))
             """
-            params = list(run_ids)
+            params = [json.dumps(run_ids)]
             if exclude_run_id:
                 query += " AND tr.run_id != ?"
                 params.append(exclude_run_id)
@@ -1444,47 +1310,6 @@ class TestResultsDatabase:
             rows = await cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
-
-    async def get_previous_run_test_cases(
-        self,
-        group_hash: str,
-        current_run_id: str
-    ) -> List[str]:
-        """Get test case IDs from the previous run in the same group.
-
-        Used to determine if a test case is new (not in previous run).
-        """
-        async with self.get_connection() as db:
-            # First get the current run's start time
-            cursor = await db.execute(
-                "SELECT start_time FROM test_runs WHERE run_id = ?",
-                (current_run_id,)
-            )
-            row = await cursor.fetchone()
-            if not row:
-                return []
-            current_start_time = row[0]
-
-            # Find the most recent run before the current one in the same group
-            cursor = await db.execute("""
-                SELECT run_id FROM test_runs
-                WHERE group_hash = ? AND start_time < ?
-                ORDER BY start_time DESC LIMIT 1
-            """, (group_hash, current_start_time))
-
-            row = await cursor.fetchone()
-            if not row:
-                return []
-
-            previous_run_id = row[0]
-
-            # Get test case IDs from the previous run
-            cursor = await db.execute(
-                "SELECT tc_full_name FROM test_cases WHERE run_id = ?",
-                (previous_run_id,)
-            )
-            rows = await cursor.fetchall()
-            return [r[0] for r in rows]
 
     async def get_previous_run_test_cases_in_set(
         self,
@@ -1499,10 +1324,9 @@ class TestResultsDatabase:
             row = await cursor.fetchone()
             if not row:
                 return []
-            placeholders = ", ".join("?" for _ in run_ids)
             cursor = await db.execute(
-                f"SELECT run_id FROM test_runs WHERE run_id IN ({placeholders}) AND start_time < ? ORDER BY start_time DESC, run_id DESC LIMIT 1",
-                [*run_ids, row[0]],
+                "SELECT run_id FROM test_runs WHERE run_id IN (SELECT value FROM json_each(?)) AND start_time < ? ORDER BY start_time DESC, run_id DESC LIMIT 1",
+                (json.dumps(run_ids), row[0]),
             )
             previous = await cursor.fetchone()
             if not previous:
@@ -1513,7 +1337,6 @@ class TestResultsDatabase:
     async def get_classifications_for_run(
         self,
         run_id: str,
-        group_hash: Optional[str] = None,
         run_ids: Optional[List[str]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Get classification data for all test cases in a run.
@@ -1542,11 +1365,8 @@ class TestResultsDatabase:
             if not test_cases:
                 return {}
 
-            # Get previous run's test cases if we have a group
             previous_tc_ids = set()
-            if group_hash:
-                previous_tc_ids = set(await self.get_previous_run_test_cases(group_hash, run_id))
-            elif run_ids is not None:
+            if run_ids is not None:
                 previous_tc_ids = set(await self.get_previous_run_test_cases_in_set(run_ids, run_id))
 
             result = {}
@@ -1554,7 +1374,6 @@ class TestResultsDatabase:
                 # Get history for this TC - only previous runs (excludes current and future runs)
                 history = await self.get_test_case_classification_data(
                     tc_id,
-                    group_hash,
                     limit=10,
                     current_run_id=run_id,
                     current_run_start_time=current_run_start_time,
@@ -1566,11 +1385,11 @@ class TestResultsDatabase:
 
                 # Determine if TC is new (wasn't in previous run)
                 # Returns True if:
-                # - We have a group_hash (so we can compare runs)
+                # - We have a Run set (so we can compare runs)
                 # - There were test cases in the previous run
                 # - This TC was not in the previous run
                 is_new = bool(
-                    (group_hash or run_ids is not None)
+                    run_ids is not None
                     and len(previous_tc_ids) > 0
                     and tc_id not in previous_tc_ids
                 )
@@ -1681,41 +1500,6 @@ class TestResultsDatabase:
                 print(f"Error inserting run commits: {e}")
                 await db.rollback()
                 return False
-
-    async def get_last_commits_for_group(self, group_hash: str) -> Dict[str, str]:
-        """
-        Get the last commit SHA for each repo from the most recent run in a group.
-
-        Args:
-            group_hash: The group hash to query
-
-        Returns:
-            Dict mapping repo_name to commit_sha
-        """
-        async with self.get_connection() as db:
-            # Find the most recent run in this group that has started execution
-            # Include 'running' and 'finished' runs, exclude only 'preparing' runs
-            cursor = await db.execute("""
-                SELECT run_id FROM test_runs
-                WHERE group_hash = ? AND status != 'preparing'
-                ORDER BY start_time DESC
-                LIMIT 1
-            """, (group_hash,))
-            row = await cursor.fetchone()
-
-            if not row:
-                return {}
-
-            last_run_id = row[0]
-
-            # Get all commits for that run
-            cursor = await db.execute("""
-                SELECT repo_name, commit_sha FROM run_commits
-                WHERE run_id = ?
-            """, (last_run_id,))
-            rows = await cursor.fetchall()
-
-            return {row[0]: row[1] for row in rows}
 
     async def get_commit_baselines_for_run(self, run_id: str) -> Dict[str, Dict[str, str]]:
         """Find earlier finished exact-Target/purpose/branch source baselines."""
@@ -2005,7 +1789,7 @@ class TestResultsDatabase:
         """Get all failed/error test cases for a run, ordered by priority."""
         async with self.get_connection() as db:
             cursor = await db.execute("""
-                SELECT tc.*, tr.group_hash
+                SELECT tc.*, tr.target_key
                 FROM test_cases tc
                 JOIN test_runs tr ON tc.run_id = tr.run_id
                 WHERE tc.run_id = ? AND tc.status IN ('failed', 'error')
@@ -2029,35 +1813,6 @@ def initialize_database(data_dir: str = "data"):
     db_path = data_path / "test_results.db"
     db = TestResultsDatabase(str(db_path))
     return db
-
-# Convenience functions for integration with existing code
-async def log_test_run_started(
-    run_id: str,
-    retention_days: Optional[int],
-    local_run: bool,
-    user_metadata: Dict[str, Any] = None,
-    dut: str = "TestDevice-001",
-    run_name: Optional[str] = None,
-    group_name: Optional[str] = None,
-    group_hash: Optional[str] = None,
-    group_metadata: Dict[str, Any] = None,
-    status: str = "running"
-):
-    """Log a test run start to the database."""
-    test_run = TestRunData(
-        run_id=run_id,
-        status=status,
-        start_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
-        end_time=None,
-        retention_days=retention_days,
-        local_run=local_run,
-        dut=dut,
-        run_name=run_name,
-        group_name=group_name,
-        group_hash=group_hash
-    )
-    return await db.insert_test_run(test_run, user_metadata, group_metadata)
-
 
 async def log_test_run_finished(run_id: str, status: str):
     """Log a test run completion to the database."""

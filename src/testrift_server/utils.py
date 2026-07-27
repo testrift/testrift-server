@@ -4,7 +4,6 @@ Utility functions for TestRift server.
 Path helpers, validators, sanitizers, and file operations.
 """
 
-import hashlib
 import json
 import re
 import struct
@@ -18,7 +17,6 @@ from . import config
 
 UTC = timezone.utc
 
-GROUP_HASH_LENGTH = 16
 CASE_STORAGE_DIR_NAME = "cases"
 CASE_LOG_FILE_SUFFIX = "_log.mplog"
 CASE_STACK_FILE_SUFFIX = "_stack.mplog"
@@ -318,77 +316,6 @@ def validate_test_case_id(test_case_id):
         return False
 
     return True
-
-
-def validate_group_hash_value(group_hash):
-    """Ensure group hash only contains safe hex characters."""
-    if not group_hash or not isinstance(group_hash, str):
-        return False
-    return re.fullmatch(r"[0-9a-fA-F]{6,64}", group_hash) is not None
-
-
-# --- Group hash functions ---
-
-def normalize_group_payload(group_data):
-    """Return canonical group dict with 'name' and dict metadata."""
-    if not isinstance(group_data, dict):
-        return None
-
-    name = str(group_data.get("name", "") or "").strip()
-    if not name:
-        return None
-
-    raw_metadata = group_data.get("metadata") or {}
-    normalized_metadata = {}
-
-    if isinstance(raw_metadata, dict):
-        items = raw_metadata.items()
-    elif isinstance(raw_metadata, list):
-        items = []
-        for entry in raw_metadata:
-            if isinstance(entry, dict):
-                items.append((entry.get("name"), entry))
-    else:
-        items = []
-
-    for key, meta_value in items:
-        key_str = str(key or "").strip()
-        if not key_str:
-            continue
-
-        value = ""
-        url = None
-        if isinstance(meta_value, dict):
-            value = str(meta_value.get("value", "") or "")
-            url_raw = meta_value.get("url")
-            url = str(url_raw) if url_raw is not None else None
-        else:
-            value = str(meta_value or "")
-
-        normalized_metadata[key_str] = {"value": value, "url": url}
-
-    return {"name": name, "metadata": normalized_metadata}
-
-
-def compute_group_hash(group_data):
-    """Compute deterministic hash for normalized group payload."""
-    normalized = normalize_group_payload(group_data)
-    if not normalized:
-        return None
-
-    metadata_items = []
-    for key, meta_value in (normalized.get("metadata") or {}).items():
-        metadata_items.append((key, meta_value.get("value", "")))
-
-    metadata_items.sort(key=lambda item: (item[0].lower(), item[1]))
-    canonical_payload = {
-        "name": normalized["name"],
-        "metadata": metadata_items
-    }
-    digest = hashlib.sha256(
-        json.dumps(canonical_payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return digest[:GROUP_HASH_LENGTH]
 
 
 # --- Test case helpers ---

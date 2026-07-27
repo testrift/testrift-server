@@ -115,45 +115,6 @@ class TestDatabaseFunctions:
         assert len(test_cases) == 0
 
     @pytest.mark.asyncio
-    async def test_log_test_run_started(self, initialized_db):
-        """Test log_test_run_started convenience function."""
-        # Test logging test run start
-        success = await database.log_test_run_started(
-            "test-run-456",
-            retention_days=7,
-            local_run=True,
-            user_metadata={"DUT": {"value": "TestDevice-002"}},
-            dut="TestDevice-002",
-            group_name="Release Builds",
-            group_hash="abc123def4567890",
-            group_metadata={
-                "Branch": {"value": "release/v2"},
-                "Environment": {"value": "staging", "url": "https://staging.example.com"}
-            }
-        )
-        assert success is True
-
-        # Verify the test run was created
-        run = await initialized_db.get_test_run_by_id("test-run-456")
-        assert run is not None
-        assert run["status"] == "running"
-        assert run["retention_days"] == 7
-        assert run["local_run"] == 1  # SQLite stores boolean as integer
-        assert run["dut"] == "TestDevice-002"
-
-        # Verify metadata was stored
-        metadata = await initialized_db.get_user_metadata_for_run("test-run-456")
-        assert "DUT" in metadata
-        assert metadata["DUT"]["value"] == "TestDevice-002"
-
-        group_metadata = await initialized_db.get_group_metadata_for_run("test-run-456")
-        assert "Branch" in group_metadata
-        assert group_metadata["Branch"]["value"] == "release/v2"
-        assert group_metadata["Environment"]["url"] == "https://staging.example.com"
-        assert run["group_name"] == "Release Builds"
-        assert run["group_hash"] == "abc123def4567890"
-
-    @pytest.mark.asyncio
     async def test_log_test_run_finished(self, initialized_db, sample_test_run):
         """Test log_test_run_finished convenience function."""
         # Test logging test run finish

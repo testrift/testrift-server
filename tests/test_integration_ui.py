@@ -361,16 +361,14 @@ data:
         port, server_proc = server_process
         page = browser_page
 
-        group_hash = f"test-group-{int(time.time())}"
+        target_key = f"classification-{int(time.time())}"
 
         # Step 1: Create first run with one test case
         async with ClientSession() as session:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
                 client = ProtocolClient(ws)
 
-                response = await client.send_run_started(
-                    group={"hash": group_hash, "name": "Classification Test Group"}
-                )
+                response = await client.send_run_started(target_key=target_key)
                 first_run_id = response.get("run_id")
 
                 tc_id_1 = "00000001"
@@ -384,9 +382,7 @@ data:
             async with session.ws_connect(f"ws://127.0.0.1:{port}/ws/nunit") as ws:
                 client = ProtocolClient(ws)
 
-                response = await client.send_run_started(
-                    group={"hash": group_hash, "name": "Classification Test Group"}
-                )
+                response = await client.send_run_started(target_key=target_key)
                 second_run_id = response.get("run_id")
 
                 # Existing test case

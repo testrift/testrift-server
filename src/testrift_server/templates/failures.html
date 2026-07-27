@@ -348,27 +348,6 @@
         </div>
 
         <div class="content-section">
-            <div id="groupContextBanner" class="group-banner" style="display: none;">
-                <div class="group-banner-header">
-                    <div>
-                        <div class="group-title-label">Group</div>
-                        <h2 id="groupBannerTitle"></h2>
-                    </div>
-                    <div class="group-banner-links">
-                        <a id="groupRunsLink" href="#" class="btn btn-outline-primary btn-sm">
-                            <i class="fas fa-list"></i> Test Runs
-                        </a>
-                        <a id="groupAnalyzerLink" href="#" class="btn btn-outline-primary btn-sm">
-                            <i class="fas fa-chart-line"></i> Analyzer
-                        </a>
-                        <a id="groupMatrixLink" href="#" class="btn btn-outline-primary btn-sm">
-                            <i class="fas fa-table"></i> Matrix
-                        </a>
-                    </div>
-                </div>
-                <div class="group-info-grid" id="groupBannerMetadata"></div>
-            </div>
-
             <div class="filter-section">
                 <h5 class="mb-3">
                     <i class="fas fa-filter me-2"></i>Filters
@@ -466,7 +445,6 @@
         let currentData = [];
         let metadataKeys = [];
         const contextParams = new URLSearchParams(window.location.search);
-        const groupHash = null;
 
         function appendContextParams(params) {
             ['target', 'collection', 'profile_id', 'at'].forEach(key => {
@@ -500,43 +478,6 @@
             await loadData();
             initFiltersFromURL();
         });
-
-        async function loadGroupContext() {
-            if (!groupHash) return;
-
-            try {
-                const response = await fetch(`/api/groups/${groupHash}`);
-                const result = await response.json();
-
-                if (result.success && result.data) {
-                    const group = result.data;
-                    const banner = document.getElementById('groupContextBanner');
-                    const title = document.getElementById('groupBannerTitle');
-                    const metadataGrid = document.getElementById('groupBannerMetadata');
-
-                    title.textContent = group.name || `Group ${group.hash}`;
-
-                    // Update navigation links
-                    document.getElementById('groupRunsLink').href = `/groups/${groupHash}`;
-                    document.getElementById('groupAnalyzerLink').href = `/analyzer?group=${groupHash}`;
-                    document.getElementById('groupMatrixLink').href = `/matrix?group=${groupHash}`;
-
-                    // Populate metadata
-                    if (group.metadata && Object.keys(group.metadata).length > 0) {
-                        metadataGrid.innerHTML = Object.entries(group.metadata).map(([key, value]) => `
-                            <div class="group-info-item">
-                                <strong>${key}</strong>
-                                <span>${value.url ? `<a href="${value.url}" target="_blank">${value.value || value}</a>` : (value.value || value)}</span>
-                            </div>
-                        `).join('');
-                    }
-
-                    banner.style.display = 'block';
-                }
-            } catch (error) {
-                console.error('Failed to load group context:', error);
-            }
-        }
 
         async function loadMetadataKeys() {
             try {
@@ -698,7 +639,7 @@
                             const canonicalId = storageId || displayName;
                             const tcNameEl = document.getElementById(`tc-name-${index}-${tcIndex}`);
                             if (tcNameEl && typeof Classifications !== 'undefined' && canonicalId) {
-                                Classifications.setupBadgeHistoryHoverAsync(tcNameEl, canonicalId, groupHash || null, null, displayName);
+                                Classifications.setupBadgeHistoryHoverAsync(tcNameEl, canonicalId, null, null, displayName);
                             }
                         });
                     }, 100);
@@ -718,7 +659,7 @@
                         const tcNameEl = document.getElementById(tcNameId);
                         const canonicalId = tcStorageId || tcDisplayName;
                         if (tcNameEl && typeof Classifications !== 'undefined' && canonicalId) {
-                            Classifications.setupBadgeHistoryHoverAsync(tcNameEl, canonicalId, groupHash || null, null, tcDisplayName);
+                            Classifications.setupBadgeHistoryHoverAsync(tcNameEl, canonicalId, null, null, tcDisplayName);
                         }
                     }, 100);
                 }

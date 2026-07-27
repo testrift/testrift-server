@@ -264,7 +264,6 @@
       serverMode: {{ server_mode | tojson }},
       attachments: {{ attachments | tojson if attachments else '[]' }},
       stackTraces: {{ (stack_traces if stack_traces is defined else (test_case.stack_traces if test_case else (tc_meta.stack_traces if tc_meta else []))) | tojson }},
-      groupHash: {{ group_hash | tojson if group_hash else 'null' }},
       metrics: {{ metrics | tojson if metrics is defined else '[]' }}
     };
 </script>
