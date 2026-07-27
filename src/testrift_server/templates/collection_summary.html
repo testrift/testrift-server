@@ -25,6 +25,7 @@
     <label>Summary profile <select id="profile" class="form-select"></select></label>
   </div>
   <div id="summary-time" class="text-muted mt-3"></div>
+  <div id="tools" class="mt-3"></div>
   <div id="tiles" class="tiles"></div>
 </main>
 <script>
@@ -41,11 +42,15 @@ async function load() {
 async function render() {
   const profileId = document.getElementById('profile').value;
   if (!profileId) { document.getElementById('tiles').textContent = 'No Summary profile configured.'; return; }
-  const at = new Date().toISOString();
+  const at = new URLSearchParams(window.location.search).get('at') || new Date().toISOString();
   const [collection, selections] = await Promise.all([api(`/api/collections/${collectionKey}`), api(`/api/collections/${collectionKey}/summary?profile_id=${profileId}&at=${encodeURIComponent(at)}`)]);
   const profile = collection.profiles.find(item => String(item.id) === profileId);
   document.getElementById('summary-time').textContent = `Requested at ${at}`;
   document.getElementById('profile-details').textContent = `${profile.purpose}, ${profile.window_hours}h window`;
+  const context = `profile_id=${encodeURIComponent(profileId)}&at=${encodeURIComponent(at)}`;
+  document.getElementById('tools').innerHTML = ['analyzer', 'matrix', 'failures'].map(tool =>
+    `<a class="btn btn-outline-primary btn-sm me-2" href="/collections/${collectionKey}/${tool}?${context}">${tool[0].toUpperCase() + tool.slice(1)}</a>`
+  ).join('');
   document.getElementById('tiles').innerHTML = selections.map(selection => selection.run_id
     ? `<article class="tile match"><strong>${selection.target_key}</strong><div class="detail">Selected Run</div><a href="/testRun/${selection.run_id}/index.html">${selection.run_id}</a><div class="detail"><a href="/api/test-runs?target=${selection.target_key}">Target history</a></div></article>`
     : `<article class="tile no-match"><strong>${selection.target_key}</strong><div class="detail">No matching run</div></article>`).join('');

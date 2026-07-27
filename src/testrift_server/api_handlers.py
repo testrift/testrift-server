@@ -32,7 +32,7 @@ from .utils import (
     TC_FULL_NAME_FIELD,
 )
 from . import database
-from .summary_profiles import select_profile_from_database
+from .summary_profiles import select_profile_from_database, resolve_run_set
 from .ai_analysis import create_collection_report
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,23 @@ def _validate_display_name(value):
 
 def _validation_error(error):
     return web.json_response({"success": False, "error": str(error)}, status=400)
+
+
+async def _context_run_ids(request):
+    """Return shared Run-set IDs when a Target or Collection context is requested."""
+    target_key = request.query.get("target")
+    collection_key = request.query.get("collection")
+    if not target_key and not collection_key:
+        return None
+    requested_at = request.query.get("at")
+    run_set = await resolve_run_set(
+        database.db,
+        target_key=target_key,
+        collection_key=collection_key,
+        profile_id=int(request.query["profile_id"]) if request.query.get("profile_id") else None,
+        requested_at=datetime.fromisoformat(requested_at.replace("Z", "+00:00")) if requested_at else None,
+    )
+    return run_set["run_ids"]
 
 
 async def api_targets_handler(request):
@@ -250,6 +267,22 @@ async def api_collection_report_handler(request):
         return _validation_error(error)
 
 
+async def api_run_set_handler(request):
+    """Resolve a reproducible Target or Collection/profile Run set for views."""
+    try:
+        requested_at = request.query.get("at")
+        run_set = await resolve_run_set(
+            database.db,
+            target_key=request.query.get("target"),
+            collection_key=request.query.get("collection"),
+            profile_id=int(request.query["profile_id"]) if request.query.get("profile_id") else None,
+            requested_at=datetime.fromisoformat(requested_at.replace("Z", "+00:00")) if requested_at else None,
+        )
+        return web.json_response({"success": True, "data": run_set})
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
 # --- Test Results Analyzer API ---
 
 async def api_test_runs_handler(request):
@@ -426,6 +459,7 @@ async def api_test_results_over_time_handler(request):
                 metadata_key = key[9:]  # Remove 'metadata.' prefix
                 metadata_filters[metadata_key] = value
 
+        run_ids = await _context_run_ids(request)
         group_hash = request.query.get('group') or request.query.get('group_hash')
         if group_hash and not validate_group_hash_value(group_hash):
             return web.json_response({
@@ -437,7 +471,8 @@ async def api_test_results_over_time_handler(request):
         results = await database.db.get_test_runs_over_time(
             days_back=days_back,
             metadata_filters=metadata_filters if metadata_filters else None,
-            group_hash=group_hash
+            group_hash=group_hash,
+            run_ids=run_ids,
         )
 
         # Log the results
@@ -647,6 +682,7 @@ async def api_failures_toplist_handler(request):
                 metadata_key = key[9:]  # Remove 'metadata.' prefix
                 metadata_filters[metadata_key] = value
 
+        run_ids = await _context_run_ids(request)
         group_hash = request.query.get('group')
         if group_hash and not validate_group_hash_value(group_hash):
             return web.json_response({
@@ -660,7 +696,8 @@ async def api_failures_toplist_handler(request):
                 days_back=days_back,
                 limit=1000,  # Get more to analyze symptoms
                 group_hash=group_hash,
-                metadata_filters=metadata_filters if metadata_filters else None
+                metadata_filters=metadata_filters if metadata_filters else None,
+                run_ids=run_ids,
             )
 
             # Cache loaded runs to avoid re-loading the same run multiple times
@@ -810,7 +847,8 @@ async def api_failures_toplist_handler(request):
                 days_back=days_back,
                 top_n=top_n,
                 group_hash=group_hash,
-                metadata_filters=metadata_filters if metadata_filters else None
+                metadata_filters=metadata_filters if metadata_filters else None,
+                run_ids=run_ids,
             )
 
             # Check if log files exist for each result while enriching identifiers
@@ -1552,6 +1590,7 @@ def get_routes():
         web.post("/api/collections/{key}/profiles", api_collection_profiles_handler),
         web.get("/api/collections/{key}/summary", api_collection_summary_handler),
         web.post("/api/collections/{key}/reports", api_collection_report_handler),
+        web.get("/api/run-set", api_run_set_handler),
         web.get("/api/profiles/{profile_id}", api_profile_handler),
         web.put("/api/profiles/{profile_id}", api_profile_handler),
         web.delete("/api/profiles/{profile_id}", api_profile_handler),

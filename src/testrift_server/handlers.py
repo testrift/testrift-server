@@ -920,6 +920,29 @@ async def collection_summary_handler(request):
         return web.Response(status=500, text=f"Error loading Collection summary: {str(e)}")
 
 
+async def target_handler(request):
+    """Serve Target Run discovery and navigation."""
+    try:
+        return web.Response(
+            text=render_template("target.html", target_key=request.match_info["key"]),
+            content_type="text/html",
+            headers=NO_CACHE_HEADERS,
+        )
+    except Exception as e:
+        logger.error(f"Error in target_handler: {e}")
+        return web.Response(status=500, text=f"Error loading Target: {str(e)}")
+
+
+async def target_tool_redirect_handler(request):
+    return web.HTTPFound(f"/{request.match_info['tool']}?target={request.match_info['key']}")
+
+
+async def collection_tool_redirect_handler(request):
+    query = request.rel_url.query_string
+    suffix = f"?collection={request.match_info['key']}" + (f"&{query}" if query else "")
+    return web.HTTPFound(f"/{request.match_info['tool']}{suffix}")
+
+
 async def server_log_handler(request):
     """Serve the server log page."""
     try:
@@ -947,7 +970,10 @@ def get_routes():
         web.get("/matrix", matrix_handler),
         web.get("/failures", failures_handler),
         web.get("/settings", settings_handler),
+        web.get("/targets/{key}", target_handler),
         web.get("/collections/{key}", collection_summary_handler),
+        web.get("/targets/{key}/{tool:analyzer|matrix|failures}", target_tool_redirect_handler),
+        web.get("/collections/{key}/{tool:analyzer|matrix|failures}", collection_tool_redirect_handler),
         web.get("/logs", server_log_handler),
     ]
 

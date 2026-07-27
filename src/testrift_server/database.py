@@ -1023,7 +1023,8 @@ class TestResultsDatabase:
         self,
         days_back: int = 30,
         metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None
+        group_hash: Optional[str] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get individual test runs over time for trending analysis."""
         async with self.get_connection() as db:
@@ -1059,6 +1060,11 @@ class TestResultsDatabase:
             if group_hash:
                 conditions.append("tr.group_hash = ?")
                 params.append(group_hash)
+            if run_ids is not None:
+                if not run_ids:
+                    return []
+                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
+                params.extend(run_ids)
 
             query += " WHERE " + " AND ".join(conditions)
             query += " GROUP BY tr.run_id, tr.start_time, tr.end_time, tr.status ORDER BY tr.start_time ASC"
@@ -1168,7 +1174,8 @@ class TestResultsDatabase:
         days_back: int = 30,
         limit: int = 100,
         group_hash: Optional[str] = None,
-        metadata_filters: Optional[Dict[str, str]] = None
+        metadata_filters: Optional[Dict[str, str]] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get failed test cases within a time range for failure analysis."""
         async with self.get_connection() as db:
@@ -1188,6 +1195,12 @@ class TestResultsDatabase:
             if group_hash:
                 conditions.append("tr.group_hash = ?")
                 params.append(group_hash)
+
+            if run_ids is not None:
+                if not run_ids:
+                    return []
+                conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
+                params.extend(run_ids)
 
             if metadata_filters:
                 for key, value in metadata_filters.items():
@@ -1212,7 +1225,8 @@ class TestResultsDatabase:
         days_back: int = 30,
         top_n: int = 20,
         group_hash: Optional[str] = None,
-        metadata_filters: Optional[Dict[str, str]] = None
+        metadata_filters: Optional[Dict[str, str]] = None,
+        run_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get top N test cases by failure count, including run_id of last failure."""
         async with self.get_connection() as db:
@@ -1226,6 +1240,12 @@ class TestResultsDatabase:
             if group_hash:
                 base_conditions.append("tr.group_hash = ?")
                 params.append(group_hash)
+
+            if run_ids is not None:
+                if not run_ids:
+                    return []
+                base_conditions.append("tr.run_id IN (" + ", ".join("?" for _ in run_ids) + ")")
+                params.extend(run_ids)
 
             if metadata_filters:
                 for key, value in metadata_filters.items():

@@ -465,7 +465,14 @@
     <script>
         let currentData = [];
         let metadataKeys = [];
-        const groupHash = new URLSearchParams(window.location.search).get('group');
+        const contextParams = new URLSearchParams(window.location.search);
+        const groupHash = null;
+
+        function appendContextParams(params) {
+            ['target', 'collection', 'profile_id', 'at'].forEach(key => {
+                if (contextParams.has(key)) params.set(key, contextParams.get(key));
+            });
+        }
 
         function resolveTestCaseStorageId(entry) {
             if (!entry) {
@@ -490,7 +497,6 @@
         // Initialize page
         document.addEventListener('DOMContentLoaded', async function() {
             await loadMetadataKeys();
-            await loadGroupContext();
             await loadData();
             initFiltersFromURL();
         });
@@ -593,9 +599,7 @@
             params.set('days', daysBack);
             params.set('top', topN);
 
-            if (groupHash) {
-                params.set('group', groupHash);
-            }
+            appendContextParams(params);
 
             // Add metadata filters
             const metadataFilters = document.querySelectorAll('.metadata-filter');
@@ -818,9 +822,7 @@
                 url.searchParams.set('top', topN);
             }
 
-            if (groupHash) {
-                url.searchParams.set('group', groupHash);
-            }
+            appendContextParams(url.searchParams);
 
             // Add metadata filters
             const metadataFilters = document.querySelectorAll('.metadata-filter');

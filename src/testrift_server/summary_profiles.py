@@ -90,6 +90,42 @@ async def select_profile_from_database(database: Any, profile_id: int, requested
     return select_representative_runs(profile, inputs["target_keys"], candidates, requested_at)
 
 
+async def resolve_run_set(
+    database: Any,
+    *,
+    target_key: str | None = None,
+    collection_key: str | None = None,
+    profile_id: int | None = None,
+    requested_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Resolve the sole Run set consumed by Target and Collection views."""
+    if bool(target_key) == bool(collection_key):
+        raise ValueError("Specify exactly one of target or collection")
+    if target_key:
+        target = await database.get_target(target_key)
+        if not target:
+            raise ValueError("Target not found")
+        runs = await database.get_test_runs(limit=1000, target_key=target_key)
+        return {"context": "target", "target_key": target_key, "run_ids": [run["run_id"] for run in runs], "missing_targets": []}
+
+    collection = await database.get_collection(collection_key)
+    if not collection:
+        raise ValueError("Collection not found")
+    profile_id = profile_id or next((profile["id"] for profile in collection["profiles"] if profile["is_primary"]), None)
+    if not profile_id or profile_id not in {profile["id"] for profile in collection["profiles"]}:
+        raise ValueError("A Collection Summary profile is required")
+    requested_at = _as_utc(requested_at or datetime.now(UTC))
+    selections = await select_profile_from_database(database, profile_id, requested_at)
+    return {
+        "context": "collection",
+        "collection_key": collection_key,
+        "profile_id": profile_id,
+        "requested_at": requested_at.isoformat().replace("+00:00", "Z"),
+        "run_ids": [selection.run_id for selection in selections if selection.run_id],
+        "missing_targets": [selection.target_key for selection in selections if not selection.run_id],
+    }
+
+
 def _selectors_for_target(
     selectors: tuple[SourceSelector, ...], target_key: str) -> dict[str, str]:
     defaults = {selector.source_role: selector.branch for selector in selectors if selector.target_key is None}

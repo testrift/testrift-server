@@ -495,15 +495,12 @@
         let metadataKeys = [];
         let groupHash = null;
         let groupDetails = null;
+        const contextParams = new URLSearchParams(window.location.search);
 
         // Initialize the page
         document.addEventListener('DOMContentLoaded', async function() {
             const urlParams = new URLSearchParams(window.location.search);
-            groupHash = urlParams.get('group');
             await loadMetadataKeys();
-            if (groupHash) {
-                await loadGroupContext(groupHash);
-            }
             loadFiltersFromURL();
             applyFilters();
         });
@@ -549,9 +546,9 @@
         }
 
         function appendGroupParam(params) {
-            if (groupHash) {
-                params.set('group', groupHash);
-            }
+            ['target', 'collection', 'profile_id', 'at'].forEach(key => {
+                if (contextParams.has(key)) params.set(key, contextParams.get(key));
+            });
         }
 
         // Add metadata filter from URL (without triggering value loading)
@@ -611,9 +608,7 @@
                 }
             });
 
-            if (groupHash) {
-                url.searchParams.set('group', groupHash);
-            }
+            appendGroupParam(url.searchParams);
 
             // Update URL without reloading page
             window.history.replaceState({}, '', url);
