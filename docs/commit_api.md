@@ -7,7 +7,7 @@ The TestRift server provides HTTP API endpoints for storing and retrieving commi
 ### Get last commits for a group
 
 ```
-GET /api/groups/{group_hash}/last-commits
+GET /api/runs/{run_id}/commit-baselines
 ```
 
 Returns the commit SHAs from the most recent completed run in the specified group.

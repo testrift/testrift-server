@@ -937,7 +937,6 @@ def get_routes():
     """Return list of routes for HTTP handlers."""
     routes = [
         web.get("/", index_handler),
-        web.get("/groups/{group_hash}", group_runs_handler),
         web.get("/testRun/{run_id}/index.html", test_run_index_handler),
         web.get("/testRun/{run_id}/log/{test_case_id}.html", test_case_log_handler),
         web.get("/testRun/{tail:.*}", static_handler),

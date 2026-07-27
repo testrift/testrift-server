@@ -1563,8 +1563,6 @@ def get_routes():
         web.get("/api/test-case/history-with-links", api_test_case_history_with_links_handler),
         web.get("/api/metadata/keys", api_metadata_keys_handler),
         web.get("/api/metadata/values", api_metadata_values_handler),
-        web.get("/api/groups/{group_hash}", api_group_details_handler),
-        web.get("/api/groups/{group_hash}/last-commits", api_group_last_commits_handler),
         web.get("/api/failures/toplist", api_failures_toplist_handler),
         web.get("/api/classifications/{run_id}", api_classifications_for_run_handler),
         web.get("/api/tc-hover-history", api_tc_hover_history_handler),
