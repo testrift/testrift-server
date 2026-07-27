@@ -242,6 +242,14 @@ async def api_test_runs_handler(request):
         limit = int(request.query.get('limit', 100))
         offset = int(request.query.get('offset', 0))
         status = request.query.get('status')
+        target_key = request.query.get('target')
+        purpose = request.query.get('purpose')
+        source_role = request.query.get('source_role')
+        source_branch = request.query.get('source_branch')
+        revision = request.query.get('revision')
+        start_at = request.query.get('start_at')
+        end_at = request.query.get('end_at')
+        collection_key = request.query.get('collection')
 
         # Parse metadata filters
         metadata_filters = {}
@@ -263,7 +271,15 @@ async def api_test_runs_handler(request):
             offset=offset,
             status_filter=status,
             metadata_filters=metadata_filters if metadata_filters else None,
-            group_hash=group_hash
+            group_hash=group_hash,
+            target_key=target_key,
+            purpose=purpose,
+            source_role=source_role,
+            source_branch=source_branch,
+            revision=revision,
+            start_at=start_at,
+            end_at=end_at,
+            collection_key=collection_key,
         )
 
         return web.json_response({

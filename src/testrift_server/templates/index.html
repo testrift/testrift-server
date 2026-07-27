@@ -631,6 +631,17 @@
                 </a>
             </div>
             {% endif %}
+            <form id="run-filters" class="d-flex flex-wrap gap-2 mb-3" aria-label="Run filters">
+              <input class="form-control form-control-sm" name="target" placeholder="Target" style="max-width: 150px">
+              <select class="form-select form-select-sm" name="purpose" style="max-width: 130px"><option value="">All purposes</option><option>nightly</option><option>release</option><option>feature</option><option>manual</option><option>sanity</option><option>rerun</option></select>
+              <input class="form-control form-control-sm" name="source_role" placeholder="Source role" style="max-width: 140px">
+              <input class="form-control form-control-sm" name="source_branch" placeholder="Exact branch" style="max-width: 150px">
+              <input class="form-control form-control-sm" name="revision" placeholder="Revision" style="max-width: 140px">
+              <input class="form-control form-control-sm" name="collection" placeholder="Collection" style="max-width: 140px">
+              <button class="btn btn-outline-primary btn-sm" type="submit">Filter</button>
+              <a class="btn btn-outline-secondary btn-sm" href="/">Clear</a>
+            </form>
+            <div id="run-filter-result" class="small text-muted mb-2"></div>
             <table class="runs-table">
                 <thead class="table-header">
                     <tr>
@@ -1499,6 +1510,18 @@
       badge.classList.remove('d-none');
     }
   }).catch(() => {});
+  const runFilters = document.getElementById('run-filters');
+  const filterParams = new URLSearchParams(window.location.search);
+  for (const input of runFilters.elements) if (input.name && filterParams.has(input.name)) input.value = filterParams.get(input.name);
+  runFilters.addEventListener('submit', async event => {
+    event.preventDefault();
+    const params = new URLSearchParams(new FormData(runFilters));
+    for (const [key, value] of [...params]) if (!value) params.delete(key);
+    history.replaceState(null, '', `/?${params}`);
+    const result = await fetch(`/api/test-runs?${params}`).then(response => response.json());
+    const message = document.getElementById('run-filter-result');
+    message.textContent = result.success ? `${result.data.length} matching Runs: ${result.data.map(run => run.run_id).join(', ') || 'none'}` : result.error;
+  });
   // Reconnect when coming back via back/forward cache
   window.addEventListener('pageshow', () => { connectUIWS(); });
 </script>

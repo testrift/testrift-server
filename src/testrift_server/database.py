@@ -757,7 +757,15 @@ class TestResultsDatabase:
         offset: int = 0,
         status_filter: Optional[str] = None,
         metadata_filters: Optional[Dict[str, str]] = None,
-        group_hash: Optional[str] = None
+        group_hash: Optional[str] = None,
+        target_key: Optional[str] = None,
+        purpose: Optional[str] = None,
+        source_role: Optional[str] = None,
+        source_branch: Optional[str] = None,
+        revision: Optional[str] = None,
+        start_at: Optional[str] = None,
+        end_at: Optional[str] = None,
+        collection_key: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get test runs with optional filtering."""
         async with self.get_connection() as db:
@@ -794,6 +802,36 @@ class TestResultsDatabase:
             if group_hash:
                 conditions.append("tr.group_hash = ?")
                 params.append(group_hash)
+
+            if target_key:
+                conditions.append("tr.target_key = ?")
+                params.append(target_key)
+            if purpose:
+                conditions.append("tr.purpose = ?")
+                params.append(purpose)
+            if start_at:
+                conditions.append("tr.start_time >= ?")
+                params.append(start_at)
+            if end_at:
+                conditions.append("tr.start_time <= ?")
+                params.append(end_at)
+            if source_role or source_branch or revision:
+                source_conditions = ["run_sources.run_id = tr.run_id"]
+                source_params = []
+                if source_role:
+                    source_conditions.append("run_sources.source_role = ?")
+                    source_params.append(source_role)
+                if source_branch:
+                    source_conditions.append("run_sources.branch = ?")
+                    source_params.append(source_branch)
+                if revision:
+                    source_conditions.append("run_sources.revision = ?")
+                    source_params.append(revision)
+                conditions.append("EXISTS (SELECT 1 FROM run_sources WHERE " + " AND ".join(source_conditions) + ")")
+                params.extend(source_params)
+            if collection_key:
+                conditions.append("EXISTS (SELECT 1 FROM collection_targets JOIN collections ON collections.id = collection_targets.collection_id JOIN targets ON targets.id = collection_targets.target_id WHERE targets.key = tr.target_key AND collections.key = ?)")
+                params.append(collection_key)
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
