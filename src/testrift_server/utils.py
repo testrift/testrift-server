@@ -9,12 +9,14 @@ import json
 import re
 import struct
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 
 import msgpack
 
 from . import config
+
+UTC = timezone.utc
 
 GROUP_HASH_LENGTH = 16
 CASE_STORAGE_DIR_NAME = "cases"

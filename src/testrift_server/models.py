@@ -6,7 +6,7 @@ TestRunData and TestCaseData classes for managing test run state.
 
 import asyncio
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 import aiofiles
 import msgpack
@@ -19,27 +19,40 @@ from .utils import (
     read_mplog,
     read_meta_msgpack,
     write_mplog_entries_async,
-    normalize_group_payload,
-    compute_group_hash,
     TC_ID_FIELD,
     TC_FULL_NAME_FIELD,
 )
 
 logger = logging.getLogger(__name__)
+UTC = timezone.utc
 
 
 class TestRunData:
     """Represents a test run with its metadata and test cases."""
     __test__ = False  # Tell pytest to ignore this class
 
-    def __init__(self, run_id, retention_days, local_run, user_metadata=None, group=None, group_hash=None, run_name=None, dut="TestDevice-001"):
+    def __init__(
+        self,
+        run_id,
+        retention_days,
+        local_run,
+        user_metadata=None,
+        target_key="",
+        purpose="manual",
+        parent_run_id=None,
+        sources=None,
+        run_name=None,
+        dut="TestDevice-001",
+    ):
         self.id = run_id
         self.dut = dut
         self.retention_days = retention_days
         self.local_run = local_run
         self.user_metadata = user_metadata or {}
-        self.group = normalize_group_payload(group)
-        self.group_hash = group_hash or (compute_group_hash(self.group) if self.group else None)
+        self.target_key = target_key
+        self.purpose = purpose
+        self.parent_run_id = parent_run_id
+        self.sources = sources or {}
         self.run_name = run_name  # Human-readable name displayed in UI
         self.status = "running"
         self.abort_reason = None  # Reason for abort (if status is "aborted")
@@ -70,13 +83,16 @@ class TestRunData:
             "retention_days": self.retention_days,
             "local_run": self.local_run,
             "user_metadata": self.user_metadata,
-            "group": self.group,
-            "group_hash": self.group_hash,
+            "target_key": self.target_key,
+            "purpose": self.purpose,
+            "sources": self.sources,
             "status": self.status,
             "start_time": self.start_time,
             "end_time": self.end_time,
             "test_cases": {tc_full_name: tc.to_dict() for tc_full_name, tc in self.test_cases.items()},
         }
+        if self.parent_run_id:
+            result["parent_run_id"] = self.parent_run_id
         if self.abort_reason:
             result["abort_reason"] = self.abort_reason
         # Include string table for interned component/channel strings
@@ -103,13 +119,12 @@ class TestRunData:
             meta.get("retention_days", 0),
             meta.get("local_run", False),
             meta.get("user_metadata", {}),
-            meta.get("group"),
-            meta.get("group_hash"),
+            meta.get("target_key", ""),
+            meta.get("purpose", "manual"),
+            meta.get("parent_run_id"),
+            meta.get("sources", {}),
             meta.get("run_name")
         )
-        # If group hash missing but group present, compute now
-        if run.group and not run.group_hash:
-            run.group_hash = compute_group_hash(run.group)
         run.status = meta.get("status", "running")
         run.abort_reason = meta.get("abort_reason")
         run.start_time = meta.get("start_time", datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z")

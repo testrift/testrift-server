@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 
 import msgpack
 from aiohttp import web
@@ -61,6 +61,9 @@ from .protocol import (
     F_LOCAL_RUN,
     F_ERROR,
     F_RUN_URL,
+    F_TARGET_URL,
+    F_COLLECTION_URLS,
+    F_TARGET_SETUP_STATE,
     F_METRICS,
     F_CPU,
     F_MEMORY,
@@ -84,8 +87,10 @@ from .utils import (
 )
 from .models import TestRunData, TestCaseData
 from . import database
+from .run_ingestion import IngestedRun, ingest_run_context
 
 logger = logging.getLogger(__name__)
+UTC = timezone.utc
 
 
 
@@ -152,23 +157,20 @@ class WebSocketServer:
             except Exception as e:
                 logger.error(f"Error in prepared runs cleanup: {e}")
 
-    async def get_unique_run_name(self, base_name: str, group_hash: str = None) -> str:
+    async def get_unique_run_name(self, base_name: str, target_key: str) -> str:
         """
-        Ensure run_name is unique within a group by appending a counter if needed.
+        Ensure run_name is unique within a Target by appending a counter if needed.
         E.g., "My Run" -> "My Run", "My Run 1", "My Run 2", etc.
         Names are scoped per group - the same name can exist in different groups.
         """
-        # Check both in-memory runs and database
         existing_names = set()
 
-        # Check in-memory runs (filter by group_hash)
         for run in self.test_runs.values():
-            if run.run_name and run.group_hash == group_hash:
+            if run.run_name and run.target_key == target_key:
                 existing_names.add(run.run_name)
 
-        # Check database (filter by group_hash)
         try:
-            db_names = await database.db.get_run_names_starting_with(base_name, group_hash)
+            db_names = await database.db.get_run_names_starting_with(base_name, target_key)
             existing_names.update(db_names)
         except Exception as e:
             logger.error(f"Error checking existing run names: {e}")
@@ -446,15 +448,12 @@ class WebSocketServer:
             retention_days = data.get("retention_days", DEFAULT_RETENTION_DAYS)
             local_run = data.get("local_run", False)
             user_metadata = data.get("user_metadata", {})
-            group_payload = None
-            group_hash = None
-
             # Get or generate run_name
             run_name = data.get("run_name")
             if not run_name:
                 run_name = datetime.now(UTC).strftime("Run %Y-%m-%d %H:%M:%S")
 
-            run_name = await self.get_unique_run_name(run_name, group_hash)
+            run_name = await self.get_unique_run_name(run_name, data["target_key"])
 
             # Compute deletes_at for server-side retention
             try:
@@ -467,14 +466,25 @@ class WebSocketServer:
                 deletes_at = None
 
             # Store as prepared run (not active yet)
+            ingested = await ingest_run_context(
+                database.db,
+                run_id=run_id,
+                context=data,
+                status="preparing",
+                retention_days=retention_days,
+                local_run=local_run,
+                user_metadata=user_metadata,
+                run_name=run_name,
+                start_time=data.get("start_time"),
+            )
+
             self.prepared_runs[run_id] = {
                 "run_id": run_id,
                 "run_name": run_name,
                 "retention_days": retention_days,
                 "local_run": local_run,
                 "user_metadata": user_metadata,
-                "group_payload": group_payload,
-                "group_hash": group_hash,
+                "ingested": ingested,
                 "deletes_at": deletes_at,
                 "created_at": datetime.now(UTC),
             }
@@ -483,19 +493,6 @@ class WebSocketServer:
             run_path = get_run_path(run_id)
             run_path.mkdir(parents=True, exist_ok=True)
 
-            # Insert into database so commits can reference this run_id via foreign key
-            # Use 'preparing' status - will be updated to 'running' when NUnit connects
-            await database.log_test_run_started(
-                run_id=run_id,
-                retention_days=retention_days,
-                local_run=local_run,
-                user_metadata=user_metadata,
-                run_name=run_name,
-                group_name=group_payload.get("name") if group_payload else None,
-                group_hash=group_hash,
-                status="preparing",
-            )
-
             log_event("run_prepared", run_id=run_id, run_name=run_name)
 
             # Send response
@@ -503,6 +500,9 @@ class WebSocketServer:
                 F_TYPE: MSG_RUN_PREPARE_RESPONSE,
                 F_RUN_ID: run_id,
                 F_RUN_NAME: run_name,
+                F_TARGET_URL: ingested.target_url,
+                F_COLLECTION_URLS: ingested.collection_urls,
+                F_TARGET_SETUP_STATE: ingested.target_setup_state,
             }
             await send_msgpack(ws, response)
 
@@ -535,20 +535,39 @@ class WebSocketServer:
             retention_days = data.get("retention_days", DEFAULT_RETENTION_DAYS)
             local_run = data.get("local_run", False)
             user_metadata = data.get("user_metadata", {})
-            group_payload = None
-            group_hash = None
-
             # Get or generate run_name
             run_name = data.get("run_name")
             if not run_name:
                 run_name = datetime.now(UTC).strftime("Run %Y-%m-%d %H:%M:%S")
 
-            run_name = await self.get_unique_run_name(run_name, group_hash)
+            run_name = await self.get_unique_run_name(run_name, data["target_key"])
             start_time = data.get("start_time")
+
+            ingested = await ingest_run_context(
+                database.db,
+                run_id=run_id,
+                context=data,
+                status="running",
+                retention_days=retention_days,
+                local_run=local_run,
+                user_metadata=user_metadata,
+                run_name=run_name,
+                start_time=start_time,
+            )
 
             if run_id in self.test_runs:
                 self.test_runs.pop(run_id)
-            run = TestRunData(run_id, retention_days, local_run, user_metadata, group_payload, group_hash, run_name)
+            run = TestRunData(
+                run_id,
+                retention_days,
+                local_run,
+                user_metadata,
+                ingested.target_key,
+                ingested.purpose,
+                ingested.parent_run_id,
+                ingested.sources,
+                run_name,
+            )
 
             if start_time:
                 run.start_time = start_time
@@ -583,21 +602,6 @@ class WebSocketServer:
 
             log_event("run_started", run_id=run_id, run_name=run_name, retention_days=retention_days, deletes_at=deletes_at, user_metadata=user_metadata)
 
-            # Log to database
-            try:
-                await database.log_test_run_started(
-                    run_id,
-                    retention_days,
-                    local_run,
-                    user_metadata,
-                    run_name=run_name,
-                    group_name=group_payload["name"] if group_payload else None,
-                    group_hash=group_hash,
-                    group_metadata=(group_payload or {}).get("metadata")
-                )
-            except Exception as db_error:
-                logger.error(f"Database logging error for run_started: {db_error}")
-
             # Broadcast to UI clients
             await self.broadcast_ui({"type": "run_started", "run": meta_dict})
 
@@ -606,7 +610,10 @@ class WebSocketServer:
                 F_TYPE: MSG_RUN_STARTED_RESPONSE,
                 F_RUN_ID: run_id,
                 F_RUN_NAME: run_name,
-                F_RUN_URL: f"/testRun/{run_id}/index.html"
+                F_RUN_URL: f"/testRun/{run_id}/index.html",
+                F_TARGET_URL: ingested.target_url,
+                F_COLLECTION_URLS: ingested.collection_urls,
+                F_TARGET_SETUP_STATE: ingested.target_setup_state,
             }
             await send_msgpack(ws, response)
 
@@ -614,25 +621,53 @@ class WebSocketServer:
 
         except Exception as e:
             logger.error(f"Error in run_started: {e}")
-            import traceback
-            traceback.print_exc()
+            await send_msgpack(ws, {
+                F_TYPE: MSG_RUN_STARTED_RESPONSE,
+                F_ERROR: str(e),
+            })
             return None
 
     async def _activate_prepared_run(self, ws, run_id, data, string_table):
         """Activate a prepared run when NUnit connects."""
-        prepared = self.prepared_runs.pop(run_id)
+        prepared = self.prepared_runs[run_id]
 
         retention_days = prepared["retention_days"]
         local_run = prepared["local_run"]
         user_metadata = prepared["user_metadata"]
-        group_payload = prepared["group_payload"]
-        group_hash = prepared["group_hash"]
+        ingested: IngestedRun = prepared["ingested"]
         run_name = prepared["run_name"]
         deletes_at = prepared["deletes_at"]
 
         start_time = data.get("start_time")
 
-        run = TestRunData(run_id, retention_days, local_run, user_metadata, group_payload, group_hash, run_name)
+        duplicate_context = {
+            key: data[key]
+            for key in ("target_key", "purpose", "parent_run_id", "sources")
+            if key in data
+        }
+        authoritative_context = {
+            "target_key": ingested.target_key,
+            "purpose": ingested.purpose,
+            "sources": ingested.sources,
+        }
+        if ingested.parent_run_id:
+            authoritative_context["parent_run_id"] = ingested.parent_run_id
+        if duplicate_context and duplicate_context != authoritative_context:
+            raise ValueError("Prepared Run context conflicts with collector context")
+
+        self.prepared_runs.pop(run_id)
+
+        run = TestRunData(
+            run_id,
+            retention_days,
+            local_run,
+            user_metadata,
+            ingested.target_key,
+            ingested.purpose,
+            ingested.parent_run_id,
+            ingested.sources,
+            run_name,
+        )
 
         if start_time:
             run.start_time = start_time
@@ -662,7 +697,10 @@ class WebSocketServer:
             F_TYPE: MSG_RUN_STARTED_RESPONSE,
             F_RUN_ID: run_id,
             F_RUN_NAME: run_name,
-            F_RUN_URL: f"/testRun/{run_id}/index.html"
+            F_RUN_URL: f"/testRun/{run_id}/index.html",
+            F_TARGET_URL: ingested.target_url,
+            F_COLLECTION_URLS: ingested.collection_urls,
+            F_TARGET_SETUP_STATE: ingested.target_setup_state,
         }
         await send_msgpack(ws, response)
 

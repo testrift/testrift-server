@@ -313,6 +313,20 @@ class TestResultsDatabase:
             row = await cursor.fetchone()
             return dict(zip([column[0] for column in cursor.description], row))
 
+    async def get_collection_keys_for_target(self, target_key: str) -> List[str]:
+        """Return server-managed Collection keys for one Target."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """SELECT collections.key
+                   FROM collections
+                   JOIN collection_targets ON collection_targets.collection_id = collections.id
+                   JOIN targets ON targets.id = collection_targets.target_id
+                   WHERE targets.key = ?
+                   ORDER BY collections.key""",
+                (target_key,),
+            )
+            return [row[0] for row in await cursor.fetchall()]
+
     async def create_collection(
         self,
         key: str,
@@ -596,21 +610,14 @@ class TestResultsDatabase:
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
 
-    async def get_run_names_starting_with(self, base_name: str, group_hash: str = None) -> List[str]:
-        """Get all run_names that start with a given base name, optionally filtered by group."""
+    async def get_run_names_starting_with(self, base_name: str, target_key: str) -> List[str]:
+        """Get all Run names that start with a base name for one Target."""
         async with self.get_connection() as db:
-            if group_hash:
-                cursor = await db.execute("""
-                    SELECT run_name FROM test_runs
-                    WHERE (run_name = ? OR run_name LIKE ?) AND group_hash = ?
-                    ORDER BY run_name
-                """, (base_name, f"{base_name} %", group_hash))
-            else:
-                cursor = await db.execute("""
-                    SELECT run_name FROM test_runs
-                    WHERE (run_name = ? OR run_name LIKE ?) AND group_hash IS NULL
-                    ORDER BY run_name
-                """, (base_name, f"{base_name} %"))
+            cursor = await db.execute("""
+                SELECT run_name FROM test_runs
+                WHERE (run_name = ? OR run_name LIKE ?) AND target_key = ?
+                ORDER BY run_name
+            """, (base_name, f"{base_name} %", target_key))
 
             rows = await cursor.fetchall()
             return [row[0] for row in rows if row[0]]

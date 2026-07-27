@@ -147,6 +147,7 @@ F_SOURCE_DIRTY = "dy"     # Source local dirty state (bool)
 F_RUN_URL = "ru"          # Run URL (string)
 F_TARGET_URL = "tu"       # Target URL (string)
 F_COLLECTION_URLS = "cu"  # Collection URLs (array)
+F_TARGET_SETUP_STATE = "tss"  # Target setup state (string)
 
 # Counts (for UI updates)
 F_COUNTS = "ct"           # Counts object
