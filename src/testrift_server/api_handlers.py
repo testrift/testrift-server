@@ -7,6 +7,8 @@ All /api/* endpoints for test results analysis and data access.
 import asyncio
 import logging
 import os
+import re
+from datetime import datetime, timezone
 
 from aiohttp import web
 
@@ -30,8 +32,191 @@ from .utils import (
     TC_FULL_NAME_FIELD,
 )
 from . import database
+from .summary_profiles import select_profile_from_database
 
 logger = logging.getLogger(__name__)
+
+TARGET_KEY_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PURPOSES = {"nightly", "release", "feature", "manual", "sanity", "rerun"}
+
+
+async def _json_body(request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise ValueError("JSON body must be an object")
+    return body
+
+
+def _validate_key(value, field="key"):
+    if not isinstance(value, str) or not TARGET_KEY_PATTERN.fullmatch(value):
+        raise ValueError(f"{field} must contain lowercase letters, digits, and hyphens")
+    return value
+
+
+def _validate_display_name(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("display_name cannot be blank")
+    return value.strip()
+
+
+def _validation_error(error):
+    return web.json_response({"success": False, "error": str(error)}, status=400)
+
+
+async def api_targets_handler(request):
+    if request.method == "GET":
+        targets = await database.db.list_targets(request.query.get("needs_setup") == "true")
+        return web.json_response({"success": True, "data": targets})
+    try:
+        body = await _json_body(request)
+        key = _validate_key(body.get("key"), "key")
+        target = await database.db.get_or_create_target(key, _validate_display_name(body.get("display_name", key)))
+        return web.json_response({"success": True, "data": target}, status=201)
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
+async def api_target_handler(request):
+    key = request.match_info["key"]
+    if request.method == "GET":
+        target = await database.db.get_target(key)
+        return web.json_response({"success": True, "data": target}) if target else web.json_response({"success": False, "error": "Target not found"}, status=404)
+    if request.method == "DELETE":
+        if request.query.get("cascade") != "true":
+            return _validation_error("Target deletion requires cascade=true")
+        deleted = await database.db.delete_target(key)
+        return web.json_response({"success": True}) if deleted else web.json_response({"success": False, "error": "Target not found"}, status=404)
+    try:
+        body = await _json_body(request)
+        state = body.get("setup_state")
+        if state not in {"needs_setup", "ready"}:
+            raise ValueError("setup_state must be needs_setup or ready")
+        target = await database.db.update_target(key, _validate_display_name(body.get("display_name")), state)
+        return web.json_response({"success": True, "data": target}) if target else web.json_response({"success": False, "error": "Target not found"}, status=404)
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
+async def api_collections_handler(request):
+    if request.method == "GET":
+        return web.json_response({"success": True, "data": await database.db.list_collections()})
+    try:
+        body = await _json_body(request)
+        collection_id = await database.db.create_collection(
+            _validate_key(body.get("key"), "key"), _validate_display_name(body.get("display_name")), body.get("description"),
+            bool(body.get("ai_summary_enabled", False)), bool(body.get("email_enabled", False)), body.get("recipients", []),
+        )
+        return web.json_response({"success": True, "data": {"id": collection_id}}, status=201)
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+    except Exception as error:
+        return web.json_response({"success": False, "error": str(error)}, status=409)
+
+
+async def api_collection_handler(request):
+    key = request.match_info["key"]
+    if request.method == "GET":
+        collection = await database.db.get_collection(key)
+        return web.json_response({"success": True, "data": collection}) if collection else web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    if request.method == "DELETE":
+        if request.query.get("cascade") != "true":
+            return _validation_error("Collection deletion requires cascade=true")
+        deleted = await database.db.delete_collection(key)
+        return web.json_response({"success": True}) if deleted else web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    try:
+        body = await _json_body(request)
+        collection = await database.db.update_collection(key, {**body, "display_name": _validate_display_name(body.get("display_name"))})
+        return web.json_response({"success": True, "data": collection}) if collection else web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
+async def api_collection_members_handler(request):
+    collection = await database.db.get_collection(request.match_info["key"])
+    if not collection:
+        return web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    try:
+        target_ids = (await _json_body(request)).get("target_ids")
+        if not isinstance(target_ids, list) or len(target_ids) != len(set(target_ids)):
+            raise ValueError("target_ids must be a unique list")
+        known_targets = {target["id"] for target in await database.db.list_targets()}
+        if not set(target_ids).issubset(known_targets):
+            raise ValueError("target_ids contains an unknown Target")
+        await database.db.replace_collection_membership(collection["id"], target_ids)
+        return web.json_response({"success": True})
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
+def _profile_values(body):
+    name = _validate_display_name(body.get("name"))
+    purpose = body.get("purpose")
+    window_hours = body.get("window_hours")
+    if purpose not in PURPOSES:
+        raise ValueError("purpose is unsupported")
+    if not isinstance(window_hours, int) or window_hours <= 0:
+        raise ValueError("window_hours must be a positive integer")
+    selectors = body.get("selectors", [])
+    if not isinstance(selectors, list) or any(
+        not isinstance(selector, dict) or not isinstance(selector.get("source_role"), str) or not selector["source_role"].strip()
+        or not isinstance(selector.get("branch"), str) or not selector["branch"].strip()
+        for selector in selectors
+    ):
+        raise ValueError("selectors must contain nonblank source_role and exact branch")
+    return name, purpose, window_hours, selectors
+
+
+async def api_collection_profiles_handler(request):
+    collection = await database.db.get_collection(request.match_info["key"])
+    if not collection:
+        return web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    try:
+        body = await _json_body(request)
+        name, purpose, window_hours, selectors = _profile_values(body)
+        profile_id = await database.db.create_summary_profile(collection["id"], name, purpose, window_hours, bool(body.get("is_primary", False)))
+        await database.db.replace_summary_profile_sources(profile_id, [(item["source_role"], item["branch"], item.get("target_id")) for item in selectors])
+        return web.json_response({"success": True, "data": await database.db.get_summary_profile(profile_id)}, status=201)
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+    except Exception as error:
+        return web.json_response({"success": False, "error": str(error)}, status=409)
+
+
+async def api_profile_handler(request):
+    profile_id = int(request.match_info["profile_id"])
+    if request.method == "GET":
+        profile = await database.db.get_summary_profile(profile_id)
+        return web.json_response({"success": True, "data": profile}) if profile else web.json_response({"success": False, "error": "Profile not found"}, status=404)
+    if request.method == "DELETE":
+        if request.query.get("cascade") != "true":
+            return _validation_error("Profile deletion requires cascade=true")
+        deleted = await database.db.delete_summary_profile(profile_id)
+        return web.json_response({"success": True}) if deleted else web.json_response({"success": False, "error": "Profile not found"}, status=404)
+    try:
+        body = await _json_body(request)
+        name, purpose, window_hours, selectors = _profile_values(body)
+        updated = await database.db.update_summary_profile(profile_id, {**body, "name": name, "purpose": purpose, "window_hours": window_hours})
+        if not updated:
+            return web.json_response({"success": False, "error": "Profile not found"}, status=404)
+        await database.db.replace_summary_profile_sources(profile_id, [(item["source_role"], item["branch"], item.get("target_id")) for item in selectors])
+        return web.json_response({"success": True, "data": await database.db.get_summary_profile(profile_id)})
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
+async def api_collection_summary_handler(request):
+    collection = await database.db.get_collection(request.match_info["key"])
+    if not collection:
+        return web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    profile_id = request.query.get("profile_id") or next((profile["id"] for profile in collection["profiles"] if profile["is_primary"]), None)
+    if not profile_id:
+        return _validation_error("A profile_id or primary profile is required")
+    try:
+        requested_at = datetime.fromisoformat(request.query.get("at", "").replace("Z", "+00:00"))
+        selections = await select_profile_from_database(database.db, int(profile_id), requested_at.astimezone(timezone.utc))
+        return web.json_response({"success": True, "data": [selection.__dict__ for selection in selections]})
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
 
 
 # --- Test Results Analyzer API ---
@@ -1293,6 +1478,22 @@ async def api_logs_handler(request):
 def get_routes():
     """Return list of routes for API handlers."""
     return [
+        web.get("/api/targets", api_targets_handler),
+        web.post("/api/targets", api_targets_handler),
+        web.get("/api/targets/{key}", api_target_handler),
+        web.put("/api/targets/{key}", api_target_handler),
+        web.delete("/api/targets/{key}", api_target_handler),
+        web.get("/api/collections", api_collections_handler),
+        web.post("/api/collections", api_collections_handler),
+        web.get("/api/collections/{key}", api_collection_handler),
+        web.put("/api/collections/{key}", api_collection_handler),
+        web.delete("/api/collections/{key}", api_collection_handler),
+        web.put("/api/collections/{key}/members", api_collection_members_handler),
+        web.post("/api/collections/{key}/profiles", api_collection_profiles_handler),
+        web.get("/api/collections/{key}/summary", api_collection_summary_handler),
+        web.get("/api/profiles/{profile_id}", api_profile_handler),
+        web.put("/api/profiles/{profile_id}", api_profile_handler),
+        web.delete("/api/profiles/{profile_id}", api_profile_handler),
         web.get("/api/test-runs", api_test_runs_handler),
         web.get("/api/test-runs/{run_id}", api_test_run_details_handler),
         web.get("/api/test-results/for-runs", api_test_results_for_runs_handler),

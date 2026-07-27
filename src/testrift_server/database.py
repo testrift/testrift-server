@@ -313,6 +313,35 @@ class TestResultsDatabase:
             row = await cursor.fetchone()
             return dict(zip([column[0] for column in cursor.description], row))
 
+    async def list_targets(self, needs_setup_only: bool = False) -> List[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            query = "SELECT * FROM targets"
+            if needs_setup_only:
+                query += " WHERE setup_state = 'needs_setup'"
+            cursor = await db.execute(query + " ORDER BY key")
+            return [dict(zip([column[0] for column in cursor.description], row)) for row in await cursor.fetchall()]
+
+    async def get_target(self, key: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM targets WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            return dict(zip([column[0] for column in cursor.description], row)) if row else None
+
+    async def update_target(self, key: str, display_name: str, setup_state: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            await db.execute(
+                "UPDATE targets SET display_name = ?, setup_state = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+                (display_name, setup_state, key),
+            )
+            await db.commit()
+        return await self.get_target(key)
+
+    async def delete_target(self, key: str) -> bool:
+        async with self.get_connection() as db:
+            cursor = await db.execute("DELETE FROM targets WHERE key = ?", (key,))
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def get_collection_keys_for_target(self, target_key: str) -> List[str]:
         """Return server-managed Collection keys for one Target."""
         async with self.get_connection() as db:
@@ -346,6 +375,78 @@ class TestResultsDatabase:
             )
             await db.commit()
             return cursor.lastrowid
+
+    async def list_collections(self) -> List[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM collections ORDER BY key")
+            return [self._collection_row(cursor, row) for row in await cursor.fetchall()]
+
+    async def get_collection(self, key: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM collections WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            collection = self._collection_row(cursor, row)
+            members = await db.execute(
+                "SELECT targets.* FROM targets JOIN collection_targets ON collection_targets.target_id = targets.id WHERE collection_targets.collection_id = ? ORDER BY targets.key",
+                (collection["id"],),
+            )
+            collection["targets"] = [dict(zip([column[0] for column in members.description], item)) for item in await members.fetchall()]
+            profiles = await db.execute("SELECT * FROM summary_profiles WHERE collection_id = ? ORDER BY name", (collection["id"],))
+            collection["profiles"] = [dict(zip([column[0] for column in profiles.description], item)) for item in await profiles.fetchall()]
+            return collection
+
+    @staticmethod
+    def _collection_row(cursor: Any, row: Any) -> Dict[str, Any]:
+        collection = dict(zip([column[0] for column in cursor.description], row))
+        collection["recipients"] = json.loads(collection.pop("recipients_json"))
+        return collection
+
+    async def update_collection(self, key: str, values: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """UPDATE collections SET display_name = ?, description = ?, ai_summary_enabled = ?,
+                   email_enabled = ?, recipients_json = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?""",
+                (values["display_name"], values.get("description"), values.get("ai_summary_enabled", False), values.get("email_enabled", False), json.dumps(values.get("recipients", [])), key),
+            )
+            await db.commit()
+            if cursor.rowcount != 1:
+                return None
+        return await self.get_collection(key)
+
+    async def delete_collection(self, key: str) -> bool:
+        async with self.get_connection() as db:
+            cursor = await db.execute("DELETE FROM collections WHERE key = ?", (key,))
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def get_summary_profile(self, profile_id: int) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM summary_profiles WHERE id = ?", (profile_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            profile = dict(zip([column[0] for column in cursor.description], row))
+            selectors = await db.execute("SELECT source_role, branch, target_id FROM summary_profile_sources WHERE profile_id = ?", (profile_id,))
+            profile["selectors"] = [dict(zip([column[0] for column in selectors.description], item)) for item in await selectors.fetchall()]
+            return profile
+
+    async def update_summary_profile(self, profile_id: int, values: Dict[str, Any]) -> bool:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """UPDATE summary_profiles SET name = ?, is_primary = ?, purpose = ?, window_hours = ?,
+                   selection_policy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                (values["name"], values.get("is_primary", False), values["purpose"], values["window_hours"], values.get("selection_policy", "latest-completed-per-target"), profile_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def delete_summary_profile(self, profile_id: int) -> bool:
+        async with self.get_connection() as db:
+            cursor = await db.execute("DELETE FROM summary_profiles WHERE id = ?", (profile_id,))
+            await db.commit()
+            return cursor.rowcount == 1
 
     async def replace_collection_membership(self, collection_id: int, target_ids: List[int]) -> None:
         """Atomically replace a Collection's explicitly managed Target membership."""
