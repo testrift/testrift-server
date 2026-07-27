@@ -20,7 +20,7 @@ MSG_HEARTBEAT = 9
 MSG_STRING_TABLE = 10  # For registering component/channel strings
 MSG_METRICS = 11       # System metrics (CPU, memory)
 MSG_RUN_PREPARE = 12   # Prepare a run (from collector, before NUnit connects)
-MSG_RUN_PREPARE_RESPONSE = 13  # Response with run_id and group_hash
+MSG_RUN_PREPARE_RESPONSE = 13  # Response with prepared run_id
 
 # Reverse lookup for logging/debugging
 MSG_TYPE_NAMES = {
@@ -130,18 +130,23 @@ F_IS_ERROR = "ie"         # Is error flag (bool)
 
 # Run metadata fields
 F_USER_METADATA = "md"    # User metadata (object)
-F_GROUP = "g"             # Group info (object)
-F_GROUP_NAME = "gn"       # Group name (string)
-F_GROUP_METADATA = "gm"   # Group metadata (object)
-F_GROUP_HASH = "gh"       # Group hash (string)
 F_RETENTION_DAYS = "rd"   # Retention days (int)
 F_LOCAL_RUN = "lr"        # Local run flag (bool)
 F_START_TIME = "st"       # Start time (int64 ms)
 F_END_TIME = "et"         # End time (int64 ms)
+F_TARGET_KEY = "tk"       # Stable Target key (string)
+F_PURPOSE = "pu"          # Run purpose (string)
+F_PARENT_RUN_ID = "pr"    # Parent Run ID for reruns (string)
+F_SOURCES = "so"          # Source-role map (object)
+F_SOURCE_BRANCH = "br"    # Source branch (string)
+F_SOURCE_REVISION = "rv"  # Source revision (string)
+F_SOURCE_REPOSITORY_URL = "repo"  # Source repository URL (string)
+F_SOURCE_DIRTY = "dy"     # Source local dirty state (bool)
 
 # Response fields
 F_RUN_URL = "ru"          # Run URL (string)
-F_GROUP_URL = "gu"        # Group URL (string)
+F_TARGET_URL = "tu"       # Target URL (string)
+F_COLLECTION_URLS = "cu"  # Collection URLs (array)
 
 # Counts (for UI updates)
 F_COUNTS = "ct"           # Counts object

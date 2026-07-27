@@ -36,9 +36,11 @@ from testrift_server.protocol import (
     F_USER_METADATA,
     F_RETENTION_DAYS,
     F_LOCAL_RUN,
-    F_GROUP,
-    F_GROUP_NAME,
-    F_GROUP_METADATA,
+    F_TARGET_KEY,
+    F_PURPOSE,
+    F_SOURCES,
+    F_SOURCE_BRANCH,
+    F_SOURCE_REVISION,
     MSG_TYPE_NAMES,
     STATUS_NAMES,
 )
@@ -136,9 +138,13 @@ class TestOptimizedProtocolFormat:
             {
                 F_TYPE: MSG_RUN_STARTED,
                 F_USER_METADATA: {"DUT": {"value": "TestDevice-001"}},
-                F_GROUP: {
-                    F_GROUP_NAME: "Product A",
-                    F_GROUP_METADATA: {"Branch": {"value": "main"}}
+                F_TARGET_KEY: "product-a",
+                F_PURPOSE: "nightly",
+                F_SOURCES: {
+                    "firmware": {
+                        F_SOURCE_BRANCH: "main",
+                        F_SOURCE_REVISION: "abc123",
+                    }
                 },
                 F_RETENTION_DAYS: 7,
                 F_LOCAL_RUN: False,

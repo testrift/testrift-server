@@ -44,15 +44,20 @@ from .protocol import (
     F_STACK_TRACE,
     F_IS_ERROR,
     F_USER_METADATA,
-    F_GROUP,
-    F_GROUP_NAME,
-    F_GROUP_METADATA,
     F_RETENTION_DAYS,
     F_LOCAL_RUN,
     F_ERROR,
     F_RUN_URL,
-    F_GROUP_URL,
-    F_GROUP_HASH,
+    F_TARGET_KEY,
+    F_PURPOSE,
+    F_PARENT_RUN_ID,
+    F_SOURCES,
+    F_SOURCE_BRANCH,
+    F_SOURCE_REVISION,
+    F_SOURCE_REPOSITORY_URL,
+    F_SOURCE_DIRTY,
+    F_TARGET_URL,
+    F_COLLECTION_URLS,
     F_METRICS,
     F_CPU,
     F_MEMORY,
@@ -97,7 +102,6 @@ def normalize_message(data: Dict[str, Any], string_table: Dict[int, str]) -> Dic
         F_TC_ID: "tc_id",
         F_MESSAGE: "message",
         F_USER_METADATA: "user_metadata",
-        F_GROUP: "group",
         F_RETENTION_DAYS: "retention_days",
         F_LOCAL_RUN: "local_run",
         F_ERROR: "error",
@@ -108,8 +112,8 @@ def normalize_message(data: Dict[str, Any], string_table: Dict[int, str]) -> Dic
         F_EVENTS: "events",
         F_EVENT_TYPE: "event_type",
         F_RUN_URL: "run_url",
-        F_GROUP_URL: "group_url",
-        F_GROUP_HASH: "group_hash",
+        F_TARGET_URL: "target_url",
+        F_COLLECTION_URLS: "collection_urls",
         F_METRICS: "metrics",
     }
 
@@ -122,21 +126,13 @@ def normalize_message(data: Dict[str, Any], string_table: Dict[int, str]) -> Dic
                 value = ms_to_timestamp(value)
             result[long_key] = value
 
-    # Normalize nested group object keys
-    if "group" in result and isinstance(result["group"], dict):
-        raw_group = result["group"]
-        normalized_group = {}
-        if F_GROUP_NAME in raw_group:
-            normalized_group["name"] = raw_group[F_GROUP_NAME]
-        elif "name" in raw_group:
-            normalized_group["name"] = raw_group["name"]
-        if F_GROUP_METADATA in raw_group:
-            normalized_group["metadata"] = raw_group[F_GROUP_METADATA]
-        elif "metadata" in raw_group:
-            normalized_group["metadata"] = raw_group["metadata"]
-        # Note: F_GROUP_HASH is not used in normalize_group_payload
-        # The server computes its own hash from name + metadata
-        result["group"] = normalized_group
+    if msg_type in ("run_prepare", "run_started"):
+        is_prepared_run_activation = msg_type == "run_started" and F_RUN_ID in data
+        has_context_fields = any(
+            field in data for field in (F_TARGET_KEY, F_PURPOSE, F_PARENT_RUN_ID, F_SOURCES)
+        )
+        if not is_prepared_run_activation or has_context_fields:
+            result.update(normalize_run_context(data))
 
     if "start_time" not in result and "timestamp" in result:
         result["start_time"] = result["timestamp"]
@@ -167,6 +163,64 @@ def normalize_message(data: Dict[str, Any], string_table: Dict[int, str]) -> Dic
         ]
 
     return result
+
+
+_RUN_PURPOSES = {"nightly", "release", "feature", "manual", "sanity", "rerun"}
+
+
+def normalize_run_context(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and expand compact Target and source context fields."""
+    target_key = _required_trimmed_string(data.get(F_TARGET_KEY), "target_key")
+    purpose = _required_trimmed_string(data.get(F_PURPOSE), "purpose").lower()
+    if purpose not in _RUN_PURPOSES:
+        raise ValueError(f"Unsupported purpose: {purpose}")
+
+    parent_run_id = data.get(F_PARENT_RUN_ID)
+    if purpose == "rerun":
+        parent_run_id = _required_trimmed_string(parent_run_id, "parent_run_id")
+    elif parent_run_id is not None:
+        raise ValueError("parent_run_id is only allowed for rerun purpose")
+
+    raw_sources = data.get(F_SOURCES)
+    if not isinstance(raw_sources, dict):
+        raise ValueError("sources must be a map keyed by source role")
+
+    sources: Dict[str, Dict[str, Any]] = {}
+    for source_role, raw_source in raw_sources.items():
+        role = _required_trimmed_string(source_role, "source role")
+        if not isinstance(raw_source, dict):
+            raise ValueError(f"source '{role}' must be an object")
+
+        source = {
+            "branch": _required_trimmed_string(raw_source.get(F_SOURCE_BRANCH), f"source '{role}' branch"),
+            "revision": _required_trimmed_string(raw_source.get(F_SOURCE_REVISION), f"source '{role}' revision"),
+        }
+        repository_url = raw_source.get(F_SOURCE_REPOSITORY_URL)
+        if repository_url is not None:
+            source["repository_url"] = _required_trimmed_string(
+                repository_url, f"source '{role}' repository_url"
+            )
+        dirty = raw_source.get(F_SOURCE_DIRTY)
+        if dirty is not None:
+            if not isinstance(dirty, bool):
+                raise ValueError(f"source '{role}' dirty must be a boolean")
+            source["dirty"] = dirty
+        sources[role] = source
+
+    result: Dict[str, Any] = {
+        "target_key": target_key,
+        "purpose": purpose,
+        "sources": sources,
+    }
+    if parent_run_id is not None:
+        result["parent_run_id"] = parent_run_id
+    return result
+
+
+def _required_trimmed_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not (normalized := value.strip()):
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return normalized
 
 
 def normalize_metric_sample(sample: Dict[str, Any]) -> Dict[str, Any]:

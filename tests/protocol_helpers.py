@@ -49,14 +49,15 @@ from testrift_server.protocol import (
     F_STACK_TRACE,
     F_IS_ERROR,
     F_USER_METADATA,
-    F_GROUP,
-    F_GROUP_NAME,
-    F_GROUP_METADATA,
-    F_GROUP_HASH,
     F_RETENTION_DAYS,
     F_LOCAL_RUN,
     F_RUN_URL,
-    F_GROUP_URL,
+    F_TARGET_KEY,
+    F_PURPOSE,
+    F_SOURCES,
+    F_SOURCE_BRANCH,
+    F_SOURCE_REVISION,
+    F_SOURCE_REPOSITORY_URL,
     MSG_TYPE_NAMES,
 )
 
@@ -134,11 +135,9 @@ class ProtocolClient:
             result["run_id"] = data[F_RUN_ID]
         if F_RUN_URL in data:
             result["run_url"] = data[F_RUN_URL]
-        if F_GROUP_URL in data:
-            result["group_url"] = data[F_GROUP_URL]
         # Pass through any other fields
         for k, v in data.items():
-            if k not in (F_TYPE, F_RUN_ID, F_RUN_URL, F_GROUP_URL):
+            if k not in (F_TYPE, F_RUN_ID, F_RUN_URL):
                 result[k] = v
         return result
     
@@ -147,7 +146,9 @@ class ProtocolClient:
         user_metadata: dict | None = None,
         retention_days: int = 1,
         local_run: bool = False,
-        group: dict | None = None,
+        target_key: str = "test-target",
+        purpose: str = "manual",
+        sources: dict | None = None,
     ) -> dict:
         """Send run_started message and return the response with run_id."""
         msg = {
@@ -155,16 +156,16 @@ class ProtocolClient:
             F_USER_METADATA: user_metadata or {},
             F_RETENTION_DAYS: retention_days,
             F_LOCAL_RUN: local_run,
+            F_TARGET_KEY: target_key,
+            F_PURPOSE: purpose,
+            F_SOURCES: sources or {
+                "test-system": {
+                    F_SOURCE_BRANCH: "main",
+                    F_SOURCE_REVISION: "test-revision",
+                    F_SOURCE_REPOSITORY_URL: "https://example.invalid/test-system",
+                }
+            },
         }
-        if group:
-            group_msg = {}
-            if "hash" in group:
-                group_msg[F_GROUP_HASH] = group["hash"]
-            if "name" in group:
-                group_msg[F_GROUP_NAME] = group["name"]
-            if "metadata" in group:
-                group_msg[F_GROUP_METADATA] = group["metadata"]
-            msg[F_GROUP] = group_msg
         
         await self.send(msg)
         response = await self.receive_response()

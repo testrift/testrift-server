@@ -57,7 +57,6 @@ from .protocol import (
     F_STACK_TRACE,
     F_IS_ERROR,
     F_USER_METADATA,
-    F_GROUP,
     F_RETENTION_DAYS,
     F_LOCAL_RUN,
     F_ERROR,
@@ -65,8 +64,6 @@ from .protocol import (
     F_METRICS,
     F_CPU,
     F_MEMORY,
-    F_GROUP_URL,
-    F_GROUP_HASH,
     F_AI_ANALYSIS,
     F_AI_EMAIL,
     F_AI_EMAIL_TO,
@@ -78,8 +75,6 @@ from .utils import (
     validate_run_id,
     validate_test_case_id,
     validate_custom_run_id,
-    normalize_group_payload,
-    compute_group_hash,
     find_test_case_by_tc_id,
     write_meta_msgpack,
     read_meta_msgpack,
@@ -451,9 +446,8 @@ class WebSocketServer:
             retention_days = data.get("retention_days", DEFAULT_RETENTION_DAYS)
             local_run = data.get("local_run", False)
             user_metadata = data.get("user_metadata", {})
-            raw_group = data.get("group")
-            group_payload = normalize_group_payload(raw_group)
-            group_hash = compute_group_hash(group_payload) if group_payload else None
+            group_payload = None
+            group_hash = None
 
             # Get or generate run_name
             run_name = data.get("run_name")
@@ -502,7 +496,7 @@ class WebSocketServer:
                 status="preparing",
             )
 
-            log_event("run_prepared", run_id=run_id, run_name=run_name, group_hash=group_hash)
+            log_event("run_prepared", run_id=run_id, run_name=run_name)
 
             # Send response
             response = {
@@ -510,9 +504,6 @@ class WebSocketServer:
                 F_RUN_ID: run_id,
                 F_RUN_NAME: run_name,
             }
-            if group_hash:
-                response[F_GROUP_HASH] = group_hash
-                response[F_GROUP_URL] = f"/groups/{group_hash}"
             await send_msgpack(ws, response)
 
         except Exception as e:
@@ -544,9 +535,8 @@ class WebSocketServer:
             retention_days = data.get("retention_days", DEFAULT_RETENTION_DAYS)
             local_run = data.get("local_run", False)
             user_metadata = data.get("user_metadata", {})
-            raw_group = data.get("group")
-            group_payload = normalize_group_payload(raw_group)
-            group_hash = compute_group_hash(group_payload) if group_payload else None
+            group_payload = None
+            group_hash = None
 
             # Get or generate run_name
             run_name = data.get("run_name")
@@ -618,9 +608,6 @@ class WebSocketServer:
                 F_RUN_NAME: run_name,
                 F_RUN_URL: f"/testRun/{run_id}/index.html"
             }
-            if group_hash:
-                response[F_GROUP_HASH] = group_hash
-                response[F_GROUP_URL] = f"/groups/{group_hash}"
             await send_msgpack(ws, response)
 
             return run
@@ -677,9 +664,6 @@ class WebSocketServer:
             F_RUN_NAME: run_name,
             F_RUN_URL: f"/testRun/{run_id}/index.html"
         }
-        if group_hash:
-            response[F_GROUP_HASH] = group_hash
-            response[F_GROUP_URL] = f"/groups/{group_hash}"
         await send_msgpack(ws, response)
 
         return run

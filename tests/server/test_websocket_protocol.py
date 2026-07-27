@@ -14,6 +14,7 @@ from testrift_server.models import TestCaseData, TestRunData
 from testrift_server.websocket import WebSocketServer, normalize_message
 from testrift_server.protocol import (
     MSG_RUN_STARTED,
+    MSG_RUN_PREPARE,
     MSG_TEST_CASE_STARTED,
     MSG_LOG_BATCH,
     MSG_TEST_CASE_FINISHED,
@@ -37,7 +38,16 @@ from testrift_server.protocol import (
     F_MESSAGE,
     F_COMPONENT,
     F_CHANNEL,
+    F_TARGET_KEY,
+    F_PURPOSE,
+    F_PARENT_RUN_ID,
+    F_SOURCES,
+    F_SOURCE_BRANCH,
+    F_SOURCE_REVISION,
+    F_SOURCE_REPOSITORY_URL,
+    F_SOURCE_DIRTY,
 )
+from testrift_server.protocol_utils import normalize_run_context
 from testrift_server.utils import generate_storage_id, TC_ID_FIELD
 
 
@@ -67,6 +77,63 @@ class TestWebSocketProtocol:
             user_metadata={"DUT": {"value": "TestDevice-001"}}
         )
         return run
+
+    @pytest.mark.parametrize("message_type", [MSG_RUN_STARTED, MSG_RUN_PREPARE])
+    def test_normalize_run_context_for_direct_and_prepared_runs(self, message_type):
+        normalized = normalize_message({
+            F_TYPE: message_type,
+            F_TARGET_KEY: "  nora-b26x  ",
+            F_PURPOSE: "nightly",
+            F_SOURCES: {
+                "firmware": {
+                    F_SOURCE_BRANCH: "main",
+                    F_SOURCE_REVISION: "a1b2c3",
+                    F_SOURCE_REPOSITORY_URL: "https://example.invalid/firmware",
+                    F_SOURCE_DIRTY: False,
+                },
+                "test-system": {
+                    F_SOURCE_BRANCH: "development",
+                    F_SOURCE_REVISION: "d4e5f6",
+                },
+            },
+        }, {})
+
+        assert normalized["target_key"] == "nora-b26x"
+        assert normalized["purpose"] == "nightly"
+        assert normalized["sources"] == {
+            "firmware": {
+                "branch": "main",
+                "revision": "a1b2c3",
+                "repository_url": "https://example.invalid/firmware",
+                "dirty": False,
+            },
+            "test-system": {"branch": "development", "revision": "d4e5f6"},
+        }
+
+    @pytest.mark.parametrize(
+        ("context", "error"),
+        [
+            ({F_PURPOSE: "nightly", F_SOURCES: {}}, "target_key"),
+            ({F_TARGET_KEY: "nora", F_PURPOSE: "invalid", F_SOURCES: {}}, "Unsupported purpose"),
+            ({F_TARGET_KEY: "nora", F_PURPOSE: "rerun", F_SOURCES: {}}, "parent_run_id"),
+            ({F_TARGET_KEY: "nora", F_PURPOSE: "nightly", F_PARENT_RUN_ID: "run-1", F_SOURCES: {}}, "only allowed"),
+            ({F_TARGET_KEY: "nora", F_PURPOSE: "nightly", F_SOURCES: {"firmware": "main"}}, "must be an object"),
+            ({F_TARGET_KEY: "nora", F_PURPOSE: "nightly", F_SOURCES: {"firmware": {F_SOURCE_BRANCH: "main"}}}, "revision"),
+        ],
+    )
+    def test_normalize_run_context_rejects_invalid_contract(self, context, error):
+        with pytest.raises(ValueError, match=error):
+            normalize_run_context(context)
+
+    def test_normalize_run_context_accepts_rerun_parent(self):
+        normalized = normalize_run_context({
+            F_TARGET_KEY: "nora-b26x",
+            F_PURPOSE: "rerun",
+            F_PARENT_RUN_ID: "run-123",
+            F_SOURCES: {},
+        })
+
+        assert normalized["parent_run_id"] == "run-123"
 
     @pytest.mark.asyncio
     async def test_normalize_message_converts_optimized_format(self):
