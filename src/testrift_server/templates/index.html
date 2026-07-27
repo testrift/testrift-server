@@ -691,14 +691,14 @@
                         <h3 class="run-title">
                             <a href="/testRun/{{ run.run_id }}/index.html" class="run-link">{{ run.run_name }}</a>
                         </h3>
-                        {% if run.group and (run.group.name or run.group.hash) and not group_context %}
+                        {% if run.target_key %}
                         <div class="group-pill">
-                            <span>Group:</span>
-                            {% if run.group.hash %}
-                                <a href="/groups/{{ run.group.hash }}" class="group-link">{{ run.group.name or ('Group ' ~ run.group.hash) }}</a>
-                            {% else %}
-                                <span class="group-link">{{ run.group.name }}</span>
-                            {% endif %}
+                          <span>Target:</span>
+                          <a href="/targets/{{ run.target_key }}" class="group-link">{{ run.target_key }}</a>
+                          {% for collection_key in run.collection_keys %}
+                          <span>Collection:</span>
+                          <a href="/collections/{{ collection_key }}" class="group-link">{{ collection_key }}</a>
+                          {% endfor %}
                         </div>
                         {% endif %}
                         <div class="run-meta-section">

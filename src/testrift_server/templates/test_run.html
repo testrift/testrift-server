@@ -1208,6 +1208,20 @@
                 </div>
 
                 <div class="info-grid">
+                    {% if target_key %}
+                    <div class="info-item">
+                        <strong>Target</strong>
+                        <a href="/targets/{{ target_key }}">{{ target_key }}</a>
+                    </div>
+                    {% endif %}
+                    {% if collection_keys %}
+                    <div class="info-item">
+                        <strong>Collections</strong>
+                        {% for collection_key in collection_keys %}
+                        <a href="/collections/{{ collection_key }}">{{ collection_key }}</a>{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                     {% if group %}
                     <div class="info-item">
                         <strong>Group</strong>

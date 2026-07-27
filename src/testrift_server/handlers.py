@@ -74,6 +74,8 @@ async def build_run_index_entries(runs_from_db):
     runs_index = []
     for run in runs_from_db:
         run_id = run['run_id']
+        target_key = run.get('target_key')
+        collection_keys = await database.db.get_collection_keys_for_target(target_key) if target_key else []
 
         # Get user metadata for this run (already in correct format)
         user_metadata = await database.db.get_user_metadata_for_run(run_id)
@@ -111,6 +113,8 @@ async def build_run_index_entries(runs_from_db):
             'user_metadata': user_metadata,
             'group': group_info,
             'group_hash': group_hash,  # Also include at top level for easy access
+            'target_key': target_key,
+            'collection_keys': collection_keys,
             'files_exist': files_exist
         }
 
@@ -187,6 +191,8 @@ async def test_run_index_handler(request):
     live_run = False
 
     group_info = None
+    target_key = None
+    collection_keys = []
 
     if run:
         # Use in-memory data, but only consider it "live" if it's actually running
@@ -236,6 +242,7 @@ async def test_run_index_handler(request):
         run_name = run.run_name
         abort_reason = run.abort_reason
         metrics = run.metrics or []
+        target_key = getattr(run, "target_key", None)
         if run.group or run.group_hash:
             group_info = {
                 "name": run.group.get("name") if run.group else None,
@@ -288,6 +295,7 @@ async def test_run_index_handler(request):
 
         # Get run_name from database
         run_name = run_data.get('run_name')
+        target_key = run_data.get('target_key')
 
         # Count test results from database data
         passed_count = run_data.get('passed_count', 0)
@@ -315,6 +323,9 @@ async def test_run_index_handler(request):
         end_time = run_data.get("end_time")
         retention_days = run_data.get("retention_days")
 
+    if target_key:
+        collection_keys = await database.db.get_collection_keys_for_target(target_key)
+
     html = render_template(
         'test_run.html',
         run_id=run_id,
@@ -325,6 +336,8 @@ async def test_run_index_handler(request):
         end_time=end_time,
         user_metadata=user_metadata,
         group=group_info,
+        target_key=target_key,
+        collection_keys=collection_keys,
         retention_days=retention_days,
         test_cases=test_cases_dict,
         live_run=live_run,
