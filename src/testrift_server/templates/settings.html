@@ -234,6 +234,13 @@
 
             <div class="settings-card target-collections">
                 <h3><i class="fas fa-layer-group"></i> Targets & Collections</h3>
+                <div class="panel mb-3">
+                    <h4>Target Onboarding</h4>
+                    <label for="setup-target">Reported Target</label><select id="setup-target" class="form-select"></select>
+                    <label for="setup-name">Display name</label><input id="setup-name" class="form-control">
+                    <label>Collections</label><div id="setup-collections" class="members"></div>
+                    <button id="complete-setup" class="btn btn-primary-custom mt-3"><i class="fas fa-check"></i> Complete Setup</button>
+                </div>
                 <div class="target-collections-grid">
                     <div class="panel">
                         <h4>Targets</h4>

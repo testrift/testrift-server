@@ -336,6 +336,33 @@ class TestResultsDatabase:
             await db.commit()
         return await self.get_target(key)
 
+    async def complete_target_setup(self, key: str, display_name: str, collection_ids: List[int]) -> Optional[Dict[str, Any]]:
+        """Atomically mark a Target ready and replace its Collection memberships."""
+        if len(collection_ids) != len(set(collection_ids)):
+            raise ValueError("Target membership cannot contain duplicate Collections")
+        async with self.get_connection() as db:
+            try:
+                await db.execute("BEGIN")
+                target_cursor = await db.execute("SELECT id FROM targets WHERE key = ?", (key,))
+                target = await target_cursor.fetchone()
+                if not target:
+                    await db.rollback()
+                    return None
+                target_id = target[0]
+                if collection_ids:
+                    placeholders = ", ".join("?" for _ in collection_ids)
+                    collection_cursor = await db.execute(f"SELECT id FROM collections WHERE id IN ({placeholders})", collection_ids)
+                    if len(await collection_cursor.fetchall()) != len(collection_ids):
+                        raise ValueError("Target membership contains an unknown Collection")
+                await db.execute("UPDATE targets SET display_name = ?, setup_state = 'ready', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (display_name, target_id))
+                await db.execute("DELETE FROM collection_targets WHERE target_id = ?", (target_id,))
+                await db.executemany("INSERT INTO collection_targets (collection_id, target_id) VALUES (?, ?)", [(collection_id, target_id) for collection_id in collection_ids])
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+        return await self.get_target(key)
+
     async def delete_target(self, key: str) -> bool:
         async with self.get_connection() as db:
             cursor = await db.execute("DELETE FROM targets WHERE key = ?", (key,))

@@ -97,6 +97,20 @@ async def api_target_handler(request):
         return _validation_error(error)
 
 
+async def api_target_complete_setup_handler(request):
+    try:
+        body = await _json_body(request)
+        collection_ids = body.get("collection_ids", [])
+        if not isinstance(collection_ids, list) or len(collection_ids) != len(set(collection_ids)):
+            raise ValueError("collection_ids must be a unique list")
+        target = await database.db.complete_target_setup(
+            request.match_info["key"], _validate_display_name(body.get("display_name")), collection_ids
+        )
+        return web.json_response({"success": True, "data": target}) if target else web.json_response({"success": False, "error": "Target not found"}, status=404)
+    except (ValueError, TypeError) as error:
+        return _validation_error(error)
+
+
 async def api_collections_handler(request):
     if request.method == "GET":
         return web.json_response({"success": True, "data": await database.db.list_collections()})
@@ -1495,6 +1509,7 @@ def get_routes():
         web.get("/api/targets/{key}", api_target_handler),
         web.put("/api/targets/{key}", api_target_handler),
         web.delete("/api/targets/{key}", api_target_handler),
+        web.put("/api/targets/{key}/complete-setup", api_target_complete_setup_handler),
         web.get("/api/collections", api_collections_handler),
         web.post("/api/collections", api_collections_handler),
         web.get("/api/collections/{key}", api_collection_handler),
