@@ -182,6 +182,15 @@ async def api_collection_members_handler(request):
         return _validation_error(error)
 
 
+async def api_collection_profile_filter_options_handler(request):
+    """Suggest profile filter values observed in finished runs for Collection Targets."""
+    collection = await database.db.get_collection(request.match_info["key"])
+    if not collection:
+        return web.json_response({"success": False, "error": "Collection not found"}, status=404)
+    options = await database.db.get_collection_profile_filter_options(collection["id"])
+    return web.json_response({"success": True, "data": options})
+
+
 def _profile_values(body):
     name = _validate_display_name(body.get("name"))
     purpose = body.get("purpose")
@@ -1491,6 +1500,7 @@ def get_routes():
         web.put("/api/collections/{key}", api_collection_handler),
         web.delete("/api/collections/{key}", api_collection_handler),
         web.put("/api/collections/{key}/members", api_collection_members_handler),
+        web.get("/api/collections/{key}/profile-filter-options", api_collection_profile_filter_options_handler),
         web.post("/api/collections/{key}/profiles", api_collection_profiles_handler),
         web.get("/api/collections/{key}/summary", api_collection_summary_handler),
         web.post("/api/collections/{key}/reports", api_collection_report_handler),

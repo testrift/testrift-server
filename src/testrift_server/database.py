@@ -461,6 +461,46 @@ class TestResultsDatabase:
             collection["profiles"] = [dict(zip([column[0] for column in profiles.description], item)) for item in await profiles.fetchall()]
             return collection
 
+    async def get_collection_profile_filter_options(self, collection_id: int) -> Dict[str, List[Dict[str, Any]]]:
+        """Return observed finished-run metadata for a Collection's profile builder."""
+        async with self.get_connection() as db:
+            purposes = await (
+                await db.execute(
+                    """SELECT runs.purpose, COUNT(DISTINCT runs.run_id) AS run_count
+                       FROM test_runs AS runs
+                       JOIN collection_targets ON collection_targets.target_id = (
+                           SELECT id FROM targets WHERE key = runs.target_key
+                       )
+                       WHERE collection_targets.collection_id = ?
+                         AND runs.status = 'finished' AND runs.purpose IS NOT NULL
+                       GROUP BY runs.purpose ORDER BY run_count DESC, runs.purpose""",
+                    (collection_id,),
+                )
+            ).fetchall()
+            source_pairs = await (
+                await db.execute(
+                    """SELECT sources.source_role, sources.branch, COUNT(DISTINCT runs.run_id) AS run_count
+                       FROM run_sources AS sources
+                       JOIN test_runs AS runs ON runs.run_id = sources.run_id
+                       JOIN collection_targets ON collection_targets.target_id = (
+                           SELECT id FROM targets WHERE key = runs.target_key
+                       )
+                       WHERE collection_targets.collection_id = ?
+                         AND runs.status = 'finished'
+                         AND sources.source_role != '' AND sources.branch != ''
+                       GROUP BY sources.source_role, sources.branch
+                       ORDER BY run_count DESC, sources.source_role, sources.branch""",
+                    (collection_id,),
+                )
+            ).fetchall()
+            return {
+                "purposes": [{"value": row[0], "run_count": row[1]} for row in purposes],
+                "source_pairs": [
+                    {"source_role": row[0], "branch": row[1], "run_count": row[2]}
+                    for row in source_pairs
+                ],
+            }
+
     @staticmethod
     def _collection_row(cursor: Any, row: Any) -> Dict[str, Any]:
         collection = dict(zip([column[0] for column in cursor.description], row))

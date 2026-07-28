@@ -176,6 +176,36 @@ async def test_collection_run_set_selects_profile_and_reports_missing_target(ini
 
 
 @pytest.mark.asyncio
+async def test_collection_profile_filter_options_only_include_member_finished_runs(initialized_database):
+    member = await initialized_database.get_or_create_target("nora-b26x")
+    outsider = await initialized_database.get_or_create_target("outside")
+    collection_id = await initialized_database.create_collection("nightly", "Nightly")
+    await initialized_database.replace_collection_membership(collection_id, [member["id"]])
+    for run_id, target_key, status, purpose, branch in [
+        ("member-finished", "nora-b26x", "finished", "nightly", "main"),
+        ("member-running", "nora-b26x", "running", "nightly", "release"),
+        ("outsider-finished", "outside", "finished", "feature", "feature/x"),
+    ]:
+        await initialized_database.insert_test_run(TestRunData(
+            run_id=run_id,
+            status=status,
+            start_time="2026-07-20T11:00:00Z",
+            end_time="2026-07-20T11:30:00Z" if status == "finished" else None,
+            retention_days=7,
+            local_run=False,
+            target_key=target_key,
+            purpose=purpose,
+        ), sources={"firmware": {"branch": branch, "revision": run_id}})
+
+    options = await initialized_database.get_collection_profile_filter_options(collection_id)
+
+    assert options == {
+        "purposes": [{"value": "nightly", "run_count": 1}],
+        "source_pairs": [{"source_role": "firmware", "branch": "main", "run_count": 1}],
+    }
+
+
+@pytest.mark.asyncio
 async def test_classification_history_excludes_runs_outside_run_set(initialized_database):
     await initialized_database.get_or_create_target("nora-b26x")
     await initialized_database.get_or_create_target("sara-b26x")
