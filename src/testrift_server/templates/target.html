@@ -7,41 +7,281 @@
 	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 	<link href="/static/app_shell.css" rel="stylesheet">
+	<link href="/static/entity_admin.css" rel="stylesheet">
 	<style>
 		:root { font-size: 14px; }
 		body { margin: 0; color: #30343a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 		.app-shell { width: min(1040px, 100%); margin: 0 auto; overflow: hidden; border-radius: 15px; background: #fff; box-shadow: 0 20px 40px rgba(0,0,0,.14); }
-		.header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px 30px; color: #fff; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }.header h1 { margin: 0; font-size: 2.2rem; font-weight: 300; }.header p { margin: 5px 0 0; opacity: .86; }.header a { color: #fff; }
-		.content { padding: 24px 30px 30px; }.target-key { color: #6c757d; font-size: .95rem; }.target-key code { color: inherit; }.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }.toolbar .btn { border-radius: 7px; }
-		.summary { display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)); gap: 12px; }.card { padding: 16px; border: 1px solid #e1e5e9; border-radius: 9px; background: #f8f9fa; }.card strong { display: block; font-size: 1.4rem; color: #495057; }.card span { color: #6c757d; font-size: .8rem; text-transform: uppercase; letter-spacing: .4px; }
-		.runs { margin-top: 20px; overflow: hidden; border: 1px solid #dfe3e7; border-radius: 10px; box-shadow: 0 3px 12px rgba(0,0,0,.06); }.runs h2 { margin: 0; padding: 15px 18px; border-bottom: 1px solid #e5e8eb; background: #f8f9fa; color: #495057; font-size: 1.15rem; font-weight: 650; }.run-list { padding: 0; margin: 0; list-style: none; }.run-list a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 18px; color: #337ab7; text-decoration: none; border-top: 1px solid #edf0f2; }.run-list a:hover { background: #f0f2ff; }.empty { padding: 28px; color: #6c757d; text-align: center; }
-		@media (max-width: 620px) { .header, .content { padding-right: 16px; padding-left: 16px; }.header { align-items: flex-start; flex-direction: column; }.summary { grid-template-columns: 1fr; } }
+		.header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px 30px; color: #fff; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+		.header h1 { margin: 0; font-size: 2.2rem; font-weight: 300; }
+		.header p { margin: 5px 0 0; opacity: .86; }
+		.header a { color: #fff; }
+		.header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+		.content { padding: 24px 30px 30px; }
+		.target-key { color: #6c757d; font-size: .95rem; margin-bottom: 16px; }
+		.target-key code { color: inherit; }
+		.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
+		.toolbar .btn { border-radius: 7px; }
+		.summary { display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
+		.card { padding: 16px; border: 1px solid #e1e5e9; border-radius: 9px; background: #f8f9fa; }
+		.card strong { display: block; font-size: 1.4rem; color: #495057; }
+		.card span { color: #6c757d; font-size: .8rem; text-transform: uppercase; letter-spacing: .4px; }
+		.runs { overflow: hidden; border: 1px solid #dfe3e7; border-radius: 10px; box-shadow: 0 3px 12px rgba(0,0,0,.06); }
+		.runs h2 { margin: 0; padding: 15px 18px; border-bottom: 1px solid #e5e8eb; background: #f8f9fa; color: #495057; font-size: 1.15rem; font-weight: 650; }
+		.run-list { padding: 0; margin: 0; list-style: none; }
+		.run-list a {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			padding: 13px 18px;
+			color: #337ab7;
+			text-decoration: none;
+			border-top: 1px solid #edf0f2;
+		}
+		.run-list a:first-child { border-top: 0; }
+		.run-list a:hover { background: #f0f2ff; }
+		.run-list .run-meta { display: block; color: #6c757d; font-size: .82rem; margin-top: 2px; }
+		.empty { padding: 28px; color: #6c757d; text-align: center; }
+		.status { min-height: 1.2rem; margin-bottom: 10px; color: #b42318; }
+		.status.ok { color: #067647; }
+		@media (max-width: 620px) {
+			.header, .content { padding-right: 16px; padding-left: 16px; }
+			.header { align-items: flex-start; flex-direction: column; }
+			.summary { grid-template-columns: 1fr; }
+		}
 	</style>
 </head>
 <body class="app-layout">
 	{% include '_sidebar.html' %}
 	<div class="app-main">
 	<main class="app-shell">
-		<header class="header"><div><h1><i class="fas fa-crosshairs me-2"></i><span id="target-name">{{ target_key }}</span></h1><p>Stable Target history and run context</p></div><a class="btn btn-outline-light btn-sm" href="/targets"><i class="fas fa-arrow-left me-1"></i>All Targets</a></header>
+		<header class="header">
+			<div>
+				<h1><i class="fas fa-crosshairs me-2"></i><span id="target-name">{{ target_key }}</span></h1>
+				<p>Stable Target history and run context</p>
+			</div>
+			<div class="header-actions">
+				<button id="open-edit" class="btn btn-outline-light btn-sm" type="button">
+					<i class="fas fa-pen me-1"></i>Edit
+				</button>
+				<a class="btn btn-outline-light btn-sm" href="/targets"><i class="fas fa-arrow-left me-1"></i>All Targets</a>
+			</div>
+		</header>
 		<section class="content">
 			<div class="target-key">Target key from client: <code>{{ target_key }}</code></div>
-			<div class="toolbar"><a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/analyzer"><i class="fas fa-chart-line me-1"></i>Analyzer</a><a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/matrix"><i class="fas fa-table-cells me-1"></i>Matrix</a><a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/failures"><i class="fas fa-bug me-1"></i>Failures</a></div>
-			<div class="summary"><div class="card"><strong id="run-count">--</strong><span>Runs</span></div><div class="card"><strong id="setup-state">--</strong><span>Setup status</span></div><div class="card"><strong id="collection-count">--</strong><span>Collections</span></div></div>
-			<section class="runs"><h2><i class="fas fa-list me-2"></i>Run history</h2><ul id="runs" class="run-list"></ul></section>
+			<div id="page-status" class="status" role="alert"></div>
+			<div class="toolbar">
+				<a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/analyzer"><i class="fas fa-chart-line me-1"></i>Analyzer</a>
+				<a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/matrix"><i class="fas fa-table-cells me-1"></i>Matrix</a>
+				<a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/failures"><i class="fas fa-bug me-1"></i>Failures</a>
+			</div>
+			<div class="summary">
+				<div class="card"><strong id="run-count">--</strong><span>Runs</span></div>
+				<div class="card"><strong id="setup-state">--</strong><span>Setup status</span></div>
+				<div class="card"><strong id="collection-count">--</strong><span>Collections</span></div>
+			</div>
+			<section class="runs">
+				<h2><i class="fas fa-list me-2"></i>Run history</h2>
+				<ul id="runs" class="run-list"></ul>
+			</section>
 		</section>
 	</main>
 	</div>
+
+	<div class="modal fade" id="edit-target-modal" tabindex="-1" aria-labelledby="edit-target-heading" aria-hidden="true">
+		<div class="modal-dialog modal-lg modal-dialog-scrollable">
+			<div class="modal-content entity-admin">
+				<div class="modal-header">
+					<h5 class="modal-title" id="edit-target-heading"><i class="fas fa-pen me-2"></i>Edit Target</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<div id="target-admin-status" class="status" role="alert"></div>
+					<form id="target-editor">
+						<div class="editor-grid">
+							<div class="span-2">
+								<label for="target-display-name">Display name</label>
+								<input id="target-display-name" class="form-control" required>
+							</div>
+							<div id="membership-block" class="span-2" hidden>
+								<label>Assign to Collections <span class="muted">(optional)</span></label>
+								<div id="target-collections" class="membership"></div>
+								<div class="help">Saving marks this Target ready and applies the selected membership.</div>
+							</div>
+						</div>
+						<div class="editor-footer">
+							<button id="delete-target" class="btn btn-outline-danger btn-sm" type="button">
+								<i class="fas fa-trash"></i> Delete Target
+							</button>
+							<div>
+								<span id="saved-indicator" class="saved-indicator"></span>
+								<button class="btn btn-outline-secondary btn-sm me-2" type="button" data-bs-dismiss="modal">Cancel</button>
+								<button id="save-target" class="btn btn-primary-custom" type="submit">
+									<i class="fas fa-save"></i> Save Target
+								</button>
+							</div>
+						</div>
+					</form>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 	<script>
 		const targetKey = {{ target_key | tojson }};
-		const request = async url => { const response = await fetch(url); const body = await response.json(); if (!response.ok || !body.success) throw new Error(body.error || 'Request failed'); return body.data; };
-		Promise.all([request(`/api/targets/${targetKey}`), request(`/api/run-set?target=${targetKey}`), request('/api/collections')]).then(async ([target, runSet, collectionSummaries]) => {
-			const collections = await Promise.all(collectionSummaries.map(collection => request(`/api/collections/${encodeURIComponent(collection.key)}`)));
+		const state = { target: null, collections: [], runs: [] };
+		const editModal = new bootstrap.Modal(document.getElementById('edit-target-modal'));
+
+		const api = async (url, options) => {
+			const response = await fetch(url, options);
+			const body = await response.json();
+			if (!response.ok || !body.success) throw new Error(body.error || 'Request failed');
+			return body.data;
+		};
+
+		const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character =>
+			({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]
+		);
+
+		const status = (message, ok = false) => {
+			const element = document.getElementById('target-admin-status');
+			element.textContent = message || '';
+			element.className = `status${ok ? ' ok' : ''}`;
+		};
+
+		const pageStatus = (message, ok = false) => {
+			const element = document.getElementById('page-status');
+			element.textContent = message || '';
+			element.className = `status${ok ? ' ok' : ''}`;
+		};
+
+		const selectedCollectionIds = () =>
+			[...document.querySelectorAll('#target-collections input:checked')].map(input => Number(input.value));
+
+		function renderMembership() {
+			const memberIds = new Set();
+			state.collections.forEach(collection => {
+				if ((collection.targets || []).some(member => member.id === state.target.id)) {
+					memberIds.add(collection.id);
+				}
+			});
+			document.getElementById('target-collections').innerHTML = state.collections.map(collection =>
+				`<label class="member-row"><input type="checkbox" value="${collection.id}" ${memberIds.has(collection.id) ? 'checked' : ''}><span><b>${escapeHtml(collection.display_name)}</b><small><code>${escapeHtml(collection.key)}</code></small></span></label>`
+			).join('') || '<div class="help">No Collections yet. Create one from the Collections page.</div>';
+		}
+
+		function fillPage() {
+			const target = state.target;
 			document.getElementById('target-name').textContent = target.display_name;
-			document.getElementById('run-count').textContent = runSet.run_ids.length;
+			document.getElementById('run-count').textContent = state.runs.length;
 			document.getElementById('setup-state').textContent = target.setup_state === 'ready' ? 'Ready' : 'Needs setup';
-			document.getElementById('collection-count').textContent = collections.filter(collection => collection.targets.some(member => member.id === target.id)).length;
-			document.getElementById('runs').innerHTML = runSet.run_ids.map(id => `<li><a href="/testRun/${encodeURIComponent(id)}/index.html"><span>${id}</span><i class="fas fa-arrow-right"></i></a></li>`).join('') || '<li class="empty">No Runs for this Target.</li>';
-		}).catch(error => { document.getElementById('runs').innerHTML = `<li class="empty">${error.message}</li>`; });
+			const memberCount = state.collections.filter(collection =>
+				(collection.targets || []).some(member => member.id === target.id)
+			).length;
+			document.getElementById('collection-count').textContent = memberCount;
+
+			const editBtn = document.getElementById('open-edit');
+			editBtn.classList.toggle('btn-warning', target.setup_state === 'needs_setup');
+			editBtn.classList.toggle('btn-outline-light', target.setup_state !== 'needs_setup');
+			editBtn.classList.toggle('text-dark', target.setup_state === 'needs_setup');
+
+			document.getElementById('runs').innerHTML = state.runs.map(run => {
+				const name = run.run_name || run.run_id;
+				const meta = run.run_name && run.run_name !== run.run_id
+					? `<span class="run-meta">${escapeHtml(run.run_id)}</span>`
+					: '';
+				return `<li><a href="/testRun/${encodeURIComponent(run.run_id)}/index.html"><span><strong>${escapeHtml(name)}</strong>${meta}</span><i class="fas fa-arrow-right"></i></a></li>`;
+			}).join('') || '<li class="empty">No Runs for this Target.</li>';
+		}
+
+		function fillEditor() {
+			const target = state.target;
+			document.getElementById('target-display-name').value = target.display_name || '';
+			document.getElementById('membership-block').hidden = target.setup_state !== 'needs_setup';
+			document.getElementById('saved-indicator').textContent = '';
+			renderMembership();
+		}
+
+		async function refresh() {
+			const [target, runs, collectionSummaries] = await Promise.all([
+				api(`/api/targets/${encodeURIComponent(targetKey)}`),
+				api(`/api/test-runs?target=${encodeURIComponent(targetKey)}&limit=500`),
+				api('/api/collections'),
+			]);
+			state.target = target;
+			state.runs = runs || [];
+			state.collections = await Promise.all(
+				collectionSummaries.map(collection =>
+					api(`/api/collections/${encodeURIComponent(collection.key)}`)
+				)
+			);
+			fillPage();
+			fillEditor();
+			status('');
+			pageStatus('');
+		}
+
+		document.getElementById('open-edit').addEventListener('click', () => {
+			fillEditor();
+			status('');
+			editModal.show();
+		});
+
+		document.getElementById('target-editor').addEventListener('submit', async event => {
+			event.preventDefault();
+			const displayName = document.getElementById('target-display-name').value.trim();
+			try {
+				if (state.target.setup_state === 'needs_setup') {
+					await api(`/api/targets/${encodeURIComponent(targetKey)}/complete-setup`, {
+						method: 'PUT',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							display_name: displayName,
+							collection_ids: selectedCollectionIds(),
+						}),
+					});
+				} else {
+					await api(`/api/targets/${encodeURIComponent(targetKey)}`, {
+						method: 'PUT',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							display_name: displayName,
+							setup_state: 'ready',
+						}),
+					});
+				}
+				document.getElementById('saved-indicator').textContent = 'Saved';
+				await refresh();
+				status('Target saved.', true);
+				editModal.hide();
+			} catch (error) {
+				status(error.message);
+			}
+		});
+
+		document.getElementById('delete-target').addEventListener('click', async () => {
+			const name = state.target?.display_name || targetKey;
+			const confirmed = confirm(
+				`Delete target "${name}"?\n\n` +
+				'This permanently removes the Target and its Collection membership. ' +
+				'Test runs that still reference this Target may prevent deletion.\n\n' +
+				'This cannot be undone.'
+			);
+			if (!confirmed) return;
+			try {
+				await api(`/api/targets/${encodeURIComponent(targetKey)}?cascade=true`, { method: 'DELETE' });
+				window.location.href = '/targets';
+			} catch (error) {
+				status(error.message);
+			}
+		});
+
+		refresh().catch(error => {
+			pageStatus(error.message);
+			document.getElementById('runs').innerHTML = `<li class="empty">${error.message}</li>`;
+		});
 	</script>
 </body>
 </html>

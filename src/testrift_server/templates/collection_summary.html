@@ -3,57 +3,249 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ collection_key }} Summary - TestRift</title>
+  <title>{{ collection_key }} - TestRift</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <link href="/static/app_shell.css" rel="stylesheet">
+  <link href="/static/entity_admin.css" rel="stylesheet">
   <style>
     :root { font-size: 14px; }
     body { margin: 0; color: #30343a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     .app-shell { width: min(1180px, 100%); margin: 0 auto; overflow: hidden; border-radius: 15px; background: #fff; box-shadow: 0 20px 40px rgba(0,0,0,.14); }
-    .header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px 30px; color: #fff; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }.header h1 { margin: 0; font-size: 2.2rem; font-weight: 300; }.header p { margin: 5px 0 0; opacity: .86; }.header a { color: #fff; }
-    .content { padding: 24px 30px 30px; }.summary-head { display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid #e5e8eb; }.summary-head h2 { margin: 0; color: #495057; font-size: 1.4rem; font-weight: 650; }.summary-head label { color: #495057; font-weight: 650; }.summary-head select { min-width: 220px; margin-top: 5px; }
-    .context { margin-top: 14px; padding: 11px 14px; border: 1px solid #dfe3e7; border-radius: 8px; background: #f8f9fa; color: #6c757d; font-size: .86rem; }.tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 20px; }.tile { min-height: 132px; padding: 16px; border: 1px solid #dfe3e7; border-radius: 9px; background: #fff; box-shadow: 0 3px 12px rgba(0,0,0,.06); }.tile.no-match { border-left: 4px solid #c47f00; }.tile.match { border-left: 4px solid #198754; }.tile strong { display: block; color: #343a40; font-size: 1.05rem; }.detail { margin-top: 8px; color: #6c757d; font-size: .87rem; overflow-wrap: anywhere; }.empty { padding: 30px; color: #6c757d; text-align: center; }
-    @media (max-width: 620px) { .header, .content { padding-right: 16px; padding-left: 16px; }.header { align-items: flex-start; flex-direction: column; }.summary-head { align-items: stretch; }.summary-head select { width: 100%; } }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px 30px; color: #fff; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .header h1 { margin: 0; font-size: 2.2rem; font-weight: 300; }
+    .header p { margin: 5px 0 0; opacity: .86; }
+    .header a { color: #fff; }
+    .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .content { padding: 24px 30px 30px; }
+    .collection-key { color: #6c757d; font-size: .95rem; margin-bottom: 16px; }
+    .collection-key code { color: inherit; }
+    .summary-head { display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid #e5e8eb; }
+    .summary-head h2 { margin: 0; color: #495057; font-size: 1.4rem; font-weight: 650; }
+    .summary-head label { color: #495057; font-weight: 650; }
+    .summary-head select { min-width: 220px; margin-top: 5px; }
+    .context { margin-top: 14px; padding: 11px 14px; border: 1px solid #dfe3e7; border-radius: 8px; background: #f8f9fa; color: #6c757d; font-size: .86rem; }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 20px; }
+    .tile { min-height: 132px; padding: 16px; border: 1px solid #dfe3e7; border-radius: 9px; background: #fff; box-shadow: 0 3px 12px rgba(0,0,0,.06); }
+    .tile.no-match { border-left: 4px solid #c47f00; }
+    .tile.match { border-left: 4px solid #198754; }
+    .tile strong { display: block; color: #343a40; font-size: 1.05rem; }
+    .detail { margin-top: 8px; color: #6c757d; font-size: .87rem; overflow-wrap: anywhere; }
+    .empty { padding: 30px; color: #6c757d; text-align: center; }
+    .status { min-height: 1.2rem; margin-bottom: 10px; color: #b42318; }
+    .status.ok { color: #067647; }
+    @media (max-width: 620px) {
+      .header, .content { padding-right: 16px; padding-left: 16px; }
+      .header { align-items: flex-start; flex-direction: column; }
+      .summary-head { align-items: stretch; }
+      .summary-head select { width: 100%; }
+    }
   </style>
 </head>
 <body class="app-layout">
 {% include '_sidebar.html' %}
 <div class="app-main">
 <main class="app-shell">
-  <header class="header"><div><h1><i class="fas fa-layer-group me-2"></i>{{ collection_key }}</h1><p>Combined Target overview</p></div><a class="btn btn-outline-light btn-sm" href="/collections"><i class="fas fa-arrow-left me-1"></i>All Collections</a></header>
-  <section class="content"><div class="summary-head"><div><h2 id="collection-name">{{ collection_key }}</h2><div id="profile-details" class="text-muted mt-1"></div></div><label>Summary profile<select id="profile" class="form-select"></select></label></div><div id="summary-time" class="context"></div><div id="tools" class="tools"></div><div id="tiles" class="tiles"></div></section>
+  <header class="header">
+    <div>
+      <h1><i class="fas fa-layer-group me-2"></i><span id="header-name">{{ collection_key }}</span></h1>
+      <p>Combined Target overview</p>
+    </div>
+    <div class="header-actions">
+      <button id="open-edit" class="btn btn-outline-light btn-sm" type="button">
+        <i class="fas fa-pen me-1"></i>Edit
+      </button>
+      <a class="btn btn-outline-light btn-sm" href="/collections"><i class="fas fa-arrow-left me-1"></i>All Collections</a>
+    </div>
+  </header>
+  <section class="content">
+    <div class="collection-key">URL key: <code id="collection-key-display">{{ collection_key }}</code></div>
+    <div class="summary-head">
+      <div>
+        <h2 id="collection-name-summary">{{ collection_key }}</h2>
+        <div id="profile-details" class="text-muted mt-1"></div>
+      </div>
+      <label>Summary profile
+        <select id="profile" class="form-select"></select>
+      </label>
+    </div>
+    <div id="summary-time" class="context"></div>
+    <div id="tools" class="tools"></div>
+    <div id="tiles" class="tiles"></div>
+  </section>
 </main>
 </div>
+
+<div class="modal fade" id="edit-collection-modal" tabindex="-1" aria-labelledby="edit-heading" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content entity-admin">
+      <div class="modal-header">
+        <h5 class="modal-title" id="edit-heading"><i class="fas fa-pen me-2"></i>Edit Collection</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="collection-admin-status" class="status" role="alert"></div>
+        <form id="collection-editor">
+          <div class="editor-grid">
+            <div>
+              <label for="collection-name">Display name</label>
+              <input id="collection-name" class="form-control" required>
+            </div>
+            <div>
+              <label>URL key</label>
+              <input class="form-control" value="{{ collection_key }}" readonly>
+            </div>
+            <div class="span-2">
+              <label for="collection-description">Description</label>
+              <input id="collection-description" class="form-control" placeholder="What this combined overview represents">
+            </div>
+            <div class="span-2">
+              <label>Target membership <span id="member-count" class="muted"></span></label>
+              <div id="collection-members" class="membership"></div>
+              <div class="help">Membership is managed here. Test clients only send their Target key.</div>
+            </div>
+          </div>
+          <div class="editor-footer">
+            <button id="delete-collection" class="btn btn-outline-danger btn-sm" type="button">
+              <i class="fas fa-trash"></i> Delete Collection
+            </button>
+            <div>
+              <span id="saved-indicator" class="saved-indicator"></span>
+              <button class="btn btn-outline-secondary btn-sm me-2" type="button" data-bs-dismiss="modal">Cancel</button>
+              <button class="btn btn-primary-custom" type="submit"><i class="fas fa-save"></i> Save Collection</button>
+            </div>
+          </div>
+        </form>
+
+        <section id="profiles-panel" class="profiles-panel">
+          <div class="profile-heading">
+            <div>
+              <h5><i class="fas fa-filter"></i> Summary Profiles</h5>
+              <small>Choose one matching completed run per Target for this Collection summary.</small>
+            </div>
+          </div>
+          <div id="profile-list" class="profile-list"></div>
+          <form id="profile-editor" class="profile-editor">
+            <div class="editor-grid">
+              <div>
+                <label for="profile-name">Profile name</label>
+                <input id="profile-name" class="form-control" placeholder="Nightly main" required>
+              </div>
+              <div>
+                <label for="profile-purpose">Run purpose</label>
+                <select id="profile-purpose" class="form-select"></select>
+                <div id="purpose-help" class="help"></div>
+              </div>
+              <div>
+                <label for="profile-window">Lookback window (hours)</label>
+                <input id="profile-window" class="form-control" type="number" min="1" value="36" required>
+              </div>
+              <div class="profile-primary">
+                <label><input id="profile-primary" class="form-check-input" type="checkbox" checked> Use as the primary profile</label>
+                <div class="help">The primary profile opens by default on the Collection Summary.</div>
+              </div>
+              <div class="span-2">
+                <label>Source filters <span class="muted">(optional)</span></label>
+                <div id="profile-selector-tokens" class="filter-tokens"></div>
+                <div class="filter-composer">
+                  <select id="profile-role" class="form-select"><option value="">Source role</option></select>
+                  <select id="profile-branch" class="form-select" disabled><option value="">Branch</option></select>
+                  <button id="add-profile-selector" class="btn btn-outline-custom" type="button" disabled title="Add source filter"><i class="fas fa-plus"></i></button>
+                </div>
+                <div id="selector-suggestions" class="filter-suggestions"></div>
+                <div class="help">Click an observed source state to add an exact filter. Leaving this empty matches any source state for the selected purpose.</div>
+              </div>
+            </div>
+            <div class="profile-actions">
+              <button id="create-profile" class="btn btn-primary-custom" type="submit"><i class="fas fa-plus"></i> Create Profile</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const collectionKey = {{ collection_key | tojson }};
-const api = async url => { const response = await fetch(url); const body = await response.json(); if (!response.ok || !body.success) throw new Error(body.error || 'Request failed'); return body.data; };
-async function load() {
-  const collection = await api(`/api/collections/${collectionKey}`);
-  document.getElementById('collection-name').textContent = collection.display_name;
+window.__COLLECTION_KEY__ = collectionKey;
+window.__editCollectionModal = new bootstrap.Modal(document.getElementById('edit-collection-modal'));
+
+const api = async url => {
+  const response = await fetch(url);
+  const body = await response.json();
+  if (!response.ok || !body.success) throw new Error(body.error || 'Request failed');
+  return body.data;
+};
+
+function fillSummarySelect(collection) {
   const select = document.getElementById('profile');
-  select.innerHTML = collection.profiles.map(profile => `<option value="${profile.id}">${profile.name}</option>`).join('');
-  select.value = collection.profiles.find(profile => profile.is_primary)?.id || collection.profiles[0]?.id || '';
-  select.onchange = render;
-  await render();
+  const previous = select.value;
+  select.innerHTML = (collection.profiles || []).map(profile =>
+    `<option value="${profile.id}">${profile.name}</option>`
+  ).join('');
+  const preferred = previous
+    || collection.profiles.find(profile => profile.is_primary)?.id
+    || collection.profiles[0]?.id
+    || '';
+  select.value = preferred;
 }
-async function render() {
+
+async function renderSummary() {
   const profileId = document.getElementById('profile').value;
-  if (!profileId) { document.getElementById('tiles').innerHTML = '<div class="empty">No Summary profile configured.</div>'; document.getElementById('summary-time').textContent = 'Create a Summary profile in Settings to select a deterministic run set.'; return; }
+  if (!profileId) {
+    document.getElementById('tiles').innerHTML = '<div class="empty">No Summary profile configured.</div>';
+    document.getElementById('summary-time').textContent = 'Use Edit to create a Summary profile for a deterministic run set.';
+    document.getElementById('tools').innerHTML = '';
+    document.getElementById('profile-details').textContent = '';
+    return;
+  }
   const at = new URLSearchParams(window.location.search).get('at') || new Date().toISOString();
-  const [collection, selections] = await Promise.all([api(`/api/collections/${collectionKey}`), api(`/api/collections/${collectionKey}/summary?profile_id=${profileId}&at=${encodeURIComponent(at)}`)]);
-  const profile = collection.profiles.find(item => String(item.id) === profileId);
+  const [collection, selections] = await Promise.all([
+    api(`/api/collections/${collectionKey}`),
+    api(`/api/collections/${collectionKey}/summary?profile_id=${profileId}&at=${encodeURIComponent(at)}`),
+  ]);
+  document.getElementById('header-name').textContent = collection.display_name;
+  document.getElementById('collection-name-summary').textContent = collection.display_name;
+  const profile = collection.profiles.find(item => String(item.id) === String(profileId));
   document.getElementById('summary-time').textContent = `Requested at ${at}`;
-  document.getElementById('profile-details').textContent = `${profile.purpose}, ${profile.window_hours}h window`;
+  document.getElementById('profile-details').textContent = profile
+    ? `${profile.purpose}, ${profile.window_hours}h window`
+    : '';
   const context = `profile_id=${encodeURIComponent(profileId)}&at=${encodeURIComponent(at)}`;
   document.getElementById('tools').innerHTML = ['analyzer', 'matrix', 'failures'].map(tool =>
-    `<a class="btn btn-outline-primary btn-sm me-2" href="/collections/${collectionKey}/${tool}?${context}">${tool[0].toUpperCase() + tool.slice(1)}</a>`
+    `<a class="btn btn-outline-primary btn-sm" href="/collections/${collectionKey}/${tool}?${context}">${tool[0].toUpperCase() + tool.slice(1)}</a>`
   ).join('');
   document.getElementById('tiles').innerHTML = selections.map(selection => selection.run_id
     ? `<article class="tile match"><strong>${selection.target_key}</strong><div class="detail">Selected Run</div><a href="/testRun/${selection.run_id}/index.html">${selection.run_id}</a><div class="detail"><a href="/api/test-runs?target=${selection.target_key}">Target history</a></div></article>`
-    : `<article class="tile no-match"><strong>${selection.target_key}</strong><div class="detail">No matching run</div></article>`).join('');
+    : `<article class="tile no-match"><strong>${selection.target_key}</strong><div class="detail">No matching run</div></article>`
+  ).join('');
 }
-load().catch(error => document.getElementById('tiles').textContent = error.message);
+
+window.__onCollectionUpdated = collection => {
+  fillSummarySelect(collection);
+  renderSummary().catch(error => {
+    document.getElementById('tiles').textContent = error.message;
+  });
+};
+
+document.getElementById('profile').onchange = () => {
+  renderSummary().catch(error => {
+    document.getElementById('tiles').textContent = error.message;
+  });
+};
+
+api(`/api/collections/${collectionKey}`).then(collection => {
+  fillSummarySelect(collection);
+  document.getElementById('header-name').textContent = collection.display_name;
+  document.getElementById('collection-name-summary').textContent = collection.display_name;
+  return renderSummary();
+}).catch(error => {
+  document.getElementById('tiles').textContent = error.message;
+});
 </script>
+<script src="/static/collection_admin.js"></script>
 </body>
 </html>

@@ -1405,14 +1405,6 @@
 
   // Initial connect
   connectUIWS();
-  fetch('/api/targets?needs_setup=true').then(response => response.json()).then(data => {
-    if (data.success && data.data.length) {
-      const badge = document.getElementById('needs-setup-badge');
-      if (!badge) return;
-      badge.textContent = data.data.length;
-      badge.classList.remove('d-none');
-    }
-  }).catch(() => {});
   const runFilters = document.getElementById('run-filters');
   const filterParams = new URLSearchParams(window.location.search);
   for (const input of runFilters.elements) if (input.name && filterParams.has(input.name)) input.value = filterParams.get(input.name);

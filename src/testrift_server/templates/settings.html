@@ -6,7 +6,6 @@
     <title>Settings - TestRift</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="/static/target_collections.css?v=4" rel="stylesheet">
     <link href="/static/app_shell.css" rel="stylesheet">
     <style>
         :root {
@@ -222,74 +221,6 @@
                     </div>
                 </div>
             </div>
-
-            <div class="settings-card target-collections">
-                <h3><i class="fas fa-layer-group"></i> Targets & Collections</h3>
-                <div id="target-collections-status" class="status" role="alert"></div>
-                <section id="onboarding-panel" class="onboarding-panel mb-4" hidden>
-                    <div class="section-header">
-                        <div>
-                            <h4><i class="fas fa-triangle-exclamation"></i> Target Onboarding</h4>
-                            <small>Complete the server-owned setup for a newly reported Target.</small>
-                        </div>
-                    </div>
-                    <div class="onboarding-body">
-                        <div class="onboarding-fields">
-                            <label for="setup-target">Reported Target</label><select id="setup-target" class="form-select"></select>
-                            <label for="setup-name">Display name</label><input id="setup-name" class="form-control">
-                        </div>
-                        <div>
-                            <label>Collections</label><div id="setup-collections" class="membership"></div>
-                        </div>
-                        <div class="onboarding-actions"><span>Target keys arrive from test clients; membership is configured here.</span><button id="complete-setup" class="btn btn-primary-custom"><i class="fas fa-check"></i> Complete Setup</button></div>
-                    </div>
-                </section>
-                <div class="summary-row" aria-label="Target and Collection summary">
-                    <div class="summary-item"><strong id="target-count">0</strong><span>Known Targets</span></div>
-                    <div class="summary-item"><strong id="collection-count">0</strong><span>Collections</span></div>
-                    <div class="summary-item warning"><strong id="pending-target-count">0</strong><span>Need Setup</span></div>
-                </div>
-                <div class="workspace">
-                    <section class="section" aria-labelledby="targets-heading">
-                        <div class="section-header">
-                            <div><h4 id="targets-heading"><i class="fas fa-crosshairs"></i> Targets</h4><small>Stable identities reported by test clients</small></div>
-                            <div class="search-wrap"><i class="fas fa-search"></i><input id="target-search" class="form-control form-control-sm" type="search" placeholder="Find target"></div>
-                        </div>
-                        <table class="data-table"><thead><tr><th>Target</th><th>Key from client</th><th>Collections</th><th>Status</th></tr></thead><tbody id="targets-body"></tbody></table>
-                        <div id="targets-empty" class="empty-state">No Targets match this search.</div>
-                    </section>
-                    <section class="section" aria-labelledby="collections-heading">
-                        <div class="section-header">
-                            <div><h4 id="collections-heading"><i class="fas fa-layer-group"></i> Collections</h4><small>Combined views made from one or more Targets</small></div>
-                            <button id="new-collection" class="btn btn-outline-custom btn-sm" title="New Collection"><i class="fas fa-plus"></i></button>
-                        </div>
-                        <div id="collections-list" class="collection-list"></div>
-                        <form id="collection-editor" class="collection-editor">
-                            <div class="editor-grid">
-                                <div><label for="collection-name">Display name</label><input id="collection-name" class="form-control" placeholder="u-connectXpress" required></div>
-                                <div><label for="collection-key">URL key</label><div class="input-group"><span class="input-group-text">/collections/</span><input id="collection-key" class="form-control" placeholder="uconnectxpress" pattern="[a-z0-9\-]+" required></div></div>
-                                <div class="span-2"><label for="collection-description">Description</label><input id="collection-description" class="form-control" placeholder="What this combined overview represents"></div>
-                                <div class="span-2"><label>Target membership <span id="member-count" class="muted"></span></label><div id="collection-members" class="membership"></div><div class="help">Membership is managed by TestRift. Test clients only send their Target key.</div></div>
-                            </div>
-                            <div class="editor-footer"><button id="delete-collection" class="btn btn-outline-danger btn-sm" type="button" hidden><i class="fas fa-trash"></i> Delete</button><div><span id="saved-indicator" class="saved-indicator"></span><button class="btn btn-primary-custom" type="submit"><i class="fas fa-save"></i> Save Collection</button></div></div>
-                        </form>
-                        <section id="profiles-panel" class="profiles-panel" hidden>
-                            <div class="profile-heading"><div><h5><i class="fas fa-filter"></i> Summary Profiles</h5><small>Choose one matching completed run per Target for this Collection summary.</small></div><a id="open-collection-summary" class="btn btn-outline-custom btn-sm" target="_blank"><i class="fas fa-eye"></i> Open Summary</a></div>
-                            <div id="profile-list" class="profile-list"></div>
-                            <form id="profile-editor" class="profile-editor">
-                                <div class="editor-grid">
-                                    <div><label for="profile-name">Profile name</label><input id="profile-name" class="form-control" placeholder="Nightly main" required></div>
-                                    <div><label for="profile-purpose">Run purpose</label><select id="profile-purpose" class="form-select"></select><div id="purpose-help" class="help">Values observed in completed runs for this Collection's Targets.</div></div>
-                                    <div><label for="profile-window">Lookback window (hours)</label><input id="profile-window" class="form-control" type="number" min="1" value="36" required></div>
-                                    <div class="profile-primary"><label><input id="profile-primary" class="form-check-input" type="checkbox" checked> Use as the primary profile</label><div class="help">The primary profile opens by default on the Collection Summary.</div></div>
-                                    <div class="span-2"><label>Source filters <span class="muted">(optional)</span></label><div id="profile-selector-tokens" class="filter-tokens"></div><div class="filter-composer"><select id="profile-role" class="form-select"><option value="">Source role</option></select><select id="profile-branch" class="form-select" disabled><option value="">Branch</option></select><button id="add-profile-selector" class="btn btn-outline-custom" type="button" disabled title="Add source filter"><i class="fas fa-plus"></i></button></div><div id="selector-suggestions" class="filter-suggestions"></div><div class="help">Click an observed source state to add an exact filter. Leaving this empty matches any source state for the selected purpose.</div></div>
-                                </div>
-                                <div class="profile-actions"><button id="create-profile" class="btn btn-primary-custom" type="submit"><i class="fas fa-plus"></i> Create Profile</button></div>
-                            </form>
-                        </section>
-                    </section>
-                </div>
-            </div>
         </div>
     </div>
     </div>
@@ -392,6 +323,5 @@
     loadEmailRecipients();
     loadAiUsage();
     </script>
-    <script src="/static/target_collections.js?v=4"></script>
 </body>
 </html>

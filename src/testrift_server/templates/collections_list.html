@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Collections - TestRift{% endblock %}
 {% block head %}
+<link href="/static/entity_admin.css" rel="stylesheet">
 <style>
   :root { font-size: 14px; }
   a { color: #337ab7; }
@@ -29,16 +30,62 @@
     margin-top: 8px;
   }
   .content-section { padding: 24px 30px 30px; }
+  .list-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
 </style>
 {% endblock %}
 {% block body %}
-<div class="main-container">
+<div class="main-container entity-admin">
   <div class="header-section">
     <h1>Collections</h1>
     <div class="subtitle">Groups of Targets for shared reporting</div>
   </div>
   <div class="content-section">
-    <div id="collections-status" class="small text-muted mb-2">Loading…</div>
+    <div class="list-toolbar">
+      <div id="collections-status" class="small text-muted">Loading…</div>
+      <button id="toggle-create" class="btn btn-primary-custom btn-sm" type="button">
+        <i class="fas fa-plus"></i> New Collection
+      </button>
+    </div>
+
+    <section id="create-panel" class="section create-panel" hidden>
+      <div class="section-header">
+        <h3>Create Collection</h3>
+      </div>
+      <div class="section-body">
+        <div id="create-status" class="status" role="alert"></div>
+        <form id="create-collection">
+          <div class="editor-grid">
+            <div>
+              <label for="new-collection-name">Display name</label>
+              <input id="new-collection-name" class="form-control" placeholder="u-connectXpress" required>
+            </div>
+            <div>
+              <label for="new-collection-key">URL key</label>
+              <div class="input-group">
+                <span class="input-group-text">/collections/</span>
+                <input id="new-collection-key" class="form-control" placeholder="uconnectxpress" pattern="[a-z0-9\-]+" required>
+              </div>
+            </div>
+            <div class="span-2">
+              <label for="new-collection-description">Description</label>
+              <input id="new-collection-description" class="form-control" placeholder="What this combined overview represents">
+            </div>
+          </div>
+          <div class="editor-footer">
+            <button id="cancel-create" class="btn btn-outline-custom btn-sm" type="button">Cancel</button>
+            <button class="btn btn-primary-custom" type="submit"><i class="fas fa-plus"></i> Create</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
     <table class="entity-list" id="collections-table">
       <thead>
         <tr>
@@ -50,12 +97,79 @@
       <tbody id="collections-body">
       </tbody>
     </table>
-    <div id="collections-empty" class="entity-empty d-none">No Collections yet. Create them under Settings.</div>
+    <div id="collections-empty" class="entity-empty d-none">No Collections yet. Use New Collection to create one.</div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function slugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+const createPanel = document.getElementById('create-panel');
+const createStatus = document.getElementById('create-status');
+let keyTouched = false;
+
+document.getElementById('toggle-create').addEventListener('click', () => {
+  createPanel.hidden = !createPanel.hidden;
+  if (!createPanel.hidden) {
+    document.getElementById('new-collection-name').focus();
+  }
+});
+
+document.getElementById('cancel-create').addEventListener('click', () => {
+  createPanel.hidden = true;
+  createStatus.textContent = '';
+});
+
+document.getElementById('new-collection-name').addEventListener('input', event => {
+  if (keyTouched) return;
+  document.getElementById('new-collection-key').value = slugify(event.target.value);
+});
+
+document.getElementById('new-collection-key').addEventListener('input', () => {
+  keyTouched = true;
+});
+
+document.getElementById('create-collection').addEventListener('submit', async event => {
+  event.preventDefault();
+  createStatus.textContent = '';
+  createStatus.className = 'status';
+  const key = document.getElementById('new-collection-key').value.trim();
+  const body = {
+    key,
+    display_name: document.getElementById('new-collection-name').value.trim(),
+    description: document.getElementById('new-collection-description').value.trim(),
+  };
+  try {
+    const response = await fetch('/api/collections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error || 'Failed to create collection');
+    }
+    window.location.href = `/collections/${encodeURIComponent(key)}`;
+  } catch (error) {
+    createStatus.textContent = error.message || 'Failed to create collection';
+  }
+});
+
 async function loadCollections() {
   const status = document.getElementById('collections-status');
   const body = document.getElementById('collections-body');
@@ -68,12 +182,16 @@ async function loadCollections() {
       throw new Error(payload.error || 'Failed to load collections');
     }
     const collections = payload.data || [];
-    status.textContent = collections.length ? `${collections.length} collection${collections.length === 1 ? '' : 's'}` : '';
+    status.textContent = collections.length
+      ? `${collections.length} collection${collections.length === 1 ? '' : 's'}`
+      : '';
     if (!collections.length) {
       table.classList.add('d-none');
       empty.classList.remove('d-none');
       return;
     }
+    table.classList.remove('d-none');
+    empty.classList.add('d-none');
     body.innerHTML = collections.map(collection => {
       const name = collection.display_name || collection.key;
       const description = collection.description || '—';
@@ -89,14 +207,6 @@ async function loadCollections() {
     empty.classList.remove('d-none');
     empty.textContent = error.message || 'Failed to load collections';
   }
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 loadCollections();
