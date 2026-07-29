@@ -26,6 +26,53 @@ Or:
 python -m testrift_server
 ```
 
+### Docker
+
+All Docker-related files live in `docker/`.
+
+**Build the image:**
+
+```bash
+docker build --network=host -f docker/Dockerfile -t testrift-server:latest .
+```
+
+**Run a container** (host networking — the server binds directly to host port 8080):
+
+```bash
+docker run -d \
+  --name testrift-server \
+  --network=host \
+  -v testrift-data:/data \
+  testrift-server:latest
+```
+
+**Using Docker Compose** (from the project root):
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+Or from the `docker/` directory:
+
+```bash
+cd docker && docker compose up -d
+```
+
+The server will be available at `http://localhost:8080`. Data is persisted in the `testrift-data` Docker volume.
+
+To use a custom config, mount it over the default one:
+
+```bash
+docker run -d \
+  --name testrift-server \
+  --network=host \
+  -v /path/to/your/testrift_server.yaml:/app/testrift_server.yaml:ro \
+  -v testrift-data:/data \
+  testrift-server:latest
+```
+
+Or set the `TESTRIFT_SERVER_YAML` environment variable to an absolute path inside the container.
+
 ### Configuration
 
 - The server loads configuration from either:

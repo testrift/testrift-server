@@ -159,6 +159,31 @@ def build_nuget(c):
         c.run("dotnet pack -c Release")
 
 
+@task
+def docker_build(c):
+    """Build the testrift-server Docker image (uses host network)."""
+    server_dir = Path(__file__).parent
+    with c.cd(str(server_dir)):
+        c.run("docker build --network=host -f docker/Dockerfile -t testrift-server:latest .")
+
+
+@task
+def docker_run(c, detach=True, volume="testrift-data"):
+    """Run the testrift-server container with host networking.
+
+    Args:
+        detach: Run container in the background (default: True).
+        volume: Docker volume name or host path for /data (default: testrift-data).
+    """
+    server_dir = Path(__file__).parent
+    flags = "-d" if detach else "-it --rm"
+    with c.cd(str(server_dir)):
+        c.run(
+            f"docker run {flags} --name testrift-server --network=host "
+            f"-v {volume}:/data testrift-server:latest"
+        )
+
+
 @task(pre=[build_nuget])
 def publish_nuget(c, source="https://api.nuget.org/v3/index.json", api_key=None):
     """Publish the NuGet package. Requires: `dotnet nuget push` and API key.

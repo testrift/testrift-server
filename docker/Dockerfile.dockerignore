@@ -1,0 +1,39 @@
+# Version control
+.git
+.gitignore
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local runtime data
+data/
+*.sqlite
+*.db
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# .NET / NuGet build outputs (not needed for the Python server image)
+nuget/**/bin/
+nuget/**/obj/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
