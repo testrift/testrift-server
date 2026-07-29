@@ -32,11 +32,14 @@ Tests for live log streaming functionality:
 - Log entry processing through WebSocket
 - Connection cleanup and error handling
 
-### `test_http_api.py`
-Tests for HTTP API endpoints:
-- Test run listing
-- Test case log retrieval
-- Attachment handling
+### `test_asgi_contracts.py`
+End-to-end ASGI contract tests against the FastAPI app (no mocked requests):
+- Health, index, server-info, targets/collections APIs
+- Static file serving and tool redirects
+- `/ws/nunit` MessagePack run_started roundtrip
+- Attachment upload/list/download over real multipart HTTP
+
+These catch framework regressions that unit tests with MagicMock requests would miss.
 
 ### `test_integration.py`
 Server integration tests for client-server communication:

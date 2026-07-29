@@ -18,8 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from aiohttp import WSMsgType, web
-from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+from aiohttp import WSMsgType
 
 from testrift_server import database
 from testrift_server.database import TestCaseData as DatabaseTestCaseData

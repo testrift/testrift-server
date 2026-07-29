@@ -4,13 +4,17 @@ TestRift Server - Main entry point.
 A real-time test logging system for NUnit tests.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
 import sys
 import time
+from contextlib import asynccontextmanager
 
-from aiohttp import web
+import uvicorn
+from fastapi import FastAPI, WebSocket
 
 from .config import (
     CONFIG,
@@ -27,6 +31,7 @@ from .config import (
 )
 from .handlers import get_routes as get_handler_routes, log_event
 from .api_handlers import get_routes as get_api_routes
+from .http_compat import convert_aiohttp_path, wrap_handler
 from .websocket import WebSocketServer
 from .cleanup import (
     cleanup_runs_sweep,
@@ -34,6 +39,7 @@ from .cleanup import (
     cleanup_old_runs,
 )
 from . import database
+from .log_buffer import log_buffer
 
 
 # Configure logging with timestamps
@@ -52,7 +58,6 @@ root_logger.addHandler(handler)
 root_logger.setLevel(logging.DEBUG)
 
 # Add in-memory ring buffer handler for the /logs page
-from .log_buffer import log_buffer
 buf_formatter = logging.Formatter('%(message)s')
 log_buffer.setFormatter(buf_formatter)
 log_buffer.setLevel(logging.DEBUG)
@@ -61,59 +66,77 @@ root_logger.addHandler(log_buffer)
 logger = logging.getLogger(__name__)
 
 
-# --- Main app setup ---
+def _register_http_routes(app: FastAPI) -> None:
+    """Register HTTP routes from handler modules."""
+    for methods, path, handler in list(get_handler_routes()) + list(get_api_routes()):
+        app.add_api_route(
+            convert_aiohttp_path(path),
+            wrap_handler(handler),
+            methods=list(methods),
+            name=getattr(handler, "__name__", None),
+        )
 
-app = web.Application()
+
+def _register_websocket_routes(app: FastAPI, ws_server: WebSocketServer) -> None:
+    """Register MessagePack WebSocket endpoints."""
+
+    @app.websocket("/ws/nunit")
+    async def ws_nunit(websocket: WebSocket):
+        await ws_server.accept_and_route(websocket, "/ws/nunit")
+
+    @app.websocket("/ws/ui")
+    async def ws_ui(websocket: WebSocket):
+        await ws_server.accept_and_route(websocket, "/ws/ui")
+
+    @app.websocket("/ws/logs/{run_id}/{test_case_id}")
+    async def ws_logs(websocket: WebSocket, run_id: str, test_case_id: str):
+        await ws_server.accept_and_route(websocket, f"/ws/logs/{run_id}/{test_case_id}")
+
+
+def create_app(ws_server: WebSocketServer | None = None) -> FastAPI:
+    """Create and configure the FastAPI application."""
+    ws_server = ws_server or WebSocketServer()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        try:
+            database.initialize_database(DATA_DIR)
+            await database.db.initialize()
+            log_event("database_initialized")
+        except Exception as e:
+            log_event("database_init_error", level="error", error=str(e))
+
+        try:
+            await cleanup_runs_sweep()
+            await cleanup_abandoned_running_runs()
+        except Exception as e:
+            log_event("startup_cleanup_error", level="error", error=str(e))
+
+        cleanup_task = asyncio.create_task(cleanup_old_runs())
+        app.state.cleanup_task = cleanup_task
+        await ws_server.start_prepared_runs_cleanup()
+
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+            await ws_server.stop_prepared_runs_cleanup()
+
+    app = FastAPI(title="TestRift Server", lifespan=lifespan)
+    app.state.ws_server = ws_server
+    # Dict-like access for helpers that still use app["ws_server"] in tests via CompatRequest
+    _register_http_routes(app)
+    _register_websocket_routes(app, ws_server)
+    return app
+
+
+# Module-level app for `uvicorn testrift_server.tr_server:app`
 ws_server = WebSocketServer()
-
-app["ws_server"] = ws_server
-
-# Collect routes from all modules
-routes = []
-routes.extend(get_handler_routes())
-routes.extend(get_api_routes())
-routes.append(web.get("/ws/{tail:.*}", ws_server.handle_ws))
-
-app.add_routes(routes)
-
-
-async def on_startup(app):
-    """Application startup handler."""
-    # Initialize database with configured data directory
-    try:
-        database.initialize_database(DATA_DIR)
-        await database.db.initialize()
-        log_event("database_initialized")
-    except Exception as e:
-        log_event("database_init_error", level="error", error=str(e))
-
-    # Run an immediate cleanup sweep at startup
-    try:
-        await cleanup_runs_sweep()
-        await cleanup_abandoned_running_runs()
-    except Exception as e:
-        log_event("startup_cleanup_error", level="error", error=str(e))
-
-    app["cleanup_task"] = asyncio.create_task(cleanup_old_runs())
-
-    # Start prepared runs cleanup task
-    await ws_server.start_prepared_runs_cleanup()
-
-
-async def on_cleanup(app):
-    """Application cleanup handler."""
-    app["cleanup_task"].cancel()
-    try:
-        await app["cleanup_task"]
-    except asyncio.CancelledError:
-        pass
-
-    # Stop prepared runs cleanup
-    await ws_server.stop_prepared_runs_cleanup()
-
-
-app.on_startup.append(on_startup)
-app.on_cleanup.append(on_cleanup)
+app = create_app(ws_server=ws_server)
 
 
 def main(argv=None):
@@ -199,15 +222,14 @@ def main(argv=None):
         max_size_mb = ATTACHMENT_MAX_SIZE // (1024 * 1024)
         logger.info(f"Max attachment size: {max_size_mb}MB")
 
-    def _runner_print(*args):
-        """Route aiohttp runner banner through the logger for timestamps."""
-        message = " ".join(str(arg) for arg in args)
-        logger.info(message)
-
-    # Disable aiohttp's built-in access logging — it always logs at INFO level
-    # and there's no way to downgrade it to DEBUG. Application-level log_event()
-    # calls already cover meaningful request activity.
-    web.run_app(app, host=host, port=PORT, print=_runner_print, access_log=None)
+    # Disable access logs; application-level log_event() covers meaningful activity.
+    uvicorn.run(
+        app,
+        host=host,
+        port=PORT,
+        log_level="info",
+        access_log=False,
+    )
     return 0
 
 

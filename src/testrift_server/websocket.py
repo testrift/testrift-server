@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import msgpack
-from aiohttp import web
+from .http_compat import WebSocketWrapper, WSMsgType
 
 from .config import DEFAULT_RETENTION_DAYS
 from .protocol import (
@@ -188,25 +188,25 @@ class WebSocketServer:
             counter += 1
 
     async def handle_ws(self, request):
-        """Main WebSocket handler that routes to appropriate sub-handler."""
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        path = request.path
+        """Legacy aiohttp entrypoint; FastAPI uses dedicated websocket routes."""
+        raise RuntimeError(
+            "handle_ws is not used with FastAPI; use handle_nunit_ws/handle_ui_ws/handle_log_stream"
+        )
+
+    async def accept_and_route(self, websocket, path: str):
+        """Accept a Starlette WebSocket and route by path."""
+        await websocket.accept()
+        ws = WebSocketWrapper(websocket)
         if path == "/ws/nunit":
             await self.handle_nunit_ws(ws)
         elif path == "/ws/ui":
             await self.handle_ui_ws(ws)
         else:
-            # Try matching /ws/logs/{run_id}/{test_case_id}
             match = re.match(r"^/ws/logs/([^/]+)/([^/]+)$", path)
             if match:
-                run_id = match.group(1)
-                test_case_id = match.group(2)
-                await self.handle_log_stream(ws, run_id, test_case_id)
+                await self.handle_log_stream(ws, match.group(1), match.group(2))
             else:
                 await ws.close()
-
-        return ws
 
     async def handle_nunit_ws(self, ws):
         """Handle WebSocket connection from NUnit test client."""
@@ -360,18 +360,18 @@ class WebSocketServer:
                 last_activity = datetime.now(UTC)
                 logger.debug(f"Received message from NUnit client: {msg.type}")
 
-                if msg.type == web.WSMsgType.CLOSE:
+                if msg.type == WSMsgType.CLOSE:
                     logger.debug(f"NUnit WebSocket connection closed normally for run {run.id if run else 'unknown'}")
                     if run and run.status == "running":
                         await mark_run_aborted("WebSocket closed before run_finished was sent")
                     break
-                elif msg.type == web.WSMsgType.ERROR:
+                elif msg.type == WSMsgType.ERROR:
                     logger.warning(f"NUnit WebSocket connection error: {ws.exception()}")
                     if run and run.status == "running":
                         await mark_run_aborted("WebSocket error before run_finished was sent")
                     break
 
-                if msg.type == web.WSMsgType.BINARY:
+                if msg.type == WSMsgType.BINARY:
                     try:
                         raw_message = msgpack.unpackb(msg.data, raw=False)
                         data = normalize_message(raw_message, string_table)
@@ -1265,10 +1265,10 @@ class WebSocketServer:
         self.ui_clients.add(ws)
         try:
             async for msg in ws:
-                if msg.type == web.WSMsgType.TEXT:
+                if msg.type == WSMsgType.TEXT:
                     # UI clients currently send no commands
                     pass
-                elif msg.type == web.WSMsgType.ERROR:
+                elif msg.type == WSMsgType.ERROR:
                     logger.error("UI ws connection closed with exception %s", ws.exception())
         finally:
             self.ui_clients.remove(ws)

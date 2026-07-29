@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from aiohttp import web, MultipartReader
+from testrift_server.http_compat import web
 
 from testrift_server import database
 from testrift_server.handlers import (

@@ -177,7 +177,7 @@ This will run the `TestWithAttachments` test which:
 
 ### Server
 - `aiofiles>=23.0.0` - For async file operations
-- `aiohttp>=3.8.0` - For HTTP handling
+- `fastapi`, `uvicorn`, `python-multipart` - HTTP/WebSocket serving
 
 ### Client (NUnit Plugin)
 - `System.Net.Http` - For HTTP client operations

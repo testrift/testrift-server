@@ -16,7 +16,7 @@ This NuGet package contains:
 - TestRift Server Python source code
 - Platform-specific launcher scripts (`testrift-server.bat`, `testrift-server.sh`)
 - Automatic Python virtual environment management
-- All required Python dependencies (aiohttp, aiofiles, PyYAML, jinja2, aiosqlite)
+- All required Python dependencies (fastapi, uvicorn, aiofiles, PyYAML, jinja2, aiosqlite)
 
 ## Installation
 

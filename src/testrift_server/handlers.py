@@ -12,8 +12,9 @@ UTC = timezone.utc
 
 import aiofiles
 import msgpack
-from aiohttp import web
 from jinja2 import Environment, FileSystemLoader
+
+from .http_compat import web
 
 from .config import (
     TEMPLATES_DIR,
@@ -887,13 +888,19 @@ async def target_handler(request):
 
 
 async def target_tool_redirect_handler(request):
-    return web.HTTPFound(f"/{request.match_info['tool']}?target={request.match_info['key']}")
+    tool = request.match_info["tool"]
+    if tool not in ("analyzer", "matrix", "failures"):
+        return web.Response(status=404, text="Not Found")
+    return web.HTTPFound(f"/{tool}?target={request.match_info['key']}")
 
 
 async def collection_tool_redirect_handler(request):
+    tool = request.match_info["tool"]
+    if tool not in ("analyzer", "matrix", "failures"):
+        return web.Response(status=404, text="Not Found")
     query = request.rel_url.query_string
     suffix = f"?collection={request.match_info['key']}" + (f"&{query}" if query else "")
-    return web.HTTPFound(f"/{request.match_info['tool']}{suffix}")
+    return web.HTTPFound(f"/{tool}{suffix}")
 
 
 async def server_log_handler(request):
@@ -910,32 +917,32 @@ async def server_log_handler(request):
 # --- Route Registration ---
 
 def get_routes():
-    """Return list of routes for HTTP handlers."""
+    """Return list of (methods, path, handler) tuples for HTTP handlers."""
     routes = [
-        web.get("/", index_handler),
-        web.get("/testRun/{run_id}/index.html", test_run_index_handler),
-        web.get("/testRun/{run_id}/log/{test_case_id}.html", test_case_log_handler),
-        web.get("/testRun/{tail:.*}", static_handler),
-        web.get("/static/{path:.*}", static_file_handler),
-        web.get("/export/{run_id}.zip", zip_export_handler),
-        web.get("/health", health_handler),
-        web.get("/analyzer", analyzer_handler),
-        web.get("/matrix", matrix_handler),
-        web.get("/failures", failures_handler),
-        web.get("/settings", settings_handler),
-        web.get("/targets/{key}", target_handler),
-        web.get("/collections/{key}", collection_summary_handler),
-        web.get("/targets/{key}/{tool:analyzer|matrix|failures}", target_tool_redirect_handler),
-        web.get("/collections/{key}/{tool:analyzer|matrix|failures}", collection_tool_redirect_handler),
-        web.get("/logs", server_log_handler),
+        (("GET",), "/", index_handler),
+        (("GET",), "/testRun/{run_id}/index.html", test_run_index_handler),
+        (("GET",), "/testRun/{run_id}/log/{test_case_id}.html", test_case_log_handler),
+        (("GET",), "/testRun/{tail:.*}", static_handler),
+        (("GET",), "/static/{path:.*}", static_file_handler),
+        (("GET",), "/export/{run_id}.zip", zip_export_handler),
+        (("GET",), "/health", health_handler),
+        (("GET",), "/analyzer", analyzer_handler),
+        (("GET",), "/matrix", matrix_handler),
+        (("GET",), "/failures", failures_handler),
+        (("GET",), "/settings", settings_handler),
+        (("GET",), "/targets/{key}", target_handler),
+        (("GET",), "/collections/{key}", collection_summary_handler),
+        (("GET",), "/targets/{key}/{tool}", target_tool_redirect_handler),
+        (("GET",), "/collections/{key}/{tool}", collection_tool_redirect_handler),
+        (("GET",), "/logs", server_log_handler),
     ]
 
     # Add attachment routes only if enabled
     if ATTACHMENTS_ENABLED:
         routes.extend([
-            web.post("/api/attachments/{run_id}/{test_case_id}/upload", upload_attachment_handler),
-            web.get("/api/attachments/{run_id}/{test_case_id}/list", list_attachments_handler),
-            web.get("/api/attachments/{run_id}/{test_case_id}/download/{filename}", download_attachment_handler),
+            (("POST",), "/api/attachments/{run_id}/{test_case_id}/upload", upload_attachment_handler),
+            (("GET",), "/api/attachments/{run_id}/{test_case_id}/list", list_attachments_handler),
+            (("GET",), "/api/attachments/{run_id}/{test_case_id}/download/{filename}", download_attachment_handler),
         ])
 
     return routes

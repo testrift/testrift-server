@@ -72,7 +72,7 @@ def test_main_returns_2_on_mismatch_without_restart_flag(monkeypatch):
     monkeypatch.setattr(config, "get_running_server_info", lambda port: {"service": "testrift-server", "config_hash": "different"})
     # Also patch the module-level import in tr_server
     monkeypatch.setattr(tr_server, "get_running_server_info", lambda port: {"service": "testrift-server", "config_hash": "different"})
-    monkeypatch.setattr(tr_server.web, "run_app", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tr_server.uvicorn, "run", lambda *args, **kwargs: None)
 
     rc = tr_server.main(argv=[])
     assert rc == 2
@@ -112,7 +112,7 @@ def test_main_restart_on_config_triggers_shutdown_and_starts(monkeypatch):
     def fake_run_app(*args, **kwargs):
         calls["run_app"] += 1
 
-    monkeypatch.setattr(tr_server.web, "run_app", fake_run_app)
+    monkeypatch.setattr(tr_server.uvicorn, "run", fake_run_app)
 
     rc = tr_server.main(argv=["--restart-on-config"])
     assert rc == 0
