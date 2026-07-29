@@ -57,6 +57,10 @@ handler.setLevel(logging.INFO)
 root_logger.addHandler(handler)
 root_logger.setLevel(logging.DEBUG)
 
+# Keep library chatter out of the /logs ring buffer (capacity is finite).
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+
 # Add in-memory ring buffer handler for the /logs page
 buf_formatter = logging.Formatter('%(message)s')
 log_buffer.setFormatter(buf_formatter)
@@ -157,7 +161,12 @@ def main(argv=None):
     root_logger.addHandler(handler)
     root_logger.setLevel(logging.DEBUG)
 
+    # Keep library chatter out of the /logs ring buffer (capacity is finite).
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+
     # Re-add ring buffer handler (removed above with the old handlers)
+    log_buffer.clear()
     buf_formatter = logging.Formatter('%(message)s')
     log_buffer.setFormatter(buf_formatter)
     log_buffer.setLevel(logging.DEBUG)

@@ -20,6 +20,11 @@ class RingBufferHandler(logging.Handler):
         self._lock = threading.Lock()
         self._seq = 0
 
+    def clear(self):
+        with self._lock:
+            self._buffer.clear()
+            self._seq = 0
+
     def emit(self, record):
         try:
             entry = {

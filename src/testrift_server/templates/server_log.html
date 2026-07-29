@@ -90,7 +90,7 @@
 
         <div class="toolbar">
             <label>Level:</label>
-            <select id="level-filter" onchange="onFilterChange()">
+            <select id="level-filter" onchange="onLevelChange()">
                 <option value="">ALL</option>
                 <option value="DEBUG">DEBUG</option>
                 <option value="INFO" selected>INFO</option>
@@ -98,7 +98,7 @@
                 <option value="ERROR">ERROR</option>
             </select>
             <label>Search:</label>
-            <input type="text" id="search-filter" placeholder="filter text..." oninput="onFilterChange()" style="width: 200px;">
+            <input type="text" id="search-filter" placeholder="filter text..." oninput="rebuildTable()" style="width: 200px;">
             <label class="auto-label">
                 <input type="checkbox" id="auto-scroll" checked> Auto-scroll
             </label>
@@ -220,14 +220,12 @@
         }
     });
 
-    function onFilterChange() {
-        rebuildTable();
-    }
-
     async function poll() {
         try {
-            const url = `/api/logs?after_seq=${lastSeq}&limit=500`;
-            const resp = await fetch(url);
+            const level = document.getElementById('level-filter').value;
+            const params = new URLSearchParams({ after_seq: String(lastSeq), limit: '500' });
+            if (level) params.set('level', level);
+            const resp = await fetch(`/api/logs?${params}`);
             const data = await resp.json();
             if (data.success && data.entries.length > 0) {
                 for (const e of data.entries) {
@@ -248,6 +246,16 @@
             console.error('Log poll error:', e);
         }
         pollTimer = setTimeout(poll, POLL_INTERVAL);
+    }
+
+    function onLevelChange() {
+        // Re-fetch from the start with the new level so the API can apply it.
+        lastSeq = 0;
+        allEntries = [];
+        document.getElementById('log-tbody').innerHTML = '';
+        document.getElementById('entry-count').textContent = '0';
+        if (pollTimer) clearTimeout(pollTimer);
+        poll();
     }
 
     // Initial load
