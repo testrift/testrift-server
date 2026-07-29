@@ -132,7 +132,7 @@ async def index_handler(request):
     runs_from_db = await database.db.get_test_runs(limit=1000)
     runs_index = await build_run_index_entries(runs_from_db)
 
-    html = render_template('index.html', runs_index=runs_index)
+    html = render_template('index.html', runs_index=runs_index, active_nav='runs')
 
     return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
 
@@ -853,7 +853,7 @@ async def matrix_handler(request):
 async def settings_handler(request):
     """Serve the settings page."""
     try:
-        html = render_template('settings.html')
+        html = render_template('settings.html', active_nav='settings')
         return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
 
     except Exception as e:
@@ -861,11 +861,35 @@ async def settings_handler(request):
         return web.Response(status=500, text=f"Error loading settings page: {str(e)}")
 
 
+async def targets_list_handler(request):
+    """Serve the Targets list page."""
+    try:
+        html = render_template('targets_list.html', active_nav='targets')
+        return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        logger.error(f"Error in targets_list_handler: {e}")
+        return web.Response(status=500, text=f"Error loading Targets list: {str(e)}")
+
+
+async def collections_list_handler(request):
+    """Serve the Collections list page."""
+    try:
+        html = render_template('collections_list.html', active_nav='collections')
+        return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        logger.error(f"Error in collections_list_handler: {e}")
+        return web.Response(status=500, text=f"Error loading Collections list: {str(e)}")
+
+
 async def collection_summary_handler(request):
     """Serve the deterministic Collection Summary page."""
     try:
         return web.Response(
-            text=render_template("collection_summary.html", collection_key=request.match_info["key"]),
+            text=render_template(
+                "collection_summary.html",
+                collection_key=request.match_info["key"],
+                active_nav='collections',
+            ),
             content_type="text/html",
             headers=NO_CACHE_HEADERS,
         )
@@ -878,7 +902,11 @@ async def target_handler(request):
     """Serve Target Run discovery and navigation."""
     try:
         return web.Response(
-            text=render_template("target.html", target_key=request.match_info["key"]),
+            text=render_template(
+                "target.html",
+                target_key=request.match_info["key"],
+                active_nav='targets',
+            ),
             content_type="text/html",
             headers=NO_CACHE_HEADERS,
         )
@@ -906,7 +934,7 @@ async def collection_tool_redirect_handler(request):
 async def server_log_handler(request):
     """Serve the server log page."""
     try:
-        html = render_template('server_log.html')
+        html = render_template('server_log.html', active_nav='logs')
         return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
 
     except Exception as e:
@@ -930,6 +958,8 @@ def get_routes():
         (("GET",), "/matrix", matrix_handler),
         (("GET",), "/failures", failures_handler),
         (("GET",), "/settings", settings_handler),
+        (("GET",), "/targets", targets_list_handler),
+        (("GET",), "/collections", collections_list_handler),
         (("GET",), "/targets/{key}", target_handler),
         (("GET",), "/collections/{key}", collection_summary_handler),
         (("GET",), "/targets/{key}/{tool}", target_tool_redirect_handler),

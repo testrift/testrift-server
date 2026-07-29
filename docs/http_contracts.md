@@ -8,6 +8,7 @@ Frozen surface for the FastAPI migration (Phase 0). Clients (NUnit plugin, colle
 |--------|------|
 | GET | `/` |
 | GET | `/health` |
+| GET | `/targets`, `/collections` |
 | GET | `/analyzer`, `/matrix`, `/failures`, `/settings`, `/logs` |
 | GET | `/targets/{key}`, `/collections/{key}` |
 | GET | `/targets/{key}/{tool}` where tool is `analyzer`\|`matrix`\|`failures` |

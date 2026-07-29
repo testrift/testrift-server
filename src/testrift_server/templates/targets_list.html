@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Targets - TestRift{% endblock %}
+{% block head %}
+<style>
+  :root { font-size: 14px; }
+  a { color: #337ab7; }
+  a:hover { color: #23527c; }
+  .main-container {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+  .header-section {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 28px 30px;
+    text-align: center;
+  }
+  .header-section h1 {
+    margin: 0;
+    font-size: 2.4em;
+    font-weight: 300;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .header-section .subtitle {
+    font-size: 1.15em;
+    opacity: 0.9;
+    margin-top: 8px;
+  }
+  .content-section { padding: 24px 30px 30px; }
+</style>
+{% endblock %}
+{% block body %}
+<div class="main-container">
+  <div class="header-section">
+    <h1>Targets</h1>
+    <div class="subtitle">Stable devices and systems under test</div>
+  </div>
+  <div class="content-section">
+    <div id="targets-status" class="small text-muted mb-2">Loading…</div>
+    <table class="entity-list" id="targets-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Key</th>
+          <th>Setup</th>
+        </tr>
+      </thead>
+      <tbody id="targets-body">
+      </tbody>
+    </table>
+    <div id="targets-empty" class="entity-empty d-none">No Targets yet. Runs will create Targets automatically.</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadTargets() {
+  const status = document.getElementById('targets-status');
+  const body = document.getElementById('targets-body');
+  const empty = document.getElementById('targets-empty');
+  const table = document.getElementById('targets-table');
+  try {
+    const response = await fetch('/api/targets');
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error || 'Failed to load targets');
+    }
+    const targets = payload.data || [];
+    status.textContent = targets.length ? `${targets.length} target${targets.length === 1 ? '' : 's'}` : '';
+    if (!targets.length) {
+      table.classList.add('d-none');
+      empty.classList.remove('d-none');
+      return;
+    }
+    body.innerHTML = targets.map(target => {
+      const setupClass = target.setup_state === 'ready' ? 'ready' : 'needs_setup';
+      const setupLabel = target.setup_state === 'ready' ? 'Ready' : 'Needs setup';
+      const name = target.display_name || target.key;
+      return `<tr>
+        <td><a class="entity-link" href="/targets/${encodeURIComponent(target.key)}">${escapeHtml(name)}</a></td>
+        <td><span class="entity-key">${escapeHtml(target.key)}</span></td>
+        <td><span class="setup-pill ${setupClass}">${setupLabel}</span></td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    status.textContent = '';
+    table.classList.add('d-none');
+    empty.classList.remove('d-none');
+    empty.textContent = error.message || 'Failed to load targets';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+loadTargets();
+</script>
+{% endblock %}

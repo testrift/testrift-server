@@ -112,6 +112,19 @@ class TestHTTPContracts:
         response = asgi_client.get("/settings")
         assert response.status_code == 200
         assert "text/html" in response.headers.get("content-type", "")
+        assert "tr-sidebar" in response.text
+
+    def test_targets_list_page(self, asgi_client):
+        response = asgi_client.get("/targets")
+        assert response.status_code == 200
+        assert "Targets" in response.text
+        assert "tr-sidebar" in response.text
+
+    def test_collections_list_page(self, asgi_client):
+        response = asgi_client.get("/collections")
+        assert response.status_code == 200
+        assert "Collections" in response.text
+        assert "tr-sidebar" in response.text
 
     def test_tool_redirect(self, asgi_client):
         response = asgi_client.get("/targets/demo/analyzer", follow_redirects=False)

@@ -10,6 +10,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/static/status-badges.css" rel="stylesheet">
+    <link href="/static/app_shell.css" rel="stylesheet">
     <script src="/static/msgpack.min.js"></script>
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
@@ -26,8 +27,6 @@
         }
 
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.428571429; /* Bootstrap 3 line-height */
         }
@@ -58,7 +57,7 @@
             background: white;
             border-radius: 15px;
             box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin: 20px auto;
+            margin: 0 auto;
             padding: 0;
             overflow: hidden;
         }
@@ -558,7 +557,9 @@
     <link href="/static/classifications.css" rel="stylesheet">
     <script src="/static/classifications.js"></script>
 </head>
-<body>
+<body class="app-layout">
+    {% include '_sidebar.html' %}
+    <div class="app-main">
     <div class="main-container">
         <div class="header-section">
             <h1>Test Runs</h1>
@@ -575,12 +576,6 @@
                 </a>
                 <a href="/failures" class="btn btn-outline-primary btn-sm">
                     <i class="fas fa-bug"></i> Failures
-                </a>
-                <a href="/settings" class="btn btn-outline-primary btn-sm">
-                  <i class="fas fa-cog"></i> Settings <span id="needs-setup-badge" class="badge bg-warning text-dark d-none"></span>
-                </a>
-                <a href="/logs" class="btn btn-outline-primary btn-sm">
-                    <i class="fas fa-terminal"></i> Server Log
                 </a>
             </div>
             <form id="run-filters" class="d-flex flex-wrap gap-2 mb-3" aria-label="Run filters">
@@ -710,6 +705,7 @@
             </div>
             {% endif %}
         </div>
+    </div>
     </div>
 <script>
   // Function to convert UTC time to local time
@@ -1412,6 +1408,7 @@
   fetch('/api/targets?needs_setup=true').then(response => response.json()).then(data => {
     if (data.success && data.data.length) {
       const badge = document.getElementById('needs-setup-badge');
+      if (!badge) return;
       badge.textContent = data.data.length;
       badge.classList.remove('d-none');
     }

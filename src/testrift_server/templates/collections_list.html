@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Collections - TestRift{% endblock %}
+{% block head %}
+<style>
+  :root { font-size: 14px; }
+  a { color: #337ab7; }
+  a:hover { color: #23527c; }
+  .main-container {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+  .header-section {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 28px 30px;
+    text-align: center;
+  }
+  .header-section h1 {
+    margin: 0;
+    font-size: 2.4em;
+    font-weight: 300;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .header-section .subtitle {
+    font-size: 1.15em;
+    opacity: 0.9;
+    margin-top: 8px;
+  }
+  .content-section { padding: 24px 30px 30px; }
+</style>
+{% endblock %}
+{% block body %}
+<div class="main-container">
+  <div class="header-section">
+    <h1>Collections</h1>
+    <div class="subtitle">Groups of Targets for shared reporting</div>
+  </div>
+  <div class="content-section">
+    <div id="collections-status" class="small text-muted mb-2">Loading…</div>
+    <table class="entity-list" id="collections-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Key</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody id="collections-body">
+      </tbody>
+    </table>
+    <div id="collections-empty" class="entity-empty d-none">No Collections yet. Create them under Settings.</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadCollections() {
+  const status = document.getElementById('collections-status');
+  const body = document.getElementById('collections-body');
+  const empty = document.getElementById('collections-empty');
+  const table = document.getElementById('collections-table');
+  try {
+    const response = await fetch('/api/collections');
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error || 'Failed to load collections');
+    }
+    const collections = payload.data || [];
+    status.textContent = collections.length ? `${collections.length} collection${collections.length === 1 ? '' : 's'}` : '';
+    if (!collections.length) {
+      table.classList.add('d-none');
+      empty.classList.remove('d-none');
+      return;
+    }
+    body.innerHTML = collections.map(collection => {
+      const name = collection.display_name || collection.key;
+      const description = collection.description || '—';
+      return `<tr>
+        <td><a class="entity-link" href="/collections/${encodeURIComponent(collection.key)}">${escapeHtml(name)}</a></td>
+        <td><span class="entity-key">${escapeHtml(collection.key)}</span></td>
+        <td>${escapeHtml(description)}</td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    status.textContent = '';
+    table.classList.add('d-none');
+    empty.classList.remove('d-none');
+    empty.textContent = error.message || 'Failed to load collections';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+loadCollections();
+</script>
+{% endblock %}

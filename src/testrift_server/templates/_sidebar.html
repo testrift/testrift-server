@@ -1,0 +1,30 @@
+<aside class="tr-sidebar" aria-label="Primary">
+  <a class="tr-sidebar-brand" href="/">
+    <i class="fas fa-vial"></i>
+    <span>TestRift</span>
+  </a>
+  <nav class="tr-sidebar-nav">
+    <a href="/" class="{{ 'active' if active_nav == 'runs' else '' }}">
+      <i class="fas fa-list-check"></i>
+      <span>Test Runs</span>
+    </a>
+    <a href="/targets" class="{{ 'active' if active_nav == 'targets' else '' }}">
+      <i class="fas fa-crosshairs"></i>
+      <span>Targets</span>
+    </a>
+    <a href="/collections" class="{{ 'active' if active_nav == 'collections' else '' }}">
+      <i class="fas fa-layer-group"></i>
+      <span>Collections</span>
+    </a>
+    <a href="/settings" class="{{ 'active' if active_nav == 'settings' else '' }}">
+      <i class="fas fa-cog"></i>
+      <span>Settings</span>
+      <span id="needs-setup-badge" class="badge bg-warning text-dark d-none" style="margin-left: auto;"></span>
+    </a>
+    <a href="/logs" class="{{ 'active' if active_nav == 'logs' else '' }}">
+      <i class="fas fa-terminal"></i>
+      <span>Server Log</span>
+    </a>
+  </nav>
+  <div class="tr-sidebar-footer">Test logging</div>
+</aside>
