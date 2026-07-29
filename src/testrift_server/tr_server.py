@@ -119,6 +119,7 @@ def create_app(ws_server: WebSocketServer | None = None) -> FastAPI:
         try:
             yield
         finally:
+            await ws_server.close_all_connections()
             cleanup_task.cancel()
             try:
                 await cleanup_task
@@ -223,12 +224,14 @@ def main(argv=None):
         logger.info(f"Max attachment size: {max_size_mb}MB")
 
     # Disable access logs; application-level log_event() covers meaningful activity.
+    # Bound graceful shutdown so open UI/NUnit WebSockets cannot hang CTRL+C forever.
     uvicorn.run(
         app,
         host=host,
         port=PORT,
         log_level="info",
         access_log=False,
+        timeout_graceful_shutdown=5,
     )
     return 0
 

@@ -116,6 +116,7 @@ class WebSocketServer:
         self.test_runs: dict[str, TestRunData] = {}  # run_id -> TestRunData
         self.prepared_runs: dict[str, dict] = {}  # run_id -> {run_data, created_at, commits, ...}
         self.ui_clients = set()  # websockets for UI clients
+        self._active_websockets = set()
         self._cleanup_task = None
 
     async def start_prepared_runs_cleanup(self):
@@ -130,6 +131,22 @@ class WebSocketServer:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
+
+    async def close_all_connections(self):
+        """Close open WebSockets and unblock log-stream subscribers for shutdown."""
+        for ws in list(self._active_websockets):
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+        for run in list(self.test_runs.values()):
+            for test_case in list(run.test_cases.values()):
+                for queue in list(getattr(test_case, "subscribers", []) or []):
+                    try:
+                        queue.put_nowait(None)
+                    except Exception:
+                        pass
 
     async def _cleanup_prepared_runs_loop(self):
         """Periodically remove prepared runs older than PREPARED_RUN_EXPIRY_SECONDS."""
@@ -197,16 +214,20 @@ class WebSocketServer:
         """Accept a Starlette WebSocket and route by path."""
         await websocket.accept()
         ws = WebSocketWrapper(websocket)
-        if path == "/ws/nunit":
-            await self.handle_nunit_ws(ws)
-        elif path == "/ws/ui":
-            await self.handle_ui_ws(ws)
-        else:
-            match = re.match(r"^/ws/logs/([^/]+)/([^/]+)$", path)
-            if match:
-                await self.handle_log_stream(ws, match.group(1), match.group(2))
+        self._active_websockets.add(ws)
+        try:
+            if path == "/ws/nunit":
+                await self.handle_nunit_ws(ws)
+            elif path == "/ws/ui":
+                await self.handle_ui_ws(ws)
             else:
-                await ws.close()
+                match = re.match(r"^/ws/logs/([^/]+)/([^/]+)$", path)
+                if match:
+                    await self.handle_log_stream(ws, match.group(1), match.group(2))
+                else:
+                    await ws.close()
+        finally:
+            self._active_websockets.discard(ws)
 
     async def handle_nunit_ws(self, ws):
         """Handle WebSocket connection from NUnit test client."""
@@ -1343,13 +1364,19 @@ class WebSocketServer:
         test_case.subscribers.append(queue)
 
         try:
-            while True:
-                entry = await queue.get()
+            while not ws.closed:
+                try:
+                    entry = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                if entry is None:
+                    break
                 await send_msgpack(ws, entry)
         except Exception:
             pass
         finally:
-            test_case.subscribers.remove(queue)
+            if queue in test_case.subscribers:
+                test_case.subscribers.remove(queue)
 
     async def broadcast_ui(self, message):
         """Broadcast a message to all connected UI clients."""

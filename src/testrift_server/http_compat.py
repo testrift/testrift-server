@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
+import asyncio
 
 from starlette.requests import Request
 from starlette.responses import FileResponse as StarletteFileResponse
@@ -257,6 +258,8 @@ class WSMessage:
 class WebSocketWrapper:
     """Make Starlette WebSocket iterable like aiohttp WebSocketResponse."""
 
+    _RECEIVE_POLL_SECONDS = 0.5
+
     def __init__(self, websocket: WebSocket):
         self._ws = websocket
         self._closed = False
@@ -267,7 +270,9 @@ class WebSocketWrapper:
         if self._closed:
             return True
         try:
-            return self._ws.client_state.name == "DISCONNECTED"
+            client = self._ws.client_state.name
+            app_state = self._ws.application_state.name
+            return client == "DISCONNECTED" or app_state == "DISCONNECTED"
         except Exception:
             return self._closed
 
@@ -294,30 +299,37 @@ class WebSocketWrapper:
         return self
 
     async def __anext__(self) -> WSMessage:
-        if self._closed:
-            raise StopAsyncIteration
-        try:
-            message = await self._ws.receive()
-        except WebSocketDisconnect:
-            self._closed = True
-            return WSMessage(WSMsgType.CLOSE)
-        except Exception as exc:
-            self._exception = exc
-            self._closed = True
-            return WSMessage(WSMsgType.ERROR)
+        while True:
+            if self.closed:
+                self._closed = True
+                raise StopAsyncIteration
+            try:
+                message = await asyncio.wait_for(
+                    self._ws.receive(),
+                    timeout=self._RECEIVE_POLL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                continue
+            except WebSocketDisconnect:
+                self._closed = True
+                return WSMessage(WSMsgType.CLOSE)
+            except Exception as exc:
+                self._exception = exc
+                self._closed = True
+                return WSMessage(WSMsgType.ERROR)
 
-        msg_type = message.get("type")
-        if msg_type == "websocket.disconnect":
-            self._closed = True
-            return WSMessage(WSMsgType.CLOSE)
+            msg_type = message.get("type")
+            if msg_type == "websocket.disconnect":
+                self._closed = True
+                return WSMessage(WSMsgType.CLOSE)
 
-        if msg_type == "websocket.receive":
-            if message.get("bytes") is not None:
-                return WSMessage(WSMsgType.BINARY, message["bytes"])
-            if message.get("text") is not None:
-                return WSMessage(WSMsgType.TEXT, message["text"])
+            if msg_type == "websocket.receive":
+                if message.get("bytes") is not None:
+                    return WSMessage(WSMsgType.BINARY, message["bytes"])
+                if message.get("text") is not None:
+                    return WSMessage(WSMsgType.TEXT, message["text"])
 
-        return WSMessage(WSMsgType.TEXT, None)
+            return WSMessage(WSMsgType.TEXT, None)
 
 
 # Expose WSMsgType on web for `web.WSMsgType` compatibility in websocket.py
