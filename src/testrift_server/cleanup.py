@@ -103,7 +103,9 @@ async def cleanup_runs_sweep():
                     if start_time.tzinfo is None:
                         start_time = start_time.replace(tzinfo=UTC)
                     age_days = (now - start_time).days
-                    if age_days > int(retention_days):
+                    # Expire once age reaches retention_days (inclusive), matching
+                    # "days left: 0" and deletes_at = start + retention_days.
+                    if age_days >= int(retention_days):
                         should_delete = True
                         reason = "expired_retention_days"
                 except Exception as e:

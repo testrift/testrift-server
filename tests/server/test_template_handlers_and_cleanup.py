@@ -243,6 +243,33 @@ class TestCleanupFunctions:
         assert run_data is not None
 
     @pytest.mark.asyncio
+    async def test_cleanup_runs_sweep_expires_on_retention_boundary(self, temp_data_dir):
+        """Files are removed once age_days reaches retention_days (inclusive)."""
+        run_id = "boundary-run"
+        boundary_start = (datetime.now(UTC) - timedelta(days=7)).replace(tzinfo=None).isoformat() + "Z"
+
+        test_run = database.TestRunData(
+            run_id=run_id,
+            status="finished",
+            start_time=boundary_start,
+            end_time=datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z",
+            retention_days=7,
+            local_run=False,
+            dut="TestDevice"
+        )
+
+        await database.db.insert_test_run(test_run, {})
+
+        run_path = get_run_path(run_id)
+        run_path.mkdir(parents=True, exist_ok=True)
+        write_meta_msgpack(run_id, {"run_id": run_id})
+
+        await cleanup_runs_sweep()
+
+        assert not run_path.exists()
+        assert await database.db.get_test_run_by_id(run_id) is not None
+
+    @pytest.mark.asyncio
     async def test_cleanup_runs_sweep_not_expired(self, temp_data_dir):
         """Test cleanup sweep doesn't remove non-expired runs."""
         # Create a recent run (within retention_days)
