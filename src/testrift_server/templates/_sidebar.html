@@ -17,28 +17,54 @@
       <i class="fas fa-layer-group"></i>
       <span>Collections</span>
     </a>
-    <a href="/settings" class="{{ 'active' if active_nav == 'settings' else '' }}">
-      <i class="fas fa-cog"></i>
-      <span>Settings</span>
-    </a>
-    <a href="/logs" class="{{ 'active' if active_nav == 'logs' else '' }}">
-      <i class="fas fa-terminal"></i>
-      <span>Server Log</span>
-    </a>
+
+    <details class="tr-nav-section{% if active_nav in ['settings', 'logs'] %} is-active{% endif %}"
+             {% if active_nav in ['settings', 'logs'] %}open{% endif %}
+             data-section="admin">
+      <summary>
+        <i class="fas fa-wrench"></i>
+        <span>Admin</span>
+        <i class="fas fa-chevron-down tr-nav-chevron" aria-hidden="true"></i>
+      </summary>
+      <div class="tr-nav-children" role="group" aria-label="Admin">
+        <a href="/settings" class="{{ 'active' if active_nav == 'settings' else '' }}">
+          <i class="fas fa-cog"></i>
+          <span>Settings</span>
+        </a>
+        <a href="/logs" class="{{ 'active' if active_nav == 'logs' else '' }}">
+          <i class="fas fa-terminal"></i>
+          <span>Server Log</span>
+        </a>
+      </div>
+    </details>
   </nav>
   <div class="tr-sidebar-footer">Test logging</div>
 </aside>
 <script>
 (function () {
   const badge = document.getElementById('needs-setup-badge');
-  if (!badge) return;
-  fetch('/api/targets?needs_setup=true')
-    .then(response => response.json())
-    .then(data => {
-      if (!data.success || !data.data.length) return;
-      badge.textContent = data.data.length;
-      badge.classList.remove('d-none');
-    })
-    .catch(() => {});
+  if (badge) {
+    fetch('/api/targets?needs_setup=true')
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success || !data.data.length) return;
+        badge.textContent = data.data.length;
+        badge.classList.remove('d-none');
+      })
+      .catch(() => {});
+  }
+
+  const section = document.querySelector('.tr-nav-section[data-section="admin"]');
+  if (!section) return;
+  const storageKey = 'tr-sidebar-admin-open';
+  const forcedOpen = section.classList.contains('is-active');
+  if (!forcedOpen) {
+    const saved = localStorage.getItem(storageKey);
+    if (saved === '1') section.open = true;
+    if (saved === '0') section.open = false;
+  }
+  section.addEventListener('toggle', () => {
+    localStorage.setItem(storageKey, section.open ? '1' : '0');
+  });
 })();
 </script>

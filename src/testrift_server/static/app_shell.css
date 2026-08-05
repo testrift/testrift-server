@@ -91,6 +91,90 @@ body.app-layout {
   box-shadow: inset 3px 0 0 var(--tr-sidebar-accent);
 }
 
+.tr-nav-section {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tr-nav-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--tr-sidebar-text);
+  font-weight: 500;
+  font-size: 0.95rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.tr-nav-section > summary::-webkit-details-marker,
+.tr-nav-section > summary::marker {
+  display: none;
+  content: '';
+}
+
+.tr-nav-section > summary > i:first-child {
+  width: 1.1em;
+  text-align: center;
+  opacity: 0.9;
+}
+
+.tr-nav-section > summary:hover {
+  background: var(--tr-sidebar-hover-bg);
+  color: #fff;
+}
+
+.tr-nav-section > summary:focus {
+  outline: none;
+}
+
+.tr-nav-section > summary:focus-visible {
+  outline: 2px solid var(--tr-sidebar-accent);
+  outline-offset: 1px;
+}
+
+.tr-nav-chevron {
+  margin-left: auto;
+  font-size: 0.65rem;
+  opacity: 0.55;
+  transition: transform 0.15s ease;
+}
+
+.tr-nav-section[open] > summary .tr-nav-chevron {
+  transform: rotate(180deg);
+}
+
+.tr-nav-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 2px 0 4px;
+}
+
+.tr-nav-children a {
+  gap: 10px;
+  padding: 8px 12px 8px 36px;
+  font-size: 0.95rem;
+  border-radius: 8px;
+}
+
+.tr-nav-children a i {
+  width: 1.1em;
+  text-align: center;
+  opacity: 0.9;
+}
+
+.tr-nav-children a.active {
+  box-shadow: inset 3px 0 0 var(--tr-sidebar-accent);
+  background: var(--tr-sidebar-active-bg);
+  color: #fff;
+}
+
 .tr-sidebar-footer {
   padding: 12px 16px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
