@@ -123,15 +123,18 @@
           <div class="profile-heading">
             <div>
               <h5><i class="fas fa-filter"></i> Summary Profiles</h5>
-              <small>Choose one matching completed run per Target for this Collection summary.</small>
+              <small>Each profile picks one completed run per Target for this Collection summary.</small>
             </div>
+            <button id="new-profile" class="btn btn-outline-custom btn-sm" type="button">
+              <i class="fas fa-plus"></i> New Profile
+            </button>
           </div>
           <div id="profile-list" class="profile-list"></div>
           <form id="profile-editor" class="profile-editor">
-            <div class="profile-heading profile-add-heading">
+            <div class="profile-heading profile-form-heading">
               <div>
-                <h5><i class="fas fa-plus"></i> Add Summary Profile</h5>
-                <small>Create another profile for this Collection. Existing profiles are listed above.</small>
+                <h5 id="profile-form-title"><i class="fas fa-plus"></i> New Summary Profile</h5>
+                <small id="profile-form-help">Fill in the fields below, then create the profile.</small>
               </div>
             </div>
             <div class="editor-grid">
@@ -165,7 +168,15 @@
               </div>
             </div>
             <div class="profile-actions">
-              <button id="create-profile" class="btn btn-primary-custom" type="submit"><i class="fas fa-plus"></i> Create Profile</button>
+              <button id="delete-profile" class="btn btn-outline-danger btn-sm" type="button" hidden>
+                <i class="fas fa-trash"></i> Delete Profile
+              </button>
+              <div class="profile-actions-end">
+                <button id="cancel-profile" class="btn btn-outline-secondary btn-sm" type="button" hidden>Cancel</button>
+                <button id="save-profile" class="btn btn-primary-custom" type="submit">
+                  <i class="fas fa-plus"></i> Create Profile
+                </button>
+              </div>
             </div>
           </form>
         </section>

@@ -538,6 +538,13 @@ class TestResultsDatabase:
 
     async def update_summary_profile(self, profile_id: int, values: Dict[str, Any]) -> bool:
         async with self.get_connection() as db:
+            if values.get("is_primary"):
+                await db.execute(
+                    """UPDATE summary_profiles SET is_primary = 0
+                       WHERE collection_id = (SELECT collection_id FROM summary_profiles WHERE id = ?)
+                         AND id != ?""",
+                    (profile_id, profile_id),
+                )
             cursor = await db.execute(
                 """UPDATE summary_profiles SET name = ?, is_primary = ?, purpose = ?, window_hours = ?,
                    selection_policy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
@@ -580,6 +587,11 @@ class TestResultsDatabase:
     ) -> int:
         """Create a deterministic Collection Summary profile."""
         async with self.get_connection() as db:
+            if is_primary:
+                await db.execute(
+                    "UPDATE summary_profiles SET is_primary = 0 WHERE collection_id = ?",
+                    (collection_id,),
+                )
             cursor = await db.execute(
                 """INSERT INTO summary_profiles
                    (collection_id, name, is_primary, purpose, window_hours, selection_policy)

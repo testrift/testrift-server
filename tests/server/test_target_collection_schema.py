@@ -1,5 +1,4 @@
 import shutil
-import sqlite3
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,14 +92,17 @@ async def test_target_collection_profile_and_run_sources_are_constrained(initial
         ).fetchone()
         assert source == ("firmware", "main", "abc123")
 
-    with pytest.raises(sqlite3.IntegrityError):
-        await initialized_database.create_summary_profile(
-            collection_id,
-            "another-primary",
-            "nightly",
-            24,
-            is_primary=True,
-        )
+    second_primary_id = await initialized_database.create_summary_profile(
+        collection_id,
+        "another-primary",
+        "nightly",
+        24,
+        is_primary=True,
+    )
+    first_profile = await initialized_database.get_summary_profile(profile_id)
+    second_profile = await initialized_database.get_summary_profile(second_primary_id)
+    assert not first_profile["is_primary"]
+    assert second_profile["is_primary"]
 
     async with initialized_database.get_connection() as connection:
         await connection.execute("DELETE FROM collections WHERE id = ?", (collection_id,))

@@ -7,6 +7,7 @@
         targets: [],
         filterOptions: { purposes: [], source_pairs: [] },
         profileSelectors: [],
+        editingProfileId: null,
     };
 
     const api = async (url, options) => {
@@ -50,19 +51,56 @@
         updateMemberCount();
     };
 
-    const renderProfiles = () => {
-        document.getElementById('profile-list').innerHTML = (state.collection?.profiles || []).map(profile =>
-            `<div class="profile-row"><div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.purpose)} · ${profile.window_hours}h · ${escapeHtml(profile.selection_policy)}</small></div>${profile.is_primary ? '<span class="profile-primary-badge">Primary</span>' : ''}</div>`
-        ).join('') || '<div class="help" style="padding:12px 15px">No Summary Profiles yet.</div>';
+    const syncProfileFormMode = () => {
+        const editing = state.editingProfileId != null;
+        document.getElementById('profile-form-title').innerHTML = editing
+            ? '<i class="fas fa-pen"></i> Edit Summary Profile'
+            : '<i class="fas fa-plus"></i> New Summary Profile';
+        document.getElementById('profile-form-help').textContent = editing
+            ? 'Update this profile, or delete it. Cancel returns to creating a new profile.'
+            : 'Fill in the fields below, then create the profile.';
+        document.getElementById('save-profile').innerHTML = editing
+            ? '<i class="fas fa-save"></i> Save Profile'
+            : '<i class="fas fa-plus"></i> Create Profile';
+        document.getElementById('delete-profile').hidden = !editing;
+        document.getElementById('cancel-profile').hidden = !editing;
+        document.getElementById('new-profile').disabled = !editing && !(state.collection?.profiles || []).length;
+    };
+
+    const clearProfileForm = ({ keepPrimaryChecked = true } = {}) => {
+        state.editingProfileId = null;
+        state.profileSelectors = [];
+        document.getElementById('profile-editor').reset();
+        document.getElementById('profile-window').value = '36';
+        document.getElementById('profile-primary').checked = keepPrimaryChecked;
         renderProfileFilters();
+        syncProfileFormMode();
+        renderProfiles();
+    };
+
+    const renderProfiles = () => {
+        const profiles = state.collection?.profiles || [];
+        document.getElementById('profile-list').innerHTML = profiles.map(profile => {
+            const active = state.editingProfileId === profile.id ? ' active' : '';
+            const primary = profile.is_primary ? '<span class="profile-primary-badge">Primary</span>' : '';
+            return `<button type="button" class="profile-row${active}" data-edit-profile="${profile.id}">
+                <div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.purpose)} · ${profile.window_hours}h · ${escapeHtml(profile.selection_policy)}</small></div>
+                <div class="profile-row-meta">${primary}<span class="profile-edit-hint">Edit</span></div>
+            </button>`;
+        }).join('') || '<div class="help" style="padding:12px 15px">No Summary Profiles yet. Create one below.</div>';
+        syncProfileFormMode();
     };
 
     const renderProfileFilters = () => {
         const purposes = state.filterOptions.purposes;
         const purpose = document.getElementById('profile-purpose');
+        const previous = purpose.value;
         purpose.innerHTML = purposes.map(item =>
             `<option value="${escapeHtml(item.value)}">${escapeHtml(item.value)} (${item.run_count})</option>`
         ).join('') || '<option value="nightly">nightly</option>';
+        if (previous && [...purpose.options].some(option => option.value === previous)) {
+            purpose.value = previous;
+        }
         document.getElementById('purpose-help').textContent = purposes.length
             ? "Values observed in completed runs for this Collection's Targets."
             : 'No completed runs yet; choose the expected run purpose.';
@@ -87,9 +125,39 @@
         if (!selector.source_role || !selector.branch) return;
         if (state.profileSelectors.some(item =>
             item.source_role === selector.source_role && item.branch === selector.branch)) return;
-        state.profileSelectors.push(selector);
+        state.profileSelectors.push({
+            source_role: selector.source_role,
+            branch: selector.branch,
+            target_id: selector.target_id ?? null,
+        });
         renderProfileFilters();
     };
+
+    const loadProfileIntoForm = async profileId => {
+        const profile = await api(`/api/profiles/${profileId}`);
+        state.editingProfileId = profile.id;
+        state.profileSelectors = (profile.selectors || []).map(item => ({
+            source_role: item.source_role,
+            branch: item.branch,
+            target_id: item.target_id ?? null,
+        }));
+        document.getElementById('profile-name').value = profile.name || '';
+        document.getElementById('profile-window').value = String(profile.window_hours || 36);
+        document.getElementById('profile-primary').checked = Boolean(profile.is_primary);
+        renderProfileFilters();
+        document.getElementById('profile-purpose').value = profile.purpose;
+        syncProfileFormMode();
+        renderProfiles();
+        document.getElementById('profile-editor').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+
+    const profilePayload = () => ({
+        name: document.getElementById('profile-name').value.trim(),
+        purpose: document.getElementById('profile-purpose').value,
+        window_hours: Number(document.getElementById('profile-window').value),
+        selectors: state.profileSelectors,
+        is_primary: document.getElementById('profile-primary').checked,
+    });
 
     const fillEditor = () => {
         const collection = state.collection;
@@ -98,6 +166,8 @@
         document.getElementById('collection-key-display').textContent = collection.key;
         renderMembers();
         renderProfiles();
+        renderProfileFilters();
+        syncProfileFormMode();
     };
 
     async function refresh() {
@@ -110,6 +180,11 @@
             state.collection = collection;
             state.targets = targets;
             state.filterOptions = filterOptions;
+            if (state.editingProfileId != null
+                && !(collection.profiles || []).some(profile => profile.id === state.editingProfileId)) {
+                state.editingProfileId = null;
+                state.profileSelectors = [];
+            }
             fillEditor();
             status('');
             return collection;
@@ -150,29 +225,73 @@
 
     document.getElementById('profile-editor').addEventListener('submit', async event => {
         event.preventDefault();
-        const windowHours = Number(document.getElementById('profile-window').value);
-        const body = {
-            name: document.getElementById('profile-name').value.trim(),
-            purpose: document.getElementById('profile-purpose').value,
-            window_hours: windowHours,
-            selectors: state.profileSelectors,
-            is_primary: document.getElementById('profile-primary').checked,
-        };
+        const body = profilePayload();
         try {
-            await api(`/api/collections/${encodeURIComponent(collectionKey)}/profiles`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            event.target.reset();
-            document.getElementById('profile-window').value = '36';
-            state.profileSelectors = [];
-            document.getElementById('profile-primary').checked = true;
+            if (state.editingProfileId != null) {
+                await api(`/api/profiles/${state.editingProfileId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                status('Summary Profile saved.', true);
+            } else {
+                await api(`/api/collections/${encodeURIComponent(collectionKey)}/profiles`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                status('Summary Profile created.', true);
+            }
+            clearProfileForm({ keepPrimaryChecked: false });
             await refresh();
             if (typeof window.__onCollectionUpdated === 'function') {
                 window.__onCollectionUpdated(state.collection);
             }
-            status('Summary Profile created.', true);
+        } catch (error) {
+            status(error.message);
+        }
+    });
+
+    document.getElementById('profile-list').addEventListener('click', async event => {
+        const button = event.target.closest('[data-edit-profile]');
+        if (!button) return;
+        try {
+            status('');
+            await loadProfileIntoForm(Number(button.dataset.editProfile));
+        } catch (error) {
+            status(error.message);
+        }
+    });
+
+    document.getElementById('new-profile').addEventListener('click', () => {
+        status('');
+        clearProfileForm({ keepPrimaryChecked: !(state.collection?.profiles || []).some(profile => profile.is_primary) });
+        document.getElementById('profile-name').focus();
+    });
+
+    document.getElementById('cancel-profile').addEventListener('click', () => {
+        status('');
+        clearProfileForm({ keepPrimaryChecked: !(state.collection?.profiles || []).some(profile => profile.is_primary) });
+    });
+
+    document.getElementById('delete-profile').addEventListener('click', async () => {
+        if (state.editingProfileId == null) return;
+        const profile = (state.collection?.profiles || []).find(item => item.id === state.editingProfileId);
+        const name = profile?.name || `profile ${state.editingProfileId}`;
+        const confirmed = confirm(
+            `Delete summary profile "${name}"?\n\n` +
+            'This permanently removes the profile and its source filters.\n\n' +
+            'This cannot be undone.'
+        );
+        if (!confirmed) return;
+        try {
+            await api(`/api/profiles/${state.editingProfileId}?cascade=true`, { method: 'DELETE' });
+            clearProfileForm({ keepPrimaryChecked: true });
+            await refresh();
+            if (typeof window.__onCollectionUpdated === 'function') {
+                window.__onCollectionUpdated(state.collection);
+            }
+            status('Summary Profile deleted.', true);
         } catch (error) {
             status(error.message);
         }
