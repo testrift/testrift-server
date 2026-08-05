@@ -8,6 +8,7 @@
         filterOptions: { purposes: [], source_pairs: [] },
         profileSelectors: [],
         editingProfileId: null,
+        profileFormOpen: false,
     };
 
     const api = async (url, options) => {
@@ -52,42 +53,61 @@
     };
 
     const syncProfileFormMode = () => {
+        const form = document.getElementById('profile-editor');
         const editing = state.editingProfileId != null;
+        form.hidden = !state.profileFormOpen;
         document.getElementById('profile-form-title').innerHTML = editing
             ? '<i class="fas fa-pen"></i> Edit Summary Profile'
             : '<i class="fas fa-plus"></i> New Summary Profile';
         document.getElementById('profile-form-help').textContent = editing
-            ? 'Update this profile, or delete it. Cancel returns to creating a new profile.'
-            : 'Fill in the fields below, then create the profile.';
+            ? 'Update this profile, or delete it. Cancel returns to the profile list.'
+            : 'Fill in the fields below, then create the profile. Cancel returns to the profile list.';
         document.getElementById('save-profile').innerHTML = editing
             ? '<i class="fas fa-save"></i> Save Profile'
             : '<i class="fas fa-plus"></i> Create Profile';
         document.getElementById('delete-profile').hidden = !editing;
-        document.getElementById('cancel-profile').hidden = !editing;
-        document.getElementById('new-profile').disabled = !editing && !(state.collection?.profiles || []).length;
+        document.getElementById('new-profile').disabled = state.profileFormOpen && !editing;
     };
 
-    const clearProfileForm = ({ keepPrimaryChecked = true } = {}) => {
+    const resetProfileFields = ({ keepPrimaryChecked = true } = {}) => {
         state.editingProfileId = null;
         state.profileSelectors = [];
         document.getElementById('profile-editor').reset();
         document.getElementById('profile-window').value = '36';
         document.getElementById('profile-primary').checked = keepPrimaryChecked;
         renderProfileFilters();
+    };
+
+    const closeProfileForm = () => {
+        state.profileFormOpen = false;
+        resetProfileFields({
+            keepPrimaryChecked: !(state.collection?.profiles || []).some(profile => profile.is_primary),
+        });
         syncProfileFormMode();
         renderProfiles();
+    };
+
+    const openCreateProfileForm = () => {
+        state.profileFormOpen = true;
+        resetProfileFields({
+            keepPrimaryChecked: !(state.collection?.profiles || []).some(profile => profile.is_primary),
+        });
+        syncProfileFormMode();
+        renderProfiles();
+        document.getElementById('profile-editor').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        document.getElementById('profile-name').focus();
     };
 
     const renderProfiles = () => {
         const profiles = state.collection?.profiles || [];
         document.getElementById('profile-list').innerHTML = profiles.map(profile => {
-            const active = state.editingProfileId === profile.id ? ' active' : '';
+            const active = state.profileFormOpen && state.editingProfileId === profile.id ? ' active' : '';
             const primary = profile.is_primary ? '<span class="profile-primary-badge">Primary</span>' : '';
             return `<button type="button" class="profile-row${active}" data-edit-profile="${profile.id}">
                 <div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.purpose)} · ${profile.window_hours}h · ${escapeHtml(profile.selection_policy)}</small></div>
                 <div class="profile-row-meta">${primary}<span class="profile-edit-hint">Edit</span></div>
             </button>`;
-        }).join('') || '<div class="help" style="padding:12px 15px">No Summary Profiles yet. Create one below.</div>';
+        }).join('') || '<div class="help" style="padding:12px 15px">No Summary Profiles yet. Use New Profile to create one.</div>';
         syncProfileFormMode();
     };
 
@@ -135,6 +155,7 @@
 
     const loadProfileIntoForm = async profileId => {
         const profile = await api(`/api/profiles/${profileId}`);
+        state.profileFormOpen = true;
         state.editingProfileId = profile.id;
         state.profileSelectors = (profile.selectors || []).map(item => ({
             source_role: item.source_role,
@@ -165,8 +186,12 @@
         document.getElementById('collection-description').value = collection.description || '';
         document.getElementById('collection-key-display').textContent = collection.key;
         renderMembers();
+        if (!state.profileFormOpen) {
+            state.editingProfileId = null;
+            state.profileSelectors = [];
+        }
         renderProfiles();
-        renderProfileFilters();
+        if (state.profileFormOpen) renderProfileFilters();
         syncProfileFormMode();
     };
 
@@ -184,6 +209,7 @@
                 && !(collection.profiles || []).some(profile => profile.id === state.editingProfileId)) {
                 state.editingProfileId = null;
                 state.profileSelectors = [];
+                state.profileFormOpen = false;
             }
             fillEditor();
             status('');
@@ -242,7 +268,7 @@
                 });
                 status('Summary Profile created.', true);
             }
-            clearProfileForm({ keepPrimaryChecked: false });
+            closeProfileForm();
             await refresh();
             if (typeof window.__onCollectionUpdated === 'function') {
                 window.__onCollectionUpdated(state.collection);
@@ -265,13 +291,12 @@
 
     document.getElementById('new-profile').addEventListener('click', () => {
         status('');
-        clearProfileForm({ keepPrimaryChecked: !(state.collection?.profiles || []).some(profile => profile.is_primary) });
-        document.getElementById('profile-name').focus();
+        openCreateProfileForm();
     });
 
     document.getElementById('cancel-profile').addEventListener('click', () => {
         status('');
-        clearProfileForm({ keepPrimaryChecked: !(state.collection?.profiles || []).some(profile => profile.is_primary) });
+        closeProfileForm();
     });
 
     document.getElementById('delete-profile').addEventListener('click', async () => {
@@ -286,7 +311,7 @@
         if (!confirmed) return;
         try {
             await api(`/api/profiles/${state.editingProfileId}?cascade=true`, { method: 'DELETE' });
-            clearProfileForm({ keepPrimaryChecked: true });
+            closeProfileForm();
             await refresh();
             if (typeof window.__onCollectionUpdated === 'function') {
                 window.__onCollectionUpdated(state.collection);
@@ -354,6 +379,7 @@
     });
 
     document.getElementById('open-edit')?.addEventListener('click', () => {
+        closeProfileForm();
         fillEditor();
         status('');
         window.__editCollectionModal?.show();
