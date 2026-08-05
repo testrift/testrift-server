@@ -424,7 +424,7 @@
 			);
 			container.innerHTML = assigned.length
 				? assigned.map(collection =>
-					`<div class="member-row member-row-readonly"><span>${memberLabelHtml(collection.display_name, collection.key)}</span><a href="/collections/${encodeURIComponent(collection.key)}">Open Collection</a></div>`
+					`<div class="member-row member-row-readonly"><span><a href="/collections/${encodeURIComponent(collection.key)}">${memberLabelHtml(collection.display_name, collection.key)}</a></span></div>`
 				).join('')
 				: '<div class="help">Not in any Collection yet. Add this Target from a Collection\'s Edit dialog.</div>';
 		}

@@ -56,12 +56,16 @@
 .entity-admin .member-row input { margin: 0; }
 .entity-admin .member-row small { display: block; }
 .entity-admin .member-row-readonly {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr;
   cursor: default;
 }
 .entity-admin .member-row-readonly a {
-  font-size: .85rem;
-  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+}
+.entity-admin .member-row-readonly a:hover {
+  color: #667eea;
+  text-decoration: underline;
 }
 .entity-admin .profile-add-heading {
   margin: 12px 0 8px;
