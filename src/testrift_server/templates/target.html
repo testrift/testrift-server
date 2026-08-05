@@ -6,12 +6,15 @@
 	<title>{{ target_key }} - TestRift</title>
 	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+	<link href="/static/status-badges.css" rel="stylesheet">
 	<link href="/static/app_shell.css" rel="stylesheet">
 	<link href="/static/entity_admin.css" rel="stylesheet">
 	<style>
 		:root { font-size: 14px; }
-		body { margin: 0; color: #30343a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-		.app-shell { width: min(1040px, 100%); margin: 0 auto; overflow: hidden; border-radius: 15px; background: #fff; box-shadow: 0 20px 40px rgba(0,0,0,.14); }
+		a { color: #337ab7; }
+		a:hover { color: #23527c; }
+		body { margin: 0; color: #30343a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.428571429; }
+		.app-shell { width: min(1400px, 100%); margin: 0 auto; overflow: hidden; border-radius: 15px; background: #fff; box-shadow: 0 20px 40px rgba(0,0,0,.14); }
 		.header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 24px 30px; color: #fff; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
 		.header h1 { margin: 0; font-size: 2.2rem; font-weight: 300; }
 		.header p { margin: 5px 0 0; opacity: .86; }
@@ -28,27 +31,125 @@
 		.card span { color: #6c757d; font-size: .8rem; text-transform: uppercase; letter-spacing: .4px; }
 		.runs { overflow: hidden; border: 1px solid #dfe3e7; border-radius: 10px; box-shadow: 0 3px 12px rgba(0,0,0,.06); }
 		.runs h2 { margin: 0; padding: 15px 18px; border-bottom: 1px solid #e5e8eb; background: #f8f9fa; color: #495057; font-size: 1.15rem; font-weight: 650; }
-		.run-list { padding: 0; margin: 0; list-style: none; }
-		.run-list a {
+		.runs-body { padding: 0; }
+		.runs-table {
+			width: 100%;
+			background: white;
+			border-collapse: collapse;
+			table-layout: fixed !important;
+		}
+		.table-header { background: #f8f9fa; border-bottom: 2px solid #e9ecef; }
+		.table-header th {
+			padding: 12px 10px;
+			text-align: left;
+			font-weight: 600;
+			color: #495057;
+			font-size: 0.9em;
+			text-transform: uppercase;
+			letter-spacing: 0.5px;
+		}
+		.table-header th:nth-child(1),
+		.run-item td:nth-child(1) { width: 120px !important; max-width: 120px !important; min-width: 120px !important; }
+		.table-header th:nth-child(2),
+		.run-item td:nth-child(2) { width: 300px !important; max-width: 300px !important; min-width: 300px !important; }
+		.table-header th:nth-child(3),
+		.run-item td:nth-child(3) { width: auto; min-width: 250px; }
+		.run-item td { padding: 15px 10px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+		.run-item:last-child td { border-bottom: none; }
+		.run-item:hover { background: #f8f9ff; }
+		.status-column {
+			text-align: center;
+			vertical-align: top;
+			overflow: hidden;
+			word-wrap: break-word;
+		}
+		.status-column > * { display: block !important; margin: 0 auto 8px auto; }
+		.status-column > *:last-child { margin-bottom: 0; }
+		.status-column .status-badge {
+			display: inline-block !important;
+			margin: 0 auto 8px auto;
+			max-width: 100%;
+			box-sizing: border-box;
+			width: 100px;
+		}
+		.status-column .result-badges-container {
+			display: flex !important;
+			margin: 0 auto;
+			max-width: 100%;
+			box-sizing: border-box;
+			justify-content: center;
+		}
+		.title-column { vertical-align: top; }
+		.title-column > * { margin-bottom: 4px; }
+		.title-column > *:last-child { margin-bottom: 0; }
+		.run-title { font-size: 1.3em; font-weight: 600; color: #495057; margin: 0; }
+		.run-link { color: #667eea; text-decoration: none; font-weight: 600; }
+		.run-link:hover { color: #764ba2; text-decoration: none; }
+		.group-pill {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 4px 10px;
+			border-radius: 999px;
+			background: rgba(102, 126, 234, 0.12);
+			color: #4c6ef5;
+			font-size: 0.85em;
+			font-weight: 600;
+			margin-top: 8px;
+		}
+		.group-pill .group-link { color: inherit; text-decoration: none; }
+		.group-pill .group-link:hover { text-decoration: underline; }
+		.run-meta-section {
 			display: flex;
 			align-items: center;
-			justify-content: space-between;
-			gap: 12px;
-			padding: 13px 18px;
-			color: #337ab7;
-			text-decoration: none;
-			border-top: 1px solid #edf0f2;
+			gap: 16px;
+			font-size: 1.0em;
+			color: #6c757d;
+			max-width: 300px;
+			margin-top: 4px;
 		}
-		.run-list a:first-child { border-top: 0; }
-		.run-list a:hover { background: #f0f2ff; }
-		.run-list .run-meta { display: block; color: #6c757d; font-size: .82rem; margin-top: 2px; }
-		.empty { padding: 28px; color: #6c757d; text-align: center; }
+		.metadata-column {
+			font-size: 0.9em;
+			color: #6c757d;
+			line-height: 1.4;
+			vertical-align: top;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+		}
+		.metadata-column .meta-item {
+			display: inline-flex;
+			align-items: center;
+			gap: 4px;
+			margin-right: 12px;
+			margin-bottom: 4px;
+			flex-shrink: 0;
+		}
+		.meta-label { font-weight: 600; color: #495057; }
+		.empty-state { text-align: center; padding: 48px 20px; color: #6c757d; }
+		.spinner {
+			width: 14px;
+			height: 14px;
+			border: 2px solid rgba(0, 0, 0, 0.2);
+			border-top: 2px solid #000;
+			border-radius: 50%;
+			animation: spin 1s linear infinite;
+			margin-left: 0;
+			display: inline-block;
+			vertical-align: middle;
+		}
+		@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 		.status { min-height: 1.2rem; margin-bottom: 10px; color: #b42318; }
 		.status.ok { color: #067647; }
-		@media (max-width: 620px) {
+		@media (max-width: 768px) {
 			.header, .content { padding-right: 16px; padding-left: 16px; }
 			.header { align-items: flex-start; flex-direction: column; }
 			.summary { grid-template-columns: 1fr; }
+			.runs-table, .runs-table thead, .runs-table tbody, .runs-table th, .runs-table td, .runs-table tr {
+				display: block;
+			}
+			.table-header { display: none; }
+			.run-item { margin-bottom: 12px; border: 1px solid #e9ecef; border-radius: 8px; }
+			.run-item td { width: 100% !important; max-width: none !important; min-width: 0 !important; }
 		}
 	</style>
 </head>
@@ -77,13 +178,106 @@
 				<a class="btn btn-outline-primary btn-sm" href="/targets/{{ target_key }}/failures"><i class="fas fa-bug me-1"></i>Failures</a>
 			</div>
 			<div class="summary">
-				<div class="card"><strong id="run-count">--</strong><span>Runs</span></div>
+				<div class="card"><strong id="run-count">{{ runs_index|length }}</strong><span>Runs</span></div>
 				<div class="card"><strong id="setup-state">--</strong><span>Setup status</span></div>
 				<div class="card"><strong id="collection-count">--</strong><span>Collections</span></div>
 			</div>
 			<section class="runs">
 				<h2><i class="fas fa-list me-2"></i>Run history</h2>
-				<ul id="runs" class="run-list"></ul>
+				<div class="runs-body">
+					{% if runs_index %}
+					<table class="runs-table">
+						<thead class="table-header">
+							<tr>
+								<th>Status</th>
+								<th>Run</th>
+								<th>Metadata</th>
+							</tr>
+						</thead>
+						<tbody>
+						{% for run in runs_index %}
+							<tr class="run-item" data-runid="{{ run.run_id }}">
+								<td class="status-column">
+									{% if run.status.lower() == 'running' %}
+									<span class="status-badge status-running"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>RUNNING <span class="spinner"></span></span>
+									{% elif run.status.lower() == 'aborted' %}
+									<span class="status-badge status-aborted"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>ABORTED</span>
+									{% else %}
+									{% if run.skipped_count > 0 and run.passed_count == 0 and run.failed_count == 0 and (run.error_count is not defined or run.error_count == 0) %}
+									<span class="status-badge status-skipped"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>SKIPPED</span>
+									{% elif run.error_count is defined and run.error_count > 0 %}
+									<span class="status-badge status-error"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>ERROR</span>
+									{% elif run.failed_count > 0 %}
+									<span class="status-badge status-finished-failed"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>FAILED</span>
+									{% else %}
+									<span class="status-badge status-finished-passed"{% if run.target_key %} data-target-key="{{ run.target_key }}" data-run-id="{{ run.run_id }}"{% endif %}>PASSED</span>
+									{% endif %}
+									{% endif %}
+									<div class="result-badges-container">
+										{% if run.passed_count > 0 %}
+										<span class="result-badge result-passed" title="Passed">{{ run.passed_count }}</span>
+										{% endif %}
+										{% if run.skipped_count > 0 %}
+										<span class="result-badge result-skipped" title="Skipped">{{ run.skipped_count }}</span>
+										{% endif %}
+										{% if run.failed_count > 0 %}
+										<span class="result-badge result-failed" title="Failed">{{ run.failed_count }}</span>
+										{% endif %}
+										{% if run.error_count is defined and run.error_count > 0 %}
+										<span class="result-badge result-error" title="Error">{{ run.error_count }}</span>
+										{% endif %}
+									</div>
+								</td>
+								<td class="title-column">
+									<h3 class="run-title">
+										<a href="/testRun/{{ run.run_id }}/index.html" class="run-link">{{ run.run_name or run.run_id }}</a>
+									</h3>
+									{% if run.collection_keys %}
+									<div class="group-pill">
+										{% for collection_key in run.collection_keys %}
+										<span>Collection:</span>
+										<a href="/collections/{{ collection_key }}" class="group-link">{{ collection_key }}</a>
+										{% endfor %}
+									</div>
+									{% endif %}
+									<div class="run-meta-section">
+										{% if run.start_time %}
+										<div class="meta-item">
+											<span class="meta-value start-time-display">{{ run.start_time }}</span>
+										</div>
+										{% endif %}
+										{% if run.start_time and run.end_time %}
+										<div class="meta-item">
+											<span class="meta-value duration-display" data-start="{{ run.start_time }}" data-end="{{ run.end_time }}"></span>
+										</div>
+										{% endif %}
+									</div>
+								</td>
+								<td class="metadata-column">
+									{% for name, metadata in (run.user_metadata or {}).items() %}
+									<div class="meta-item">
+										<span class="meta-label">{{ name }}:</span>
+										<span class="meta-value">
+											{% if metadata.url %}
+											<a href="{{ metadata.url }}" target="_blank">{{ metadata.value }}</a>
+											{% else %}
+											{{ metadata.value }}
+											{% endif %}
+										</span>
+									</div>
+									{% endfor %}
+								</td>
+							</tr>
+						{% endfor %}
+						</tbody>
+					</table>
+					{% else %}
+					<div class="empty-state">
+						<h3>No Runs for this Target</h3>
+						<p>Runs reported for this Target will appear here.</p>
+					</div>
+					{% endif %}
+				</div>
 			</section>
 		</section>
 	</main>
@@ -131,7 +325,7 @@
 	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 	<script>
 		const targetKey = {{ target_key | tojson }};
-		const state = { target: null, collections: [], runs: [] };
+		const state = { target: null, collections: [] };
 		const editModal = new bootstrap.Modal(document.getElementById('edit-target-modal'));
 
 		const api = async (url, options) => {
@@ -160,6 +354,41 @@
 		const selectedCollectionIds = () =>
 			[...document.querySelectorAll('#target-collections input:checked')].map(input => Number(input.value));
 
+		function formatExecutionTime(milliseconds) {
+			const seconds = Math.floor(milliseconds / 1000);
+			const minutes = Math.floor(seconds / 60);
+			const hours = Math.floor(minutes / 60);
+			if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+			if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+			return `${seconds}s`;
+		}
+
+		function convertToLocalTime(utcTimeString) {
+			if (!utcTimeString) return utcTimeString;
+			try {
+				return new Date(utcTimeString).toLocaleString();
+			} catch (e) {
+				return utcTimeString;
+			}
+		}
+
+		function updateRunMetaDisplays() {
+			document.querySelectorAll('.start-time-display').forEach(element => {
+				if (element.textContent && (element.textContent.includes('T') || element.textContent.includes('Z') || element.textContent.includes('-'))) {
+					element.textContent = convertToLocalTime(element.textContent);
+				}
+			});
+			document.querySelectorAll('.duration-display').forEach(element => {
+				const startTime = element.getAttribute('data-start');
+				const endTime = element.getAttribute('data-end');
+				if (!startTime || !endTime) return;
+				try {
+					const duration = new Date(endTime) - new Date(startTime);
+					if (duration > 0) element.textContent = `⏱️ ${formatExecutionTime(duration)}`;
+				} catch (e) {}
+			});
+		}
+
 		function renderMembership() {
 			const memberIds = new Set();
 			state.collections.forEach(collection => {
@@ -175,7 +404,6 @@
 		function fillPage() {
 			const target = state.target;
 			document.getElementById('target-name').textContent = target.display_name;
-			document.getElementById('run-count').textContent = state.runs.length;
 			document.getElementById('setup-state').textContent = target.setup_state === 'ready' ? 'Ready' : 'Needs setup';
 			const memberCount = state.collections.filter(collection =>
 				(collection.targets || []).some(member => member.id === target.id)
@@ -186,14 +414,6 @@
 			editBtn.classList.toggle('btn-warning', target.setup_state === 'needs_setup');
 			editBtn.classList.toggle('btn-outline-light', target.setup_state !== 'needs_setup');
 			editBtn.classList.toggle('text-dark', target.setup_state === 'needs_setup');
-
-			document.getElementById('runs').innerHTML = state.runs.map(run => {
-				const name = run.run_name || run.run_id;
-				const meta = run.run_name && run.run_name !== run.run_id
-					? `<span class="run-meta">${escapeHtml(run.run_id)}</span>`
-					: '';
-				return `<li><a href="/testRun/${encodeURIComponent(run.run_id)}/index.html"><span><strong>${escapeHtml(name)}</strong>${meta}</span><i class="fas fa-arrow-right"></i></a></li>`;
-			}).join('') || '<li class="empty">No Runs for this Target.</li>';
 		}
 
 		function fillEditor() {
@@ -205,13 +425,11 @@
 		}
 
 		async function refresh() {
-			const [target, runs, collectionSummaries] = await Promise.all([
+			const [target, collectionSummaries] = await Promise.all([
 				api(`/api/targets/${encodeURIComponent(targetKey)}`),
-				api(`/api/test-runs?target=${encodeURIComponent(targetKey)}&limit=500`),
 				api('/api/collections'),
 			]);
 			state.target = target;
-			state.runs = runs || [];
 			state.collections = await Promise.all(
 				collectionSummaries.map(collection =>
 					api(`/api/collections/${encodeURIComponent(collection.key)}`)
@@ -278,10 +496,8 @@
 			}
 		});
 
-		refresh().catch(error => {
-			pageStatus(error.message);
-			document.getElementById('runs').innerHTML = `<li class="empty">${error.message}</li>`;
-		});
+		updateRunMetaDisplays();
+		refresh().catch(error => pageStatus(error.message));
 	</script>
 </body>
 </html>

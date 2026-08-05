@@ -901,10 +901,14 @@ async def collection_summary_handler(request):
 async def target_handler(request):
     """Serve Target Run discovery and navigation."""
     try:
+        target_key = request.match_info["key"]
+        runs_from_db = await database.db.get_test_runs(limit=500, target_key=target_key)
+        runs_index = await build_run_index_entries(runs_from_db)
         return web.Response(
             text=render_template(
                 "target.html",
-                target_key=request.match_info["key"],
+                target_key=target_key,
+                runs_index=runs_index,
                 active_nav='targets',
             ),
             content_type="text/html",

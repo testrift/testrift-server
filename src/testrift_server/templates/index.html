@@ -140,13 +140,6 @@
             min-width: 250px;
         }
 
-        .table-header th:nth-child(4),
-        .run-item td:nth-child(4) {
-            width: 133px !important;
-            max-width: 133px !important;
-            min-width: 133px !important;
-        }
-
 
         .run-item {
             background: white;
@@ -359,24 +352,6 @@
             flex-shrink: 0;
         }
 
-        .actions-column {
-            text-align: right;
-            vertical-align: top;
-        }
-
-        .actions-column > * {
-            margin-bottom: 8px;
-        }
-
-        .actions-column > *:last-child {
-            margin-bottom: 0;
-        }
-
-        .actions-column .download-btn {
-            width: auto;
-            min-width: auto;
-        }
-
         .run-title {
             font-size: 1.3em;
             font-weight: 600;
@@ -443,50 +418,6 @@
 
         /* Result badges container is in shared CSS */
 
-        .download-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 6px 12px;
-            border-radius: 16px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 0.8em;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-            display: inline-block;
-            white-space: nowrap;
-            min-width: auto;
-            width: auto;
-            height: auto;
-            line-height: 1.4;
-        }
-
-        .download-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-            color: white;
-            text-decoration: none;
-        }
-
-        .download-btn.disabled {
-            background: #6c757d;
-            color: #adb5bd;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-
-        .download-btn.disabled:hover {
-            transform: none;
-            box-shadow: none;
-        }
-
-        .days-left {
-            color: #6c757d;
-            font-size: 0.9em;
-            font-weight: 500;
-            margin-left: 10px;
-        }
-
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -537,11 +468,6 @@
 
             .metadata-column {
                 order: 3;
-            }
-
-            .actions-column {
-                order: 4;
-                align-items: flex-start;
             }
 
             .run-meta-section {
@@ -595,7 +521,6 @@
                         <th>Status</th>
                         <th>Run</th>
                         <th>Metadata</th>
-                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="runs-list">
@@ -679,19 +604,6 @@
                         </div>
                         {% endfor %}
                     </td>
-
-                    <td class="actions-column">
-                            {% if run.status != 'running' %}
-                                {% if run.files_exist %}
-                                <a class="download-btn" href="/export/{{ run.run_id }}.zip">📥 Download ZIP</a>
-                                {% else %}
-                                <span class="download-btn disabled" title="Files have been cleaned up due to retention policy">📥 Download ZIP</span>
-                                {% endif %}
-                            {% endif %}
-                        {% if run.retention_days and run.start_time %}
-                        <div class="days-left" data-days="{{ run.retention_days }}" data-start="{{ run.start_time }}"></div>
-                            {% endif %}
-                    </td>
                 </tr>
 {% endfor %}
                 </tbody>
@@ -740,19 +652,6 @@
     });
   }
 
-  function updateDaysLeft() {
-    document.querySelectorAll('.days-left').forEach(function(span) {
-      const days = parseInt(span.getAttribute('data-days'));
-      const start = new Date(span.getAttribute('data-start'));
-      const now = new Date();
-      const msPerDay = 24 * 60 * 60 * 1000;
-      const ageDays = Math.floor((now - start) / msPerDay);
-      let daysLeft = days - ageDays;
-      if (daysLeft < 0) daysLeft = 0;
-      span.textContent = 'Days left: ' + daysLeft;
-    });
-  }
-
   // Function to calculate and display duration
   function updateDurations() {
     document.querySelectorAll('.duration-display').forEach(function(element) {
@@ -778,9 +677,7 @@
 
   // Convert times to local time on page load
   convertTimesToLocal();
-  updateDaysLeft();
   updateDurations();
-  setInterval(updateDaysLeft, 60 * 1000);
 
   function convertIndexTimestampsToLocal() {
 
@@ -947,15 +844,6 @@
       const tbody = document.getElementById('runs-list');
       if (!tbody) { console.error('runs-list element not found'); return; }
       let tr = document.querySelector('tr[data-runid="' + run.run_id + '"]');
-      let daysLeft = '';
-      if (run.retention_days && run.start_time) {
-        const start = new Date(run.start_time);
-        const now = new Date();
-        const msPerDay = 24 * 60 * 60 * 1000;
-        const ageDays = Math.floor((now - start) / msPerDay);
-        daysLeft = run.retention_days - ageDays;
-        if (daysLeft < 0) daysLeft = 0;
-      }
       if (!tr) {
         tr = document.createElement('tr');
         tr.className = 'run-item new-run';
@@ -1219,45 +1107,10 @@
         }
       }
 
-      // Create actions column
-      const actionsColumn = document.createElement('td');
-      actionsColumn.className = 'actions-column';
-
-      // Only show download button if run is not currently running
-      if (run.status !== 'running') {
-        // Check if files exist (assume true for WebSocket updates of recent runs)
-        const filesExist = run.files_exist !== false; // Default to true if not specified
-
-        if (filesExist) {
-          const downloadBtn = document.createElement('a');
-          downloadBtn.className = 'download-btn';
-          downloadBtn.href = `/export/${run.run_id}.zip`;
-          downloadBtn.textContent = '📥 Download ZIP';
-          actionsColumn.appendChild(downloadBtn);
-        } else {
-          const downloadBtn = document.createElement('span');
-          downloadBtn.className = 'download-btn disabled';
-          downloadBtn.title = 'Files have been cleaned up due to retention policy';
-          downloadBtn.textContent = '📥 Download ZIP';
-          actionsColumn.appendChild(downloadBtn);
-        }
-      }
-
-      // Add days left to actions column if applicable
-      if (run.retention_days && run.start_time) {
-        const daysDiv = document.createElement('div');
-        daysDiv.className = 'days-left';
-        daysDiv.setAttribute('data-days', run.retention_days);
-        daysDiv.setAttribute('data-start', run.start_time);
-        daysDiv.textContent = `Days left: ${daysLeft}`;
-        actionsColumn.appendChild(daysDiv);
-      }
-
       // Assemble the item
       tr.appendChild(statusColumn);
       tr.appendChild(titleColumn);
       tr.appendChild(metadataColumn);
-      tr.appendChild(actionsColumn);
 
       // Handle run execution time
 
