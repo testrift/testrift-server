@@ -55,6 +55,19 @@
 .entity-admin .member-row:hover { background: #f8f9fa; }
 .entity-admin .member-row input { margin: 0; }
 .entity-admin .member-row small { display: block; }
+.entity-admin .member-row-readonly {
+  grid-template-columns: 1fr auto;
+  cursor: default;
+}
+.entity-admin .member-row-readonly a {
+  font-size: .85rem;
+  white-space: nowrap;
+}
+.entity-admin .profile-add-heading {
+  margin: 12px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e8eb;
+}
 .entity-admin .editor-footer {
   display: flex;
   justify-content: space-between;

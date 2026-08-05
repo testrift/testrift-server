@@ -93,16 +93,17 @@
               <input id="collection-name" class="form-control" required>
             </div>
             <div>
-              <label>URL key</label>
-              <input class="form-control" value="{{ collection_key }}" readonly>
+              <label for="collection-url-key">URL key</label>
+              <input id="collection-url-key" class="form-control" value="{{ collection_key }}" readonly aria-describedby="collection-url-key-help">
+              <div id="collection-url-key-help" class="help">Fixed after create; used in /collections/… URLs.</div>
             </div>
             <div class="span-2">
               <label for="collection-description">Description</label>
               <input id="collection-description" class="form-control" placeholder="What this combined overview represents">
             </div>
             <div class="span-2">
-              <label>Target membership <span id="member-count" class="muted"></span></label>
-              <div id="collection-members" class="membership"></div>
+              <label for="collection-members">Target membership <span id="member-count" class="muted"></span></label>
+              <div id="collection-members" class="membership" role="group" aria-labelledby="member-count"></div>
               <div class="help">Membership is managed here. Test clients only send their Target key.</div>
             </div>
           </div>
@@ -127,6 +128,12 @@
           </div>
           <div id="profile-list" class="profile-list"></div>
           <form id="profile-editor" class="profile-editor">
+            <div class="profile-heading profile-add-heading">
+              <div>
+                <h5><i class="fas fa-plus"></i> Add Summary Profile</h5>
+                <small>Create another profile for this Collection. Existing profiles are listed above.</small>
+              </div>
+            </div>
             <div class="editor-grid">
               <div>
                 <label for="profile-name">Profile name</label>
@@ -149,8 +156,8 @@
                 <label>Source filters <span class="muted">(optional)</span></label>
                 <div id="profile-selector-tokens" class="filter-tokens"></div>
                 <div class="filter-composer">
-                  <select id="profile-role" class="form-select"><option value="">Source role</option></select>
-                  <select id="profile-branch" class="form-select" disabled><option value="">Branch</option></select>
+                  <select id="profile-role" class="form-select" aria-label="Source role"><option value="">Source role</option></select>
+                  <select id="profile-branch" class="form-select" disabled aria-label="Branch"><option value="">Branch</option></select>
                   <button id="add-profile-selector" class="btn btn-outline-custom" type="button" disabled title="Add source filter"><i class="fas fa-plus"></i></button>
                 </div>
                 <div id="selector-suggestions" class="filter-suggestions"></div>

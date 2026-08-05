@@ -298,10 +298,10 @@
 								<label for="target-display-name">Display name</label>
 								<input id="target-display-name" class="form-control" required>
 							</div>
-							<div id="membership-block" class="span-2" hidden>
-								<label>Assign to Collections <span class="muted">(optional)</span></label>
+							<div id="membership-block" class="span-2">
+								<label id="membership-label">Collections</label>
 								<div id="target-collections" class="membership"></div>
-								<div class="help">Saving marks this Target ready and applies the selected membership.</div>
+								<div id="membership-help" class="help">Saving marks this Target ready and applies the selected membership.</div>
 							</div>
 						</div>
 						<div class="editor-footer">
@@ -389,16 +389,44 @@
 			});
 		}
 
+		function memberLabelHtml(displayName, key) {
+			const name = escapeHtml(displayName || key);
+			const keyHtml = escapeHtml(key);
+			if (!key || displayName === key) return `<b>${name}</b>`;
+			return `<b>${name}</b><small><code>${keyHtml}</code></small>`;
+		}
+
 		function renderMembership() {
-			const memberIds = new Set();
-			state.collections.forEach(collection => {
-				if ((collection.targets || []).some(member => member.id === state.target.id)) {
-					memberIds.add(collection.id);
-				}
-			});
-			document.getElementById('target-collections').innerHTML = state.collections.map(collection =>
-				`<label class="member-row"><input type="checkbox" value="${collection.id}" ${memberIds.has(collection.id) ? 'checked' : ''}><span><b>${escapeHtml(collection.display_name)}</b><small><code>${escapeHtml(collection.key)}</code></small></span></label>`
-			).join('') || '<div class="help">No Collections yet. Create one from the Collections page.</div>';
+			const needsSetup = state.target.setup_state === 'needs_setup';
+			const label = document.getElementById('membership-label');
+			const help = document.getElementById('membership-help');
+			const container = document.getElementById('target-collections');
+
+			if (needsSetup) {
+				label.innerHTML = 'Assign to Collections <span class="muted">(optional)</span>';
+				help.textContent = 'Saving marks this Target ready and applies the selected membership.';
+				const memberIds = new Set();
+				state.collections.forEach(collection => {
+					if ((collection.targets || []).some(member => member.id === state.target.id)) {
+						memberIds.add(collection.id);
+					}
+				});
+				container.innerHTML = state.collections.map(collection =>
+					`<label class="member-row"><input type="checkbox" value="${collection.id}" ${memberIds.has(collection.id) ? 'checked' : ''}><span>${memberLabelHtml(collection.display_name, collection.key)}</span></label>`
+				).join('') || '<div class="help">No Collections yet. Create one from the Collections page.</div>';
+				return;
+			}
+
+			label.textContent = 'Collections';
+			help.textContent = 'To change membership, open Edit on the Collection.';
+			const assigned = state.collections.filter(collection =>
+				(collection.targets || []).some(member => member.id === state.target.id)
+			);
+			container.innerHTML = assigned.length
+				? assigned.map(collection =>
+					`<div class="member-row member-row-readonly"><span>${memberLabelHtml(collection.display_name, collection.key)}</span><a href="/collections/${encodeURIComponent(collection.key)}">Open Collection</a></div>`
+				).join('')
+				: '<div class="help">Not in any Collection yet. Add this Target from a Collection\'s Edit dialog.</div>';
 		}
 
 		function fillPage() {
@@ -419,7 +447,6 @@
 		function fillEditor() {
 			const target = state.target;
 			document.getElementById('target-display-name').value = target.display_name || '';
-			document.getElementById('membership-block').hidden = target.setup_state !== 'needs_setup';
 			document.getElementById('saved-indicator').textContent = '';
 			renderMembership();
 		}

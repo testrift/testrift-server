@@ -20,6 +20,13 @@
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]
     );
 
+    const memberLabelHtml = (displayName, key) => {
+        const name = escapeHtml(displayName || key);
+        const keyHtml = escapeHtml(key);
+        if (!key || displayName === key) return `<b>${name}</b>`;
+        return `<b>${name}</b><small><code>${keyHtml}</code></small>`;
+    };
+
     const status = (message, ok = false) => {
         const element = document.getElementById('collection-admin-status');
         if (!element) return;
@@ -30,13 +37,17 @@
     const selectedIds = selector =>
         [...document.querySelectorAll(`${selector} input:checked`)].map(input => Number(input.value));
 
+    const updateMemberCount = () => {
+        const count = document.querySelectorAll('#collection-members input:checked').length;
+        document.getElementById('member-count').textContent = `(${count} selected)`;
+    };
+
     const renderMembers = () => {
         const selected = new Set((state.collection?.targets || []).map(target => target.id));
         document.getElementById('collection-members').innerHTML = state.targets.map(target =>
-            `<label class="member-row"><input type="checkbox" value="${target.id}" ${selected.has(target.id) ? 'checked' : ''}><span><b>${escapeHtml(target.display_name)}</b><small><code>${escapeHtml(target.key)}</code></small></span></label>`
+            `<label class="member-row"><input type="checkbox" value="${target.id}" ${selected.has(target.id) ? 'checked' : ''}><span>${memberLabelHtml(target.display_name, target.key)}</span></label>`
         ).join('') || '<div class="help">No Targets have been reported yet.</div>';
-        document.getElementById('member-count').textContent =
-            `(${(state.collection?.targets || []).length} selected)`;
+        updateMemberCount();
     };
 
     const renderProfiles = () => {
@@ -204,6 +215,8 @@
         const item = state.filterOptions.source_pairs[Number(index)];
         addProfileSelector({ source_role: item.source_role, branch: item.branch });
     });
+
+    document.getElementById('collection-members').addEventListener('change', updateMemberCount);
 
     document.getElementById('delete-collection').addEventListener('click', async () => {
         const name = state.collection?.display_name || collectionKey;
