@@ -29,6 +29,12 @@ from .config import (
     get_running_server_info,
     request_running_server_shutdown,
 )
+from .tls_certs import (
+    current_material,
+    ingest_tls_enabled,
+    setup_tls,
+    ui_tls_enabled,
+)
 from .handlers import get_routes as get_handler_routes, log_event
 from .api_handlers import get_routes as get_api_routes
 from .http_compat import convert_aiohttp_path, wrap_handler
@@ -234,17 +240,71 @@ def main(argv=None):
         max_size_mb = ATTACHMENT_MAX_SIZE // (1024 * 1024)
         logger.info(f"Max attachment size: {max_size_mb}MB")
 
-    # Disable access logs; application-level log_event() covers meaningful activity.
-    # Bound graceful shutdown so open UI/NUnit WebSockets cannot hang CTRL+C forever.
-    uvicorn.run(
-        app,
-        host=host,
-        port=PORT,
-        log_level="info",
-        access_log=False,
-        timeout_graceful_shutdown=5,
-    )
+    try:
+        setup_tls(CONFIG)
+    except Exception as e:
+        logger.error(f"TLS setup failed: {e}")
+        return 2
+
+    ingest_port = CONFIG.get("ingest_port")
+    ui_tls = ui_tls_enabled(CONFIG)
+    ingest_tls = ingest_tls_enabled(CONFIG)
+    if ingest_tls and ingest_port:
+        logger.info(f"Ingest HTTPS listener on {host}:{ingest_port}")
+    elif ingest_tls:
+        logger.info("Ingest HTTPS shares the UI listener")
+
+    _run_listeners(host, ui_tls=ui_tls, ingest_tls=ingest_tls, ingest_port=ingest_port)
     return 0
+
+
+def _ssl_kwargs():
+    material = current_material()
+    if material is None:
+        raise RuntimeError("TLS is enabled but no certificate material is loaded")
+    return {
+        "ssl_certfile": str(material.chain_path),
+        "ssl_keyfile": str(material.key_path),
+    }
+
+
+def _uvicorn_config(host: str, port: int, *, ssl: bool, lifespan: str = "auto") -> uvicorn.Config:
+    kwargs = {
+        "app": app,
+        "host": host,
+        "port": port,
+        "log_level": "info",
+        "access_log": False,
+        "timeout_graceful_shutdown": 5,
+        "lifespan": lifespan,
+    }
+    if ssl:
+        kwargs.update(_ssl_kwargs())
+    return uvicorn.Config(**kwargs)
+
+
+def _run_listeners(host: str, *, ui_tls: bool, ingest_tls: bool, ingest_port: int | None) -> None:
+    configs = [_uvicorn_config(host, PORT, ssl=ui_tls, lifespan="auto")]
+    if ingest_tls and ingest_port:
+        configs.append(_uvicorn_config(host, ingest_port, ssl=True, lifespan="off"))
+    if len(configs) == 1:
+        uvicorn.Server(configs[0]).run()
+        return
+
+    async def _serve_all():
+        servers = []
+        for index, cfg in enumerate(configs):
+            server = uvicorn.Server(cfg)
+            if index > 0:
+                server.install_signal_handlers = False
+            servers.append(server)
+        tasks = [asyncio.create_task(server.serve()) for server in servers]
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for server in servers:
+            server.should_exit = True
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(_serve_all())
 
 
 if __name__ == "__main__":

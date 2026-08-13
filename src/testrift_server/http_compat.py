@@ -186,6 +186,7 @@ class CompatRequest:
         self.headers = request.headers
         self.method = request.method
         self.path = request.url.path
+        self.scheme = request.url.scheme
         self.cookies = request.cookies
         self._state: dict[str, Any] = {}
         self.user = None

@@ -114,6 +114,7 @@ class TestPermissions:
         assert auth.required_permission("GET", "/health") is None
         assert auth.required_permission("GET", "/static/app_shell.css") is None
         assert auth.required_permission("GET", "/api/server-info") is None
+        assert auth.required_permission("GET", "/ca.crt") is None
         assert auth.required_permission("POST", "/api/admin/shutdown") is None
         assert auth.required_permission("POST", "/api/attachments/run/tc/upload") is None
 

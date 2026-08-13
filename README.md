@@ -83,6 +83,8 @@ For the full configuration reference, see [server_config.md](docs/server_config.
 
 Login, roles, and the Users page: [authentication.md](docs/authentication.md).
 
+TLS for test clients (automatic CA, fingerprint pinning): [tls.md](docs/tls.md).
+
 HTTP/WebSocket path contracts (frozen for clients): [http_contracts.md](docs/http_contracts.md).
 
 

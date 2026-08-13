@@ -1042,12 +1042,19 @@ async def api_server_info_handler(request):
     except Exception:
         ver = "unknown"
 
+    host = request.headers.get("host") or "127.0.0.1"
+    from . import config as config_mod
+    from .tls_certs import current_material, ingest_base_url
+    live = config_mod.CONFIG
+    material = current_material()
     return web.json_response({
         "service": "testrift-server",
         "version": ver,
-        "config_path": str(CONFIG_PATH_USED) if CONFIG_PATH_USED else None,
-        "config": get_config_fingerprint(CONFIG),
-        "config_hash": get_config_hash(CONFIG),
+        "config_path": str(config_mod.CONFIG_PATH_USED) if config_mod.CONFIG_PATH_USED else None,
+        "config": get_config_fingerprint(live),
+        "config_hash": get_config_hash(live),
+        "ingest_url": ingest_base_url(live, host),
+        "tls_ca_fingerprint": material.ca_fingerprint if material else None,
     })
 
 

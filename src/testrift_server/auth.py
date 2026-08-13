@@ -27,6 +27,7 @@ SESSION_COOKIE_NAME = "testrift_session"
 INGEST_TOKEN_HEADER = "x-testrift-ingest-token"
 LOGIN_ERROR_MESSAGE = "Invalid username or password."
 INGEST_TOKEN_ERROR_MESSAGE = "Invalid ingest token."
+INGEST_TLS_REQUIRED_MESSAGE = "This endpoint requires HTTPS on the ingest listener."
 VALID_ROLES = frozenset({"member", "admin"})
 PERM_RUNS_READ = "runs.read"
 PERM_CATALOG_WRITE = "catalog.write"
@@ -56,6 +57,7 @@ _PUBLIC_EXACT = frozenset({
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/logout"),
     ("GET", "/api/server-info"),
+    ("GET", "/ca.crt"),
     ("POST", "/api/admin/shutdown"),
     ("GET", "/auth/oidc/login"),
     ("GET", "/auth/oidc/callback"),
@@ -232,6 +234,25 @@ def ingest_token_matches(provided: str) -> bool:
 
 def _ingest_unauthorized_response() -> JSONResponse:
     return JSONResponse({"success": False, "error": INGEST_TOKEN_ERROR_MESSAGE}, status_code=401)
+
+
+def _ingest_tls_response() -> JSONResponse:
+    return JSONResponse({"success": False, "error": INGEST_TLS_REQUIRED_MESSAGE}, status_code=400)
+
+
+def ingest_tls_denied(request) -> Optional[Response]:
+    """Reject test-client ingest HTTP when ingest TLS is on but the request is not HTTPS."""
+    from .tls_certs import ingest_tls_enabled
+    if not ingest_tls_enabled():
+        return None
+    scheme = (getattr(request, "scheme", None) or "http").lower()
+    if scheme == "https":
+        return None
+    method = (request.method or "GET").upper()
+    path = request.path or "/"
+    if method == "POST" and _is_ingest_post(path):
+        return _ingest_tls_response()
+    return None
 
 
 def ingest_request_denied(request) -> Optional[Response]:
@@ -452,7 +473,13 @@ def apply_session_cookie(response: Response, cookie_value: str) -> None:
         httponly=True,
         samesite="lax",
         path="/",
+        secure=_cookie_secure(),
     )
+
+
+def _cookie_secure() -> bool:
+    from .tls_certs import ui_tls_enabled
+    return ui_tls_enabled()
 
 
 def clear_session_cookie(response: Response) -> None:
@@ -586,6 +613,9 @@ def _attach_user(request, user: Optional[dict]) -> frozenset[str]:
 async def enforce(request) -> Optional[Response]:
     """Return a denial response, or None if the request may proceed."""
     path = request.path or "/"
+    tls_denied = ingest_tls_denied(request)
+    if tls_denied is not None:
+        return tls_denied
     ingest_denied = ingest_request_denied(request)
     if ingest_denied is not None:
         return ingest_denied
@@ -621,6 +651,11 @@ async def enforce(request) -> Optional[Response]:
 async def enforce_websocket(websocket: WebSocket, path: str) -> bool:
     """Return True if the WebSocket may continue."""
     if path == "/ws/nunit":
+        from .tls_certs import ingest_tls_enabled
+        if ingest_tls_enabled():
+            scheme = (str(websocket.url.scheme) or "").lower()
+            if scheme not in ("https", "wss"):
+                return False
         if ingest_token_configured() and not ingest_token_matches(
             extract_ingest_token(websocket.headers)
         ):

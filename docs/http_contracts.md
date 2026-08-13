@@ -26,6 +26,7 @@ Frozen surface for the FastAPI migration (Phase 0). Clients (NUnit plugin, colle
 | Method | Path |
 |--------|------|
 | GET | `/api/server-info` |
+| GET | `/ca.crt` (generated auto CA only; 404 otherwise) |
 | POST | `/api/admin/shutdown` |
 | GET/POST | `/api/targets`, `/api/collections` |
 | GET/PUT/DELETE | `/api/targets/{key}`, `/api/collections/{key}` |
@@ -78,6 +79,7 @@ Message types and fields: see [websocket_protocol.md](websocket_protocol.md).
 - Authentication is off by default (`auth.enabled: false`): same open model as before; `localhost_only` still applies at bind time.
 - When `auth.enabled` is true, unauthenticated HTML requests redirect to `/login` and unauthenticated JSON APIs return 401. Admin pages and Admin APIs require `admin.access`. `/health` and `/api/server-info` stay public. OIDC callback and start URLs are public so the identity provider can redirect back.
 - When `auth.ingest_token` is set, `/ws/nunit` and test-client `POST` attachment/commit upload require `X-TestRift-Ingest-Token` (or `Authorization: Bearer`). When it is empty, those ingest paths stay open.
+- When `tls.ingest` is on, those ingest paths must use HTTPS on the ingest listener. HTTP to them returns 400. `GET /api/server-info` includes `ingest_url` and `tls_ca_fingerprint`. See [tls.md](tls.md).
 - Health returns `{"status": "ok"}`.
 - Most JSON APIs use `{"success": true|false, ...}` envelopes.
 - Wire protocol for WebSockets must remain MessagePack with existing field shortcuts.

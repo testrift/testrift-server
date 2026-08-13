@@ -189,6 +189,16 @@ def load_config(config_path=None):
 
         config_data['auth'] = parse_auth_config(config.get('auth') or {})
 
+        from .tls_certs import parse_ingest_port, parse_tls_config
+        tls = parse_tls_config(config.get('tls') or {})
+        tls['cert_file'] = expand_env_vars(tls['cert_file'])
+        tls['key_file'] = expand_env_vars(tls['key_file'])
+        if tls.get('ui') == 'files' or tls.get('ingest') == 'files':
+            if not tls['cert_file'] or not tls['key_file']:
+                raise ValueError("tls.cert_file and tls.key_file are required when tls.ui or tls.ingest is files")
+        config_data['tls'] = tls
+        config_data['ingest_port'] = parse_ingest_port(server_config, tls, config_data['port'])
+
         return config_data
 
     except FileNotFoundError:
@@ -230,6 +240,8 @@ def load_config(config_path=None):
                 'to_addresses': [],
             },
             'auth': default_auth_config(),
+            'tls': default_tls_config(),
+            'ingest_port': None,
         }
     except yaml.YAMLError as e:
         logger.error(f"Error parsing configuration file: {e}")
@@ -237,6 +249,12 @@ def load_config(config_path=None):
     except Exception as e:
         logger.error(f"Error loading configuration: {e}")
         sys.exit(1)
+
+
+def default_tls_config():
+    """Return default TLS settings (HTTP only)."""
+    from .tls_certs import default_tls_config as _default_tls_config
+    return _default_tls_config()
 
 
 def default_auth_config():
@@ -381,6 +399,7 @@ def parse_oidc_config(oidc, *, auth_enabled=False):
 
 def get_config_fingerprint(config: dict) -> dict:
     """Return a stable, JSON-serializable representation of config for hashing/comparison."""
+    tls = config.get("tls") or default_tls_config()
     return {
         "port": int(config["port"]),
         "localhost_only": bool(config["localhost_only"]),
@@ -388,6 +407,13 @@ def get_config_fingerprint(config: dict) -> dict:
         "default_retention_days": config["default_retention_days"],
         "attachments_enabled": bool(config["attachments_enabled"]),
         "attachment_max_size": int(config["attachment_max_size"]),
+        "ingest_port": config.get("ingest_port"),
+        "tls": {
+            "ui": tls.get("ui", "off"),
+            "ingest": tls.get("ingest", "off"),
+            "cert_file": tls.get("cert_file") or "",
+            "key_file": tls.get("key_file") or "",
+        },
     }
 
 
@@ -460,3 +486,5 @@ ATTACHMENT_MAX_SIZE = CONFIG['attachment_max_size']
 AI_ANALYSIS_CONFIG = CONFIG['ai_analysis']
 EMAIL_CONFIG = CONFIG['email']
 AUTH_CONFIG = CONFIG['auth']
+TLS_CONFIG = CONFIG.get('tls') or default_tls_config()
+INGEST_PORT = CONFIG.get('ingest_port')

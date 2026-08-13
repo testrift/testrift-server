@@ -7,6 +7,16 @@ server:
   # Set to false to allow connections from any IP address
   localhost_only: true
 
+  # HTTPS ingest bind port when tls.ingest is on and the UI stays HTTP.
+  # Unused when ingest TLS is off (ingest uses server.port).
+  # ingest_port: 8443
+
+# Encrypt test-client traffic. Off by default; the UI stays HTTP.
+# See docs/tls.md for recipes (auto CA, TOFU fingerprint, files).
+# tls:
+#   ingest: auto
+#   ui: off
+
 # Data directory for storing test run data
 data:
   # Directory path for storing test runs (relative to server directory)

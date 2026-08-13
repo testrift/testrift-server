@@ -31,6 +31,10 @@ server:
   # Set to false to allow connections from any IP address
   localhost_only: true
 
+tls:
+  ingest: off
+  ui: off
+
 data:
   # Directory path for storing test runs
   directory: "data"
@@ -56,8 +60,19 @@ attachments:
 
 ### Server Settings
 
-- **port** (integer, default: 8080): The port number for the server to listen on. Must be between 1 and 65535.
-- **localhost_only** (boolean, default: true): If true, the server only accepts connections from localhost (127.0.0.1). If false, it accepts connections from any IP address.
+- **port** (integer, default: 8080): The port number for the UI listener. Must be between 1 and 65535.
+- **localhost_only** (boolean, default: true): If true, the server only accepts connections from localhost (127.0.0.1). If false, it accepts connections from any IP address. Applies to both the UI and ingest listeners.
+- **ingest_port** (integer, optional): Bind port for the ingest HTTPS listener. Default `8443` when `tls.ingest` is on and `tls.ui` is `off`. Must differ from `port` in that case. Omitted when ingest TLS is off (ingest uses `port`) or when UI and ingest share one TLS port.
+
+### TLS Settings
+
+TLS is off by default. Recipes, TOFU fingerprint pinning, and browser notes are in [tls.md](tls.md).
+
+- **tls.ingest** (`off`, `auto`, or `files`, default: `off`): TLS for `/ws/nunit` and test-client ingest POST (attachments, commits). `auto` generates a local CA under `data/tls/` and logs the CA SHA-256 fingerprint at startup.
+- **tls.ui** (`off`, `auto`, or `files`, default: `off`): TLS for the UI listener. Leave `off` unless you have a browser-trusted certificate or you import the generated CA.
+- **tls.cert_file** / **tls.key_file** (strings): Required when `tls.ui` or `tls.ingest` is `files`. Support `${env:VAR}` expansion.
+
+`tls.ui` and `tls.ingest` cannot mix `auto` and `files`.
 
 ### Data Settings
 

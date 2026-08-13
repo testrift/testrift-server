@@ -109,10 +109,10 @@ def test_main_restart_on_config_triggers_shutdown_and_starts(monkeypatch):
     monkeypatch.setattr(tr_server.time, "sleep", lambda _: None)
     monkeypatch.setattr(tr_server.time, "time", lambda: 0.0)
 
-    def fake_run_app(*args, **kwargs):
+    def fake_run_listeners(*args, **kwargs):
         calls["run_app"] += 1
 
-    monkeypatch.setattr(tr_server.uvicorn, "run", fake_run_app)
+    monkeypatch.setattr(tr_server, "_run_listeners", fake_run_listeners)
 
     rc = tr_server.main(argv=["--restart-on-config"])
     assert rc == 0

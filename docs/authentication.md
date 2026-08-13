@@ -98,7 +98,7 @@ NUnit and other collectors are not people. They do not use the login page.
 
 When `auth.ingest_token` is empty, `/ws/nunit` and test-client attachment upload (and commit upload) stay open even if UI authentication is on. That is suitable for `localhost_only` labs.
 
-When `auth.ingest_token` is set, those ingest endpoints require the header `X-TestRift-Ingest-Token` with the same value (or `Authorization: Bearer <token>`). A missing or wrong token is rejected. A signed-in browser session is not a substitute. `/health` stays unauthenticated.
+When `auth.ingest_token` is set, those ingest endpoints require the header `X-TestRift-Ingest-Token` with the same value (or `Authorization: Bearer <token>`). A missing or wrong token is rejected. A signed-in browser session is not a substitute. `/health` stays unauthenticated. Ingest TLS (`tls.ingest`) encrypts that traffic; it does not replace the token. See [tls.md](tls.md).
 
 The NUnit plugin sends the token from `TESTRIFT_INGEST_TOKEN` or `ingestToken` in `TestRiftNUnit.yaml`.
 

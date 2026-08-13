@@ -39,6 +39,9 @@ End-to-end ASGI contract tests against the FastAPI app (no mocked requests):
 - `/ws/nunit` MessagePack run_started roundtrip
 - Attachment upload/list/download over real multipart HTTP
 
+### `test_tls.py`
+TLS certificate generation, ingest HTTPS gate, `/ca.crt`, and server-info ingest fields.
+
 These catch framework regressions that unit tests with MagicMock requests would miss.
 
 ### `test_integration.py`

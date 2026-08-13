@@ -823,6 +823,15 @@ async def health_handler(request):
     return web.json_response({"status": "ok"})
 
 
+async def ca_certificate_handler(request):
+    """Serve the generated auto CA, if one exists."""
+    from .tls_certs import current_material
+    material = current_material()
+    if not material or not material.ca_cert_path or not material.ca_cert_path.is_file():
+        return web.json_response({"success": False, "error": "No generated CA is available."}, status=404)
+    return web.FileResponse(material.ca_cert_path, media_type="application/x-x509-ca-cert")
+
+
 # --- Analyzer page handlers ---
 
 async def failures_handler(request):
@@ -1021,6 +1030,7 @@ def get_routes():
         (("GET",), "/static/{path:.*}", static_file_handler),
         (("GET",), "/export/{run_id}.zip", zip_export_handler),
         (("GET",), "/health", health_handler),
+        (("GET",), "/ca.crt", ca_certificate_handler),
         (("GET",), "/analyzer", analyzer_handler),
         (("GET",), "/matrix", matrix_handler),
         (("GET",), "/failures", failures_handler),
