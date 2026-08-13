@@ -81,6 +81,8 @@ Or set the `TESTRIFT_SERVER_YAML` environment variable to an absolute path insid
 
 For the full configuration reference, see [server_config.md](docs/server_config.md).
 
+Login, roles, and the Users page: [authentication.md](docs/authentication.md).
+
 HTTP/WebSocket path contracts (frozen for clients): [http_contracts.md](docs/http_contracts.md).
 
 

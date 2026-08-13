@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import re
+import sqlite3
 from datetime import datetime, timezone
 
 from .http_compat import web
@@ -1483,6 +1484,204 @@ async def api_logs_handler(request):
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+
+def _parse_user_id(request):
+    raw = request.match_info.get("user_id")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _user_to_admin_view(user: dict) -> dict:
+    from . import auth
+    view = auth.public_user(user)
+    lockout = None
+    if user.get("username"):
+        lockout = await auth.username_lockout_info(user["username"])
+    view["lockout"] = lockout
+    return view
+
+
+async def api_auth_login_handler(request):
+    from . import auth
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    user, cookie_value = await auth.local_login(
+        str(body.get("username") or ""),
+        str(body.get("password") or ""),
+        request.remote or "",
+    )
+    if user is None or cookie_value is None:
+        return web.json_response(
+            {"success": False, "error": auth.LOGIN_ERROR_MESSAGE},
+            status=401,
+        )
+    response = web.json_response({"success": True, "user": auth.public_user(user)})
+    auth.apply_session_cookie(response, cookie_value)
+    return response
+
+
+async def api_auth_logout_handler(request):
+    from . import auth
+    cookies = getattr(request, "cookies", {}) or {}
+    await auth.destroy_request_session(cookies.get(auth.SESSION_COOKIE_NAME))
+    response = web.json_response({"success": True})
+    auth.clear_session_cookie(response)
+    return response
+
+
+async def api_auth_me_handler(request):
+    from . import auth
+    user = getattr(request, "user", None)
+    if not user:
+        return web.json_response({"success": False, "error": "Authentication required"}, status=401)
+    return web.json_response({"success": True, "user": auth.public_user(user)})
+
+
+async def api_users_handler(request):
+    from . import auth
+    if request.method == "GET":
+        users = await database.db.list_users()
+        return web.json_response({
+            "success": True,
+            "users": [await _user_to_admin_view(user) for user in users],
+        })
+
+    try:
+        body = await _json_body(request)
+    except ValueError as error:
+        return _validation_error(error)
+
+    username = auth.normalize_username(str(body.get("username") or ""))
+    password = str(body.get("password") or "")
+    role = str(body.get("role") or "member").strip().lower()
+    display_name = str(body.get("display_name") or "").strip() or username
+    email = str(body.get("email") or "").strip() or None
+    min_length = int(auth.auth_config().get("password_min_length") or 8)
+
+    if not USERNAME_PATTERN.fullmatch(username):
+        return _validation_error("username must be lowercase letters, digits, dots, underscores, or hyphens")
+    if len(password) < min_length:
+        return _validation_error(f"password must be at least {min_length} characters")
+    if role not in auth.VALID_ROLES:
+        return _validation_error("role must be member or admin")
+
+    try:
+        user_id = await database.db.create_user(
+            display_name=display_name,
+            email=email,
+            username=username,
+            password_hash=auth.hash_password(password),
+            role=role,
+            enabled=True,
+            auth_source="local",
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+        )
+    except sqlite3.IntegrityError:
+        return web.json_response({"success": False, "error": "username already exists"}, status=409)
+
+    user = await database.db.get_user_by_id(user_id)
+    return web.json_response({"success": True, "user": await _user_to_admin_view(user)}, status=201)
+
+
+async def api_user_handler(request):
+    from . import auth
+    user_id = _parse_user_id(request)
+    if user_id is None:
+        return _validation_error("Invalid user id")
+    user = await database.db.get_user_by_id(user_id)
+    if not user:
+        return web.json_response({"success": False, "error": "User not found"}, status=404)
+
+    if request.method == "GET":
+        return web.json_response({"success": True, "user": await _user_to_admin_view(user)})
+
+    try:
+        body = await _json_body(request)
+    except ValueError as error:
+        return _validation_error(error)
+
+    updates = {}
+    if "display_name" in body:
+        display_name = str(body.get("display_name") or "").strip()
+        if not display_name:
+            return _validation_error("display_name cannot be blank")
+        updates["display_name"] = display_name
+    if "email" in body:
+        email = str(body.get("email") or "").strip()
+        updates["email"] = email or None
+    if "role" in body:
+        role = str(body.get("role") or "").strip().lower()
+        if role not in auth.VALID_ROLES:
+            return _validation_error("role must be member or admin")
+        updates["role"] = role
+    if "enabled" in body:
+        if not isinstance(body["enabled"], bool):
+            return _validation_error("enabled must be a boolean")
+        updates["enabled"] = body["enabled"]
+
+    if await auth.would_remove_last_admin(
+        user,
+        new_role=updates.get("role"),
+        new_enabled=updates.get("enabled"),
+    ):
+        return web.json_response(
+            {"success": False, "error": "Cannot disable or demote the last Admin"},
+            status=400,
+        )
+
+    if updates:
+        await database.db.update_user(user_id, **updates)
+        if updates.get("enabled") is False:
+            await database.db.delete_sessions_for_user(user_id)
+
+    user = await database.db.get_user_by_id(user_id)
+    return web.json_response({"success": True, "user": await _user_to_admin_view(user)})
+
+
+async def api_user_reset_password_handler(request):
+    from . import auth
+    user_id = _parse_user_id(request)
+    if user_id is None:
+        return _validation_error("Invalid user id")
+    user = await database.db.get_user_by_id(user_id)
+    if not user:
+        return web.json_response({"success": False, "error": "User not found"}, status=404)
+    if user.get("auth_source") != "local":
+        return web.json_response({"success": False, "error": "Cannot set a password on an SSO user"}, status=400)
+    try:
+        body = await _json_body(request)
+    except ValueError as error:
+        return _validation_error(error)
+    password = str(body.get("password") or "")
+    min_length = int(auth.auth_config().get("password_min_length") or 8)
+    if len(password) < min_length:
+        return _validation_error(f"password must be at least {min_length} characters")
+    await database.db.update_user(user_id, password_hash=auth.hash_password(password))
+    await database.db.delete_sessions_for_user(user_id)
+    return web.json_response({"success": True})
+
+
+async def api_user_unlock_handler(request):
+    user_id = _parse_user_id(request)
+    if user_id is None:
+        return _validation_error("Invalid user id")
+    user = await database.db.get_user_by_id(user_id)
+    if not user:
+        return web.json_response({"success": False, "error": "User not found"}, status=404)
+    if not user.get("username"):
+        return web.json_response({"success": False, "error": "User has no local username"}, status=400)
+    await database.db.clear_login_attempts_for_username(user["username"])
+    return web.json_response({"success": True, "user": await _user_to_admin_view(user)})
+
+
 # --- Route Registration ---
 
 def get_routes():
@@ -1529,4 +1728,11 @@ def get_routes():
         (("DELETE",), "/api/settings/email-recipients", api_email_recipients_delete_handler),
         (("GET",), "/api/settings/ai-usage", api_ai_usage_handler),
         (("GET",), "/api/logs", api_logs_handler),
+        (("POST",), "/api/auth/login", api_auth_login_handler),
+        (("POST",), "/api/auth/logout", api_auth_logout_handler),
+        (("GET",), "/api/auth/me", api_auth_me_handler),
+        (("GET", "POST"), "/api/users", api_users_handler),
+        (("GET", "PUT"), "/api/users/{user_id}", api_user_handler),
+        (("POST",), "/api/users/{user_id}/reset-password", api_user_reset_password_handler),
+        (("POST",), "/api/users/{user_id}/unlock", api_user_unlock_handler),
     ]

@@ -23,3 +23,17 @@ attachments:
 
   # Maximum attachment file size (supports B, KB, MB, GB, TB)
   max_size: "10MB"
+
+# User management. Off by default: the UI and APIs stay open to anyone who can reach the server.
+auth:
+  enabled: false
+  allow_local: true
+  session_idle_hours: 12
+  session_max_days: 7
+  password_min_length: 8
+  lockout_failures: 5
+  lockout_minutes: 15
+  ip_lockout_failures: 20
+  bootstrap_admin:
+    username: admin
+    password: "${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}"

@@ -106,6 +106,8 @@ def create_app(ws_server: WebSocketServer | None = None) -> FastAPI:
         try:
             database.initialize_database(DATA_DIR)
             await database.db.initialize()
+            from .auth import bootstrap_admin_if_needed
+            await bootstrap_admin_if_needed()
             log_event("database_initialized")
         except Exception as e:
             log_event("database_init_error", level="error", error=str(e))

@@ -15,6 +15,7 @@ import msgpack
 from jinja2 import Environment, FileSystemLoader
 
 from .http_compat import web
+from .auth import template_auth_context
 
 from .config import (
     TEMPLATES_DIR,
@@ -58,7 +59,14 @@ env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
 def render_template(template_name, **context):
     """Render a Jinja2 template with the given context."""
     template = env.get_template(template_name)
-    return template.render(**context)
+    defaults = {
+        "auth_enabled": False,
+        "current_user": None,
+        "show_admin_nav": True,
+    }
+    defaults.update(template_auth_context())
+    defaults.update(context)
+    return template.render(**defaults)
 
 
 def log_event(event: str, level: str = "info", **fields):
@@ -946,6 +954,46 @@ async def server_log_handler(request):
         return web.Response(status=500, text=f"Error loading server log page: {str(e)}")
 
 
+async def login_handler(request):
+    """Serve the local login page."""
+    from .auth import is_auth_enabled, safe_next_url
+
+    if not is_auth_enabled():
+        return web.Response(status=404, text="Not found")
+    if getattr(request, "user", None):
+        return web.HTTPFound(safe_next_url(request.query.get("next")))
+    html = render_template(
+        "login.html",
+        next_url=safe_next_url(request.query.get("next")),
+        error_message="",
+    )
+    return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+
+
+async def logout_handler(request):
+    """Clear the session cookie and return to the login page."""
+    from .auth import (
+        SESSION_COOKIE_NAME,
+        clear_session_cookie,
+        destroy_request_session,
+        is_auth_enabled,
+    )
+
+    if not is_auth_enabled():
+        return web.Response(status=404, text="Not found")
+    cookies = getattr(request, "cookies", {}) or {}
+    await destroy_request_session(cookies.get(SESSION_COOKIE_NAME))
+    response = web.HTTPFound("/login")
+    clear_session_cookie(response)
+    return response
+
+
+async def users_handler(request):
+    """Serve the Admin user-management page."""
+    html = render_template("users.html", active_nav="users")
+    return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+
+
 # --- Route Registration ---
 
 def get_routes():
@@ -969,6 +1017,9 @@ def get_routes():
         (("GET",), "/targets/{key}/{tool}", target_tool_redirect_handler),
         (("GET",), "/collections/{key}/{tool}", collection_tool_redirect_handler),
         (("GET",), "/logs", server_log_handler),
+        (("GET",), "/login", login_handler),
+        (("GET", "POST"), "/logout", logout_handler),
+        (("GET",), "/users", users_handler),
     ]
 
     # Add attachment routes only if enabled

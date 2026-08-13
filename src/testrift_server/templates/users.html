@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Users - TestRift{% endblock %}
+{% block head %}
+<link href="/static/entity_admin.css" rel="stylesheet">
+<style>
+  :root { font-size: 14px; }
+  a { color: #337ab7; }
+  a:hover { color: #23527c; }
+  .main-container {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+  .header-section {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 28px 30px;
+    text-align: center;
+  }
+  .header-section h1 {
+    margin: 0;
+    font-size: 2.4em;
+    font-weight: 300;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .header-section .subtitle {
+    font-size: 1.15em;
+    opacity: 0.9;
+    margin-top: 8px;
+  }
+  .content-section { padding: 24px 30px 30px; }
+  .list-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .user-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lockout-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #fff3cd;
+    color: #856404;
+    font-size: 0.85em;
+    font-weight: 500;
+  }
+</style>
+{% endblock %}
+{% block body %}
+<div class="main-container entity-admin">
+  <div class="header-section">
+    <h1>Users</h1>
+    <div class="subtitle">Local accounts and roles</div>
+  </div>
+  <div class="content-section">
+    <div class="list-toolbar">
+      <div id="users-status" class="small text-muted">Loading…</div>
+      <button id="toggle-create" class="btn btn-primary-custom btn-sm" type="button">
+        <i class="fas fa-plus"></i> New local user
+      </button>
+    </div>
+
+    <section id="create-panel" class="section create-panel" hidden>
+      <div class="section-header">
+        <h3>Create local user</h3>
+      </div>
+      <div class="section-body">
+        <div id="create-status" class="status" role="alert"></div>
+        <form id="create-user">
+          <div class="editor-grid">
+            <div>
+              <label for="new-username">Username</label>
+              <input id="new-username" class="form-control" required autocomplete="off">
+            </div>
+            <div>
+              <label for="new-password">Password</label>
+              <input id="new-password" type="password" class="form-control" required autocomplete="new-password">
+            </div>
+            <div>
+              <label for="new-display-name">Display name</label>
+              <input id="new-display-name" class="form-control">
+            </div>
+            <div>
+              <label for="new-email">Email</label>
+              <input id="new-email" type="email" class="form-control">
+            </div>
+            <div>
+              <label for="new-role">Role</label>
+              <select id="new-role" class="form-select">
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div class="editor-footer">
+            <button class="btn btn-outline-custom" type="button" id="cancel-create">Cancel</button>
+            <button class="btn btn-primary-custom" type="submit">Create user</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <table class="entity-list" id="users-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Username</th>
+          <th>Source</th>
+          <th>Role</th>
+          <th>Enabled</th>
+          <th>Last login</th>
+          <th>Lockout</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/users.js"></script>
+{% endblock %}

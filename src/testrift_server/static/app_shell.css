@@ -182,6 +182,36 @@ body.app-layout {
   font-size: 0.75rem;
 }
 
+.tr-sidebar-user {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tr-sidebar-user-name {
+  color: #e4e2f0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-sign-out {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--tr-sidebar-text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.tr-sign-out:hover {
+  background: var(--tr-sidebar-hover-bg);
+  color: #fff;
+}
+
 .app-main {
   margin-left: var(--tr-sidebar-width);
   min-height: 100vh;

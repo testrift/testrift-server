@@ -187,6 +187,8 @@ def load_config(config_path=None):
             'to_addresses': email_config.get('to_addresses', []),
         }
 
+        config_data['auth'] = parse_auth_config(config.get('auth') or {})
+
         return config_data
 
     except FileNotFoundError:
@@ -227,6 +229,7 @@ def load_config(config_path=None):
                 'from_address': '',
                 'to_addresses': [],
             },
+            'auth': default_auth_config(),
         }
     except yaml.YAMLError as e:
         logger.error(f"Error parsing configuration file: {e}")
@@ -234,6 +237,81 @@ def load_config(config_path=None):
     except Exception as e:
         logger.error(f"Error loading configuration: {e}")
         sys.exit(1)
+
+
+def default_auth_config():
+    """Return default auth settings (user management off)."""
+    return {
+        'enabled': False,
+        'allow_local': True,
+        'session_idle_hours': 12,
+        'session_max_days': 7,
+        'password_min_length': 8,
+        'lockout_failures': 5,
+        'lockout_minutes': 15,
+        'ip_lockout_failures': 20,
+        'bootstrap_admin': {
+            'username': 'admin',
+            'password': '',
+        },
+        'oidc': {
+            'enabled': False,
+        },
+    }
+
+
+def parse_auth_config(auth_config):
+    """Validate and normalize the top-level auth section."""
+    if not isinstance(auth_config, dict):
+        raise ValueError("auth must be a mapping")
+
+    defaults = default_auth_config()
+    enabled = auth_config.get('enabled', False)
+    if not isinstance(enabled, bool):
+        raise ValueError(f"auth.enabled must be a boolean, got: {type(enabled)}")
+
+    allow_local = auth_config.get('allow_local', True)
+    if not isinstance(allow_local, bool):
+        raise ValueError(f"auth.allow_local must be a boolean, got: {type(allow_local)}")
+
+    def _positive_number(key, default, *, allow_zero=False):
+        value = auth_config.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"auth.{key} must be a number, got: {type(value)}")
+        if allow_zero:
+            if value < 0:
+                raise ValueError(f"auth.{key} must be >= 0, got: {value}")
+        elif value <= 0:
+            raise ValueError(f"auth.{key} must be > 0, got: {value}")
+        return value
+
+    bootstrap = auth_config.get('bootstrap_admin') or {}
+    if not isinstance(bootstrap, dict):
+        raise ValueError("auth.bootstrap_admin must be a mapping")
+    bootstrap_username = expand_env_vars(str(bootstrap.get('username', defaults['bootstrap_admin']['username'])))
+    bootstrap_password = expand_env_vars(str(bootstrap.get('password', '') or ''))
+
+    oidc = auth_config.get('oidc') or {}
+    if not isinstance(oidc, dict):
+        raise ValueError("auth.oidc must be a mapping")
+
+    return {
+        'enabled': enabled,
+        'allow_local': allow_local,
+        'session_idle_hours': _positive_number('session_idle_hours', defaults['session_idle_hours']),
+        'session_max_days': _positive_number('session_max_days', defaults['session_max_days']),
+        'password_min_length': int(_positive_number('password_min_length', defaults['password_min_length'])),
+        'lockout_failures': int(_positive_number('lockout_failures', defaults['lockout_failures'], allow_zero=True)),
+        'lockout_minutes': _positive_number('lockout_minutes', defaults['lockout_minutes']),
+        'ip_lockout_failures': int(_positive_number('ip_lockout_failures', defaults['ip_lockout_failures'], allow_zero=True)),
+        'bootstrap_admin': {
+            'username': bootstrap_username.strip() or 'admin',
+            'password': bootstrap_password,
+        },
+        'oidc': {
+            'enabled': bool(oidc.get('enabled', False)),
+        },
+    }
 
 
 # --- Server identity / config fingerprint ---
@@ -318,3 +396,4 @@ ATTACHMENTS_ENABLED = CONFIG['attachments_enabled']
 ATTACHMENT_MAX_SIZE = CONFIG['attachment_max_size']
 AI_ANALYSIS_CONFIG = CONFIG['ai_analysis']
 EMAIL_CONFIG = CONFIG['email']
+AUTH_CONFIG = CONFIG['auth']

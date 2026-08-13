@@ -212,6 +212,10 @@ class WebSocketServer:
 
     async def accept_and_route(self, websocket, path: str):
         """Accept a Starlette WebSocket and route by path."""
+        from .auth import enforce_websocket
+        if not await enforce_websocket(websocket, path):
+            await websocket.close(code=4401)
+            return
         await websocket.accept()
         ws = WebSocketWrapper(websocket)
         self._active_websockets.add(ws)

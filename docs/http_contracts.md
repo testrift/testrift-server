@@ -10,6 +10,7 @@ Frozen surface for the FastAPI migration (Phase 0). Clients (NUnit plugin, colle
 | GET | `/health` |
 | GET | `/targets`, `/collections` |
 | GET | `/analyzer`, `/matrix`, `/failures`, `/settings`, `/logs` |
+| GET | `/login`, `/logout`, `/users` (present when `auth.enabled` is true) |
 | GET | `/targets/{key}`, `/collections/{key}` |
 | GET | `/targets/{key}/{tool}` where tool is `analyzer`\|`matrix`\|`failures` |
 | GET | `/collections/{key}/{tool}` (same tools) |
@@ -52,6 +53,11 @@ Frozen surface for the FastAPI migration (Phase 0). Clients (NUnit plugin, colle
 | GET/PUT/DELETE | `/api/settings/email-recipients` |
 | GET | `/api/settings/ai-usage` |
 | GET | `/api/logs` |
+| POST | `/api/auth/login`, `/api/auth/logout` |
+| GET | `/api/auth/me` |
+| GET/POST | `/api/users` |
+| GET/PUT | `/api/users/{user_id}` |
+| POST | `/api/users/{user_id}/reset-password`, `/api/users/{user_id}/unlock` |
 | POST | `/api/attachments/{run_id}/{test_case_id}/upload` (if enabled) |
 | GET | `/api/attachments/{run_id}/{test_case_id}/list` |
 | GET | `/api/attachments/{run_id}/{test_case_id}/download/{filename}` |
@@ -68,7 +74,8 @@ Message types and fields: see [websocket_protocol.md](websocket_protocol.md).
 
 ### Compatibility notes
 
-- No authentication in Phase 1 (same open model as before; `localhost_only` still applies at bind time).
+- Authentication is off by default (`auth.enabled: false`): same open model as before; `localhost_only` still applies at bind time.
+- When `auth.enabled` is true, unauthenticated HTML requests redirect to `/login` and unauthenticated JSON APIs return 401. Admin pages and Admin APIs require `admin.access`. `/health` and `/api/server-info` stay public. `/ws/nunit` stays open.
 - Health returns `{"status": "ok"}`.
 - Most JSON APIs use `{"success": true|false, ...}` envelopes.
 - Wire protocol for WebSockets must remain MessagePack with existing field shortcuts.

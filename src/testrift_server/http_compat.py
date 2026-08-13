@@ -186,6 +186,19 @@ class CompatRequest:
         self.headers = request.headers
         self.method = request.method
         self.path = request.url.path
+        self.cookies = request.cookies
+        self._state: dict[str, Any] = {}
+        self.user = None
+        self.permissions = None
+
+    def __getitem__(self, key):
+        return self._state[key]
+
+    def __setitem__(self, key, value):
+        self._state[key] = value
+
+    def get(self, key, default=None):
+        return self._state.get(key, default)
 
     @property
     def remote(self) -> str:
@@ -203,6 +216,10 @@ class CompatRequest:
 
     async def json(self):
         return await self._request.json()
+
+    async def post(self):
+        form = await self._request.form()
+        return {key: form.get(key) for key in form}
 
     async def multipart(self) -> _MultipartReader:
         form = await self._request.form()
@@ -233,7 +250,12 @@ def wrap_handler(handler):
     """Adapt an aiohttp-style handler(request) for FastAPI/Starlette."""
 
     async def endpoint(request: Request):
-        return await handler(CompatRequest(request))
+        from .auth import enforce
+        compat = CompatRequest(request)
+        denied = await enforce(compat)
+        if denied is not None:
+            return denied
+        return await handler(compat)
 
     endpoint.__name__ = getattr(handler, "__name__", "endpoint")
     endpoint.__doc__ = getattr(handler, "__doc__", None)

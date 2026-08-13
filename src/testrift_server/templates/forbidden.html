@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Admin only - TestRift{% endblock %}
+{% block head %}
+<style>
+  :root { font-size: 14px; }
+  .main-container {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+    max-width: 720px;
+  }
+  .header-section {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 28px 30px;
+    text-align: center;
+  }
+  .header-section h1 { margin: 0; font-weight: 300; }
+  .content-section { padding: 24px 30px 30px; }
+</style>
+{% endblock %}
+{% block body %}
+<div class="main-container">
+  <div class="header-section">
+    <h1>Admin only</h1>
+  </div>
+  <div class="content-section">
+    <p>This page is available to Admins only.</p>
+    <p class="mb-0"><a href="/">Back to Test Runs</a></p>
+  </div>
+</div>
+{% endblock %}

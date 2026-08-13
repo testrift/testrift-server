@@ -18,8 +18,9 @@
       <span>Collections</span>
     </a>
 
-    <details class="tr-nav-section{% if active_nav in ['settings', 'logs'] %} is-active{% endif %}"
-             {% if active_nav in ['settings', 'logs'] %}open{% endif %}
+    {% if show_admin_nav %}
+    <details class="tr-nav-section{% if active_nav in ['settings', 'logs', 'users'] %} is-active{% endif %}"
+             {% if active_nav in ['settings', 'logs', 'users'] %}open{% endif %}
              data-section="admin">
       <summary>
         <i class="fas fa-wrench"></i>
@@ -35,10 +36,28 @@
           <i class="fas fa-terminal"></i>
           <span>Server Log</span>
         </a>
+        {% if auth_enabled %}
+        <a href="/users" class="{{ 'active' if active_nav == 'users' else '' }}">
+          <i class="fas fa-users"></i>
+          <span>Users</span>
+        </a>
+        {% endif %}
       </div>
     </details>
+    {% endif %}
   </nav>
-  <div class="tr-sidebar-footer">Test logging</div>
+  <div class="tr-sidebar-footer">
+    {% if auth_enabled and current_user %}
+    <div class="tr-sidebar-user">
+      <span class="tr-sidebar-user-name" title="{{ current_user.display_name|e }}">{{ current_user.display_name|e }}</span>
+      <form method="post" action="/logout">
+        <button type="submit" class="tr-sign-out">Sign out</button>
+      </form>
+    </div>
+    {% else %}
+    Test logging
+    {% endif %}
+  </div>
 </aside>
 <script>
 (function () {

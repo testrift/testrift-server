@@ -69,6 +69,38 @@ attachments:
 - **enabled** (boolean, default: true): Whether attachment upload functionality is enabled. When disabled, attachment upload endpoints return 403 Forbidden.
 - **max_size** (string, default: "10MB"): Maximum file size for attachments. Supports units: B (bytes), KB (kilobytes), MB (megabytes), GB (gigabytes), TB (terabytes). Examples: "10MB", "1GB", "500KB".
 
+### Authentication Settings
+
+User management is off by default. The UI and HTTP APIs stay open to anyone who can reach the server; `localhost_only` still applies at bind time. For setup (bootstrap Admin, roles, lockout, and what stays open for test clients), see [authentication.md](authentication.md).
+
+```yaml
+auth:
+  enabled: false
+  allow_local: true
+  session_idle_hours: 12
+  session_max_days: 7
+  password_min_length: 8
+  lockout_failures: 5
+  lockout_minutes: 15
+  ip_lockout_failures: 20
+  bootstrap_admin:
+    username: admin
+    password: "${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}"
+```
+
+- **enabled** (boolean, default: `false`): Master switch. When `false`, the rest of the `auth` block is ignored and no login is required.
+- **allow_local** (boolean, default: `true`): Allow username and password login. Ignored unless `enabled` is `true`.
+- **session_idle_hours** (number, default: 12): Sign the session out after this much idle time.
+- **session_max_days** (number, default: 7): Absolute session lifetime.
+- **password_min_length** (integer, default: 8): Minimum length for local passwords.
+- **lockout_failures** (integer, default: 5): Failed local logins per username in the lockout window before that username is locked. `0` disables username lockout.
+- **lockout_minutes** (number, default: 15): Window for failed-login counters.
+- **ip_lockout_failures** (integer, default: 20): Failed local logins per client IP in the lockout window. `0` disables IP lockout.
+- **bootstrap_admin.username** (string, default: `admin`): Created once at startup when auth is on and no enabled Admin exists.
+- **bootstrap_admin.password** (string, default: empty): Required to create that first Admin. Use `${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}`. If auth is on, no Admin exists, and this is empty, the server refuses to start.
+
+Local login failures always return the same message: `Invalid username or password.` Admins manage users at `/users`.
+
 ## Examples
 
 ### Development Configuration
@@ -140,6 +172,7 @@ If no `testrift_server.yaml` file is found, the server will use these defaults:
 - Data directory: "data"
 - Attachments enabled: true
 - Max attachment size: "10MB"
+- Authentication enabled: false
 
 ## Error Handling
 

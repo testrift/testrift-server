@@ -313,6 +313,59 @@ class TestResultsDatabase:
                 )
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_name TEXT NOT NULL,
+                    email TEXT,
+                    username TEXT,
+                    password_hash TEXT,
+                    role TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    auth_source TEXT NOT NULL,
+                    oidc_issuer TEXT,
+                    oidc_subject TEXT,
+                    created_at TEXT NOT NULL,
+                    last_login_at TEXT
+                )
+            """)
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users (username) WHERE username IS NOT NULL"
+            )
+            await db.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc
+                   ON users (oidc_issuer, oidc_subject)
+                   WHERE oidc_issuer IS NOT NULL AND oidc_subject IS NOT NULL"""
+            )
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id)")
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    attempted_at TEXT NOT NULL,
+                    username TEXT,
+                    client_ip TEXT,
+                    username_existed INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_login_attempts_username_time ON login_attempts (username, attempted_at)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time ON login_attempts (client_ip, attempted_at)"
+            )
+
             await db.commit()
 
         self._initialized = True
@@ -1797,6 +1850,217 @@ class TestResultsDatabase:
         """Delete a setting."""
         async with self.get_connection() as db:
             await db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            await db.commit()
+
+    def _row_to_dict(self, cursor, row) -> Optional[Dict[str, Any]]:
+        if row is None:
+            return None
+        columns = [desc[0] for desc in cursor.description]
+        return dict(zip(columns, row))
+
+    async def create_user(
+        self,
+        *,
+        display_name: str,
+        email: Optional[str],
+        username: Optional[str],
+        password_hash: Optional[str],
+        role: str,
+        enabled: bool = True,
+        auth_source: str = "local",
+        oidc_issuer: Optional[str] = None,
+        oidc_subject: Optional[str] = None,
+        created_at: str,
+    ) -> int:
+        """Insert a user and return the new id."""
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO users (
+                    display_name, email, username, password_hash, role, enabled,
+                    auth_source, oidc_issuer, oidc_subject, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    display_name,
+                    email,
+                    username,
+                    password_hash,
+                    role,
+                    1 if enabled else 0,
+                    auth_source,
+                    oidc_issuer,
+                    oidc_subject,
+                    created_at,
+                ),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            return self._row_to_dict(cursor, await cursor.fetchone())
+
+    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
+            return self._row_to_dict(cursor, await cursor.fetchone())
+
+    async def list_users(self) -> List[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM users ORDER BY id ASC")
+            rows = await cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+
+    async def update_user(self, user_id: int, **fields) -> bool:
+        """Update selected user columns. Returns False if the user does not exist."""
+        allowed = {
+            "display_name",
+            "email",
+            "password_hash",
+            "role",
+            "enabled",
+            "last_login_at",
+        }
+        updates = {key: value for key, value in fields.items() if key in allowed}
+        if "enabled" in updates:
+            updates["enabled"] = 1 if updates["enabled"] else 0
+        if not updates:
+            return await self.get_user_by_id(user_id) is not None
+        assignments = ", ".join(f"{key} = ?" for key in updates)
+        values = list(updates.values()) + [user_id]
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                f"UPDATE users SET {assignments} WHERE id = ?",
+                values,
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def count_enabled_admins(self) -> int:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND enabled = 1"
+            )
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+
+    async def create_session(
+        self,
+        *,
+        token_hash: str,
+        user_id: int,
+        created_at: str,
+        last_seen_at: str,
+        expires_at: str,
+    ) -> int:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (token_hash, user_id, created_at, last_seen_at, expires_at),
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_session_by_token_hash(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE token_hash = ?",
+                (token_hash,),
+            )
+            return self._row_to_dict(cursor, await cursor.fetchone())
+
+    async def touch_session(self, token_hash: str, last_seen_at: str) -> None:
+        async with self.get_connection() as db:
+            await db.execute(
+                "UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?",
+                (last_seen_at, token_hash),
+            )
+            await db.commit()
+
+    async def delete_session(self, token_hash: str) -> None:
+        async with self.get_connection() as db:
+            await db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            await db.commit()
+
+    async def delete_sessions_for_user(self, user_id: int) -> None:
+        async with self.get_connection() as db:
+            await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            await db.commit()
+
+    async def record_login_attempt(
+        self,
+        *,
+        attempted_at: str,
+        username: Optional[str],
+        client_ip: str,
+        username_existed: bool,
+    ) -> None:
+        async with self.get_connection() as db:
+            await db.execute(
+                """
+                INSERT INTO login_attempts (attempted_at, username, client_ip, username_existed)
+                VALUES (?, ?, ?, ?)
+                """,
+                (attempted_at, username, client_ip, 1 if username_existed else 0),
+            )
+            await db.commit()
+
+    async def count_login_failures(
+        self,
+        *,
+        since: str,
+        username: Optional[str] = None,
+        client_ip: Optional[str] = None,
+    ) -> int:
+        if username is None and client_ip is None:
+            raise ValueError("username or client_ip is required")
+        async with self.get_connection() as db:
+            if username is not None:
+                cursor = await db.execute(
+                    """
+                    SELECT COUNT(*) FROM login_attempts
+                    WHERE username = ? AND attempted_at >= ?
+                    """,
+                    (username, since),
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT COUNT(*) FROM login_attempts
+                    WHERE client_ip = ? AND attempted_at >= ?
+                    """,
+                    (client_ip, since),
+                )
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+
+    async def earliest_login_failure(
+        self,
+        *,
+        username: str,
+        since: str,
+    ) -> Optional[str]:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """
+                SELECT attempted_at FROM login_attempts
+                WHERE username = ? AND attempted_at >= ?
+                ORDER BY attempted_at ASC LIMIT 1
+                """,
+                (username, since),
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def clear_login_attempts_for_username(self, username: str) -> None:
+        async with self.get_connection() as db:
+            await db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
             await db.commit()
 
     async def get_test_case_info(self, run_id: str, tc_full_name: str) -> Optional[Dict]:

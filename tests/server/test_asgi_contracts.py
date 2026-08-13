@@ -17,6 +17,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from testrift_server import database
+from testrift_server.config import default_auth_config
 from testrift_server.protocol import (
     F_TYPE,
     F_RUN_ID,
@@ -46,6 +47,7 @@ def asgi_client(monkeypatch):
     monkeypatch.setattr("testrift_server.config.DATA_DIR", data_dir)
     monkeypatch.setattr("testrift_server.tr_server.DATA_DIR", data_dir)
     monkeypatch.setattr("testrift_server.utils.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("testrift_server.config.AUTH_CONFIG", {**default_auth_config(), "enabled": False})
 
     # utils and others import DATA_DIR from config at use time via get_run_path
     import testrift_server.utils as utils_mod
