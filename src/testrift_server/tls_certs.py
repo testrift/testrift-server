@@ -362,8 +362,14 @@ def _write_key(path: Path, key) -> None:
 def ingest_base_url(config: dict, host_header: str = "127.0.0.1") -> str:
     """Public ingest origin advertised to test clients."""
     tls = config.get("tls") or {}
-    port = config.get("ingest_port") or config["port"]
-    scheme = "https" if tls.get("ingest") != "off" else "http"
+    ingest_port = config.get("ingest_port")
+    port = ingest_port or config["port"]
+    if ingest_port:
+        scheme = "https"
+    elif tls.get("ingest", "off") != "off" or tls.get("ui", "off") != "off":
+        scheme = "https"
+    else:
+        scheme = "http"
     host = _host_without_port(host_header)
     default_port = 443 if scheme == "https" else 80
     if port == default_port:

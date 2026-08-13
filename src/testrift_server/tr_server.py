@@ -232,6 +232,8 @@ def main(argv=None):
             return 2
 
     logger.info(f"Starting server on {host}:{PORT}")
+    if ui_tls_enabled(CONFIG):
+        logger.info(f"UI HTTPS listener on {host}:{PORT}")
     logger.info(f"Default retention days: {DEFAULT_RETENTION_DAYS}")
     logger.info(f"Data directory: {DATA_DIR}")
     logger.info(f"Localhost only: {LOCALHOST_ONLY}")

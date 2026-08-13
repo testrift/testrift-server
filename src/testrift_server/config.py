@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import ssl
 import sys
 import urllib.request
 import urllib.error
@@ -428,26 +429,33 @@ def get_running_server_info(port: int) -> dict | None:
 
     Raises RuntimeError if something is listening on the port but is not a compatible TestRift server.
     """
-    url = f"http://127.0.0.1:{port}/api/server-info"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            raw = resp.read().decode("utf-8", errors="replace")
-            if resp.status != 200:
-                raise RuntimeError(f"Port {port} is in use but did not return 200 from /api/server-info (status={resp.status}).")
-            if "application/json" not in content_type.lower():
-                raise RuntimeError(f"Port {port} is in use but /api/server-info did not return JSON (Content-Type={content_type}).")
-            info = json.loads(raw)
-            if info.get("service") != "testrift-server":
-                raise RuntimeError(f"Port {port} is in use but /api/server-info is not a TestRift server.")
-            return info
-    except urllib.error.HTTPError as e:
-        # Something is responding on that port but not our expected endpoint.
-        raise RuntimeError(f"Port {port} is in use but /api/server-info returned HTTP {e.code}.")
-    except urllib.error.URLError:
-        # Connection refused / no listener / timeout -> treat as not running.
-        return None
+    for url, context in _localhost_probe_targets(port, "/api/server-info"):
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=1.5, context=context) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                raw = resp.read().decode("utf-8", errors="replace")
+                if resp.status != 200:
+                    raise RuntimeError(f"Port {port} is in use but did not return 200 from /api/server-info (status={resp.status}).")
+                if "application/json" not in content_type.lower():
+                    raise RuntimeError(f"Port {port} is in use but /api/server-info did not return JSON (Content-Type={content_type}).")
+                info = json.loads(raw)
+                if info.get("service") != "testrift-server":
+                    raise RuntimeError(f"Port {port} is in use but /api/server-info is not a TestRift server.")
+                return info
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"Port {port} is in use but /api/server-info returned HTTP {e.code}.")
+        except RuntimeError:
+            raise
+        except Exception:
+            continue
+    return None
+
+
+def _localhost_probe_targets(port: int, path: str):
+    """Try HTTP first, then HTTPS with an unverified context (user/mkcert certs)."""
+    yield f"http://127.0.0.1:{port}{path}", None
+    yield f"https://127.0.0.1:{port}{path}", ssl._create_unverified_context()
 
 
 def request_running_server_shutdown(port: int, running_hash: str) -> bool:
@@ -455,22 +463,20 @@ def request_running_server_shutdown(port: int, running_hash: str) -> bool:
 
     Returns True if the request returned HTTP 200, False otherwise.
     """
-    url = f"http://127.0.0.1:{port}/api/admin/shutdown"
-    req = urllib.request.Request(
-        url,
-        method="POST",
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "X-TestRift-Config-Hash": running_hash,
-        },
-        data=json.dumps({"config_hash": running_hash}).encode("utf-8"),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    body = json.dumps({"config_hash": running_hash}).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-TestRift-Config-Hash": running_hash,
+    }
+    for url, context in _localhost_probe_targets(port, "/api/admin/shutdown"):
+        req = urllib.request.Request(url, method="POST", headers=headers, data=body)
+        try:
+            with urllib.request.urlopen(req, timeout=2.0, context=context) as resp:
+                return resp.status == 200
+        except Exception:
+            continue
+    return False
 
 
 # Load configuration at module import time
