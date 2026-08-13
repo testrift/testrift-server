@@ -86,6 +86,17 @@ auth:
   bootstrap_admin:
     username: admin
     password: "${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}"
+  oidc:
+    enabled: false
+    issuer: ""
+    client_id: "${env:TESTRIFT_OIDC_CLIENT_ID}"
+    client_secret: "${env:TESTRIFT_OIDC_CLIENT_SECRET}"
+    redirect_uri: ""
+    scopes: ["openid", "profile", "email"]
+    default_role: member
+    role_claim: groups
+    role_map: {}
+    role_source: local_override
 ```
 
 - **enabled** (boolean, default: `false`): Master switch. When `false`, the rest of the `auth` block is ignored and no login is required.
@@ -97,9 +108,19 @@ auth:
 - **lockout_minutes** (number, default: 15): Window for failed-login counters.
 - **ip_lockout_failures** (integer, default: 20): Failed local logins per client IP in the lockout window. `0` disables IP lockout.
 - **bootstrap_admin.username** (string, default: `admin`): Created once at startup when auth is on and no enabled Admin exists.
-- **bootstrap_admin.password** (string, default: empty): Required to create that first Admin. Use `${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}`. If auth is on, no Admin exists, and this is empty, the server refuses to start.
+- **bootstrap_admin.password** (string, default: empty): Used to create that first Admin. Use `${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}`. If authentication is on, no Admin exists, and this is empty, the server refuses to start unless OIDC is enabled with a `role_map` (or `default_role`) that can produce an Admin.
+- **oidc.enabled** (boolean, default: `false`): Enable OpenID Connect sign-in. Ignored unless `auth.enabled` is `true`.
+- **oidc.issuer** (string): IdP issuer URL, for example `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+- **oidc.client_id** (string): Application (client) ID. Typically `${env:TESTRIFT_OIDC_CLIENT_ID}`.
+- **oidc.client_secret** (string): Client secret for confidential apps. Typically `${env:TESTRIFT_OIDC_CLIENT_SECRET}`.
+- **oidc.redirect_uri** (string, default: empty): Must match the redirect URI registered at the IdP. When empty, the server uses `{origin}/auth/oidc/callback`.
+- **oidc.scopes** (list, default: `openid`, `profile`, `email`): Scopes requested from the IdP. `openid` is always included.
+- **oidc.default_role** (`member` or `admin`, default: `member`): Role for new SSO users when no `role_map` entry matches.
+- **oidc.role_claim** (string, default: `groups`): Token or userinfo claim used for role mapping.
+- **oidc.role_map** (mapping, default: `{}`): Maps claim values (group names or IDs) to `member` or `admin`.
+- **oidc.role_source** (`local_override` or `mapped`, default: `local_override`): `local_override` applies mapping only when the user is created. `mapped` reapplies mapping on every SSO login.
 
-Local login failures always return the same message: `Invalid username or password.` Admins manage users at `/users`.
+When `auth.oidc.enabled` is true, `issuer` and `client_id` are required. Setup: [authentication.md](authentication.md).
 
 ## Examples
 

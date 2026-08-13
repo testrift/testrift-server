@@ -41,7 +41,7 @@
       const local = user.auth_source === 'local';
       row.innerHTML =
         '<td>' + escapeHtml(user.display_name || '') + '</td>' +
-        '<td>' + escapeHtml(user.username || '') + '</td>' +
+        '<td>' + escapeHtml(user.username || user.email || '') + '</td>' +
         '<td>' + sourceLabel(user) + '</td>' +
         '<td>' +
           '<select class="form-select form-select-sm role-select">' +

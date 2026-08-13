@@ -55,6 +55,8 @@ _PUBLIC_EXACT = frozenset({
     ("POST", "/api/auth/logout"),
     ("GET", "/api/server-info"),
     ("POST", "/api/admin/shutdown"),
+    ("GET", "/auth/oidc/login"),
+    ("GET", "/auth/oidc/callback"),
 })
 _PUBLIC_PREFIXES = ("/static/",)
 _AUTH_ONLY_EXACT = frozenset({
@@ -65,7 +67,7 @@ _AUTH_ONLY_EXACT = frozenset({
     "/api/auth/logout",
     "/api/auth/me",
 })
-_AUTH_ONLY_PREFIXES = ("/api/users",)
+_AUTH_ONLY_PREFIXES = ("/api/users", "/auth/oidc")
 _ADMIN_EXACT = frozenset({
     "/settings",
     "/logs",
@@ -351,9 +353,13 @@ async def bootstrap_admin_if_needed() -> None:
     password = (cfg.get("bootstrap_admin") or {}).get("password") or ""
     username = normalize_username((cfg.get("bootstrap_admin") or {}).get("username") or "admin")
     if not password:
+        from .oidc import oidc_can_provision_admin
+        if oidc_can_provision_admin():
+            logger.info("No local Admin yet; the first SSO user mapped to admin will become Admin")
+            return
         raise RuntimeError(
             "auth.enabled is true but no Admin user exists and auth.bootstrap_admin.password is empty. "
-            "Set TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD or create an Admin before starting."
+            "Set TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD, or enable OIDC with a role_map entry for admin."
         )
     min_length = int(cfg.get("password_min_length") or 8)
     if len(password) < min_length:

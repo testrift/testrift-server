@@ -366,6 +366,16 @@ class TestResultsDatabase:
                 "CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time ON login_attempts (client_ip, attempted_at)"
             )
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS oidc_states (
+                    state TEXT PRIMARY KEY,
+                    nonce TEXT NOT NULL,
+                    code_verifier TEXT NOT NULL,
+                    next_url TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             await db.commit()
 
         self._initialized = True
@@ -1907,6 +1917,14 @@ class TestResultsDatabase:
             cursor = await db.execute("SELECT * FROM users WHERE username = ?", (username,))
             return self._row_to_dict(cursor, await cursor.fetchone())
 
+    async def get_user_by_oidc(self, issuer: str, subject: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM users WHERE oidc_issuer = ? AND oidc_subject = ?",
+                (issuer, subject),
+            )
+            return self._row_to_dict(cursor, await cursor.fetchone())
+
     async def list_users(self) -> List[Dict[str, Any]]:
         async with self.get_connection() as db:
             cursor = await db.execute("SELECT * FROM users ORDER BY id ASC")
@@ -2061,6 +2079,39 @@ class TestResultsDatabase:
     async def clear_login_attempts_for_username(self, username: str) -> None:
         async with self.get_connection() as db:
             await db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
+            await db.commit()
+
+    async def create_oidc_state(
+        self,
+        *,
+        state: str,
+        nonce: str,
+        code_verifier: str,
+        next_url: str,
+        created_at: str,
+    ) -> None:
+        async with self.get_connection() as db:
+            await db.execute(
+                """
+                INSERT INTO oidc_states (state, nonce, code_verifier, next_url, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (state, nonce, code_verifier, next_url, created_at),
+            )
+            await db.commit()
+
+    async def take_oidc_state(self, state: str) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM oidc_states WHERE state = ?", (state,))
+            row = self._row_to_dict(cursor, await cursor.fetchone())
+            if row:
+                await db.execute("DELETE FROM oidc_states WHERE state = ?", (state,))
+                await db.commit()
+            return row
+
+    async def delete_expired_oidc_states(self, older_than: str) -> None:
+        async with self.get_connection() as db:
+            await db.execute("DELETE FROM oidc_states WHERE created_at < ?", (older_than,))
             await db.commit()
 
     async def get_test_case_info(self, run_id: str, tc_full_name: str) -> Optional[Dict]:

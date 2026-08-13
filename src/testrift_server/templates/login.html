@@ -44,6 +44,7 @@
       padding: 10px 12px;
       margin-bottom: 16px;
     }
+    .error.is-visible { display: block; }
     .btn-signin {
       background: linear-gradient(135deg, #667eea, #764ba2);
       border: none;
@@ -54,6 +55,25 @@
       font-weight: 600;
     }
     .btn-signin:hover { color: white; opacity: 0.95; }
+    .btn-sso {
+      display: block;
+      width: 100%;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 1px solid #667eea;
+      color: #4c5bd4;
+      background: #fff;
+      text-align: center;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .btn-sso:hover { background: #f5f6ff; color: #4c5bd4; }
+    .login-or {
+      text-align: center;
+      color: #6c757d;
+      margin: 18px 0 14px;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
@@ -63,7 +83,14 @@
       <div>Sign in to continue</div>
     </div>
     <div class="login-body">
-      <div id="login-error" class="error" role="alert"></div>
+      <div id="login-error" class="error{% if sso_error %} is-visible{% endif %}" role="alert">{% if sso_error %}Could not sign in with company account.{% endif %}</div>
+      {% if oidc_enabled %}
+      <a class="btn-sso" href="/auth/oidc/login?next={{ next_url|urlencode }}">Sign in with company account</a>
+      {% endif %}
+      {% if oidc_enabled and allow_local %}
+      <div class="login-or">or</div>
+      {% endif %}
+      {% if allow_local %}
       <form id="login-form">
         <input type="hidden" name="next" value="{{ next_url|e }}">
         <div class="mb-3">
@@ -76,8 +103,10 @@
         </div>
         <button class="btn btn-signin" type="submit">Sign in</button>
       </form>
+      {% endif %}
     </div>
   </div>
+  {% if allow_local %}
   <script>
     const form = document.getElementById('login-form');
     const errorEl = document.getElementById('login-error');
@@ -106,5 +135,6 @@
       }
     });
   </script>
+  {% endif %}
 </body>
 </html>

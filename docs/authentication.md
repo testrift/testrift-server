@@ -24,9 +24,9 @@ $env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD = "choose-a-long-password"
 testrift-server
 ```
 
-On startup, if authentication is on and no enabled Admin exists, the server creates that local Admin once. If authentication is on, no Admin exists, and the bootstrap password is empty, the server refuses to start.
+On startup, if authentication is on and no enabled Admin exists, the server creates that local Admin once. If authentication is on, no Admin exists, and the bootstrap password is empty, the server refuses to start unless OpenID Connect is enabled with a `role_map` (or `default_role`) that can produce an Admin. In that case the first SSO user mapped to Admin becomes Admin.
 
-After that first start, manage users in the UI. You can leave `bootstrap_admin.password` set; it is not used again once an Admin exists.
+After a local bootstrap, manage users in the UI. You can leave `bootstrap_admin.password` set; it is not used again once an Admin exists.
 
 When `auth.enabled` is `false`, the rest of the `auth` block is ignored. There is no login page, no session cookie, and no Users page. Settings and Server Log stay visible to anyone who can reach the server.
 
@@ -34,8 +34,9 @@ When `auth.enabled` is `false`, the rest of the `auth` block is ignored. There i
 
 Open the UI. Unauthenticated browser requests redirect to `/login`. After a successful sign-in, the original page is restored when it was a GET request.
 
-- Use the username and password of a local account.
+- Use the username and password of a local account, or **Sign in with company account** when OpenID Connect is enabled.
 - Failed local logins always show **Invalid username or password.** That message is also used for unknown users, disabled accounts, and lockout, so a login form cannot be used to discover account names.
+- Failed SSO logins show **Could not sign in with company account.**
 - The sidebar shows the signed-in display name and **Sign out**.
 
 Unauthenticated JSON API calls return HTTP 401. `/health` and `/api/server-info` stay callable without a session (probes and local restart). Static files under `/static/` are public.
@@ -62,6 +63,8 @@ Admins open **Admin → Users** (`/users`).
 | Disable / enable | A disabled user cannot sign in. Existing sessions for that user are revoked. |
 | Reset password | Local accounts only. Existing sessions for that user are revoked. |
 | Clear lockout | Local accounts only. Clears failed-login counts for that username. |
+
+SSO users are created on first successful company sign-in. They have no local password; their identity stays with the identity provider.
 
 The last remaining enabled Admin cannot be disabled or changed to Member.
 
@@ -95,11 +98,63 @@ NUnit and other collectors are not people. `/ws/nunit` and test-client attachmen
 
 Browser attachment list/download and the rest of the UI follow the signed-in user's role.
 
-## Single sign-on
+## Single sign-on (OpenID Connect)
 
-Corporate SSO (OpenID Connect through Microsoft Entra ID, Okta, Google Workspace, Keycloak, and similar) is not available. SAML is not available.
+SAML is not available. Corporate sign-in uses OpenID Connect Authorization Code flow with PKCE. Typical identity providers include Microsoft Entra ID, Okta, Google Workspace, and Keycloak.
 
-Use local accounts created by an Admin, or leave `auth.enabled` false and control access at the network (for example `localhost_only: true`, or a reverse proxy in front of the server).
+### Enable OIDC
+
+```yaml
+auth:
+  enabled: true
+  allow_local: true
+  oidc:
+    enabled: true
+    issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+    client_id: "${env:TESTRIFT_OIDC_CLIENT_ID}"
+    client_secret: "${env:TESTRIFT_OIDC_CLIENT_SECRET}"
+    redirect_uri: "http://127.0.0.1:8080/auth/oidc/callback"
+    scopes: ["openid", "profile", "email"]
+    default_role: member
+    role_claim: groups
+    role_map:
+      "<admin-group-id>": admin
+    role_source: local_override
+```
+
+Register a **Web** application at the identity provider. The redirect URI must match `auth.oidc.redirect_uri` exactly. When `redirect_uri` is empty, TestRift uses `{origin}/auth/oidc/callback` from the incoming request (scheme and host, including `X-Forwarded-Proto` / `X-Forwarded-Host` when present).
+
+If both `allow_local` and OIDC are on, the login page shows the company button and the username/password form. Set `allow_local: false` for company accounts only. In that case either set a bootstrap Admin password or include an Admin mapping in `role_map` (or `default_role: admin`) so someone can administer the server.
+
+### Role mapping
+
+On first SSO sign-in, TestRift creates a user (`auth_source` SSO) and assigns a role:
+
+1. If the token/userinfo claim named `role_claim` contains a value listed in `role_map`, that role is used (`admin` wins if several match).
+2. Otherwise `default_role` is used (usually Member).
+
+`role_source`:
+
+- **local_override** (default): mapping applies only when the user is created. An Admin can change the role later in TestRift; later SSO logins do not overwrite it.
+- **mapped**: mapping is applied on every SSO login.
+
+Display name and email are refreshed on each SSO login. SSO tokens are not stored; the usual session cookie is issued.
+
+If no Admin exists yet, only an SSO user mapped to Admin is accepted (that user becomes Admin). Other SSO users are refused until an Admin exists.
+
+### Microsoft Entra ID
+
+1. In Azure Portal, register an application (single-tenant or multi-tenant as required).
+2. Add a Web redirect URI: `http://127.0.0.1:8080/auth/oidc/callback` (or your public HTTPS origin plus `/auth/oidc/callback`).
+3. Create a client secret. Store it in `TESTRIFT_OIDC_CLIENT_SECRET`. Store the Application (client) ID in `TESTRIFT_OIDC_CLIENT_ID`.
+4. Set `issuer` to `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+5. Optional: under Token configuration, add a **groups** claim if you want `role_map` to use Entra group object IDs.
+
+### Okta / Keycloak / Google
+
+Use the provider's OIDC issuer URL (`/.well-known/openid-configuration` must exist under that issuer), a confidential client ID and secret, and the same redirect URI path `/auth/oidc/callback`. For Keycloak the issuer is typically `https://<host>/realms/<realm>`.
+
+Callback endpoints are rate-limited per IP (30 requests per minute). Account lockout for SSO users is handled by the identity provider.
 
 ## Related configuration
 

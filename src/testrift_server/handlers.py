@@ -955,19 +955,34 @@ async def server_log_handler(request):
 
 
 async def login_handler(request):
-    """Serve the local login page."""
-    from .auth import is_auth_enabled, safe_next_url
+    """Serve the login page."""
+    from .auth import auth_config, is_auth_enabled, safe_next_url
+    from .oidc import is_oidc_enabled
 
     if not is_auth_enabled():
         return web.Response(status=404, text="Not found")
     if getattr(request, "user", None):
         return web.HTTPFound(safe_next_url(request.query.get("next")))
+    cfg = auth_config()
+    next_url = safe_next_url(request.query.get("next"))
     html = render_template(
         "login.html",
-        next_url=safe_next_url(request.query.get("next")),
-        error_message="",
+        next_url=next_url,
+        allow_local=bool(cfg.get("allow_local", True)),
+        oidc_enabled=is_oidc_enabled(),
+        sso_error=(request.query.get("error") == "sso"),
     )
     return web.Response(text=html, content_type="text/html", headers=NO_CACHE_HEADERS)
+
+
+async def oidc_login_handler(request):
+    from .oidc import start_oidc_login
+    return await start_oidc_login(request)
+
+
+async def oidc_callback_handler(request):
+    from .oidc import finish_oidc_login
+    return await finish_oidc_login(request)
 
 
 async def logout_handler(request):
@@ -1018,6 +1033,8 @@ def get_routes():
         (("GET",), "/collections/{key}/{tool}", collection_tool_redirect_handler),
         (("GET",), "/logs", server_log_handler),
         (("GET",), "/login", login_handler),
+        (("GET",), "/auth/oidc/login", oidc_login_handler),
+        (("GET",), "/auth/oidc/callback", oidc_callback_handler),
         (("GET", "POST"), "/logout", logout_handler),
         (("GET",), "/users", users_handler),
     ]

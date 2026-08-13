@@ -19,12 +19,19 @@ MEMBER_PASSWORD = "member-pass"
 
 def _auth_config(**overrides):
     cfg = config.default_auth_config()
+    oidc_override = overrides.pop("oidc", None)
+    bootstrap_override = overrides.pop("bootstrap_admin", None)
     cfg.update(overrides)
     bootstrap = dict(cfg["bootstrap_admin"])
-    bootstrap.update(overrides.get("bootstrap_admin") or {})
-    if "bootstrap_admin" not in overrides:
+    if bootstrap_override is not None:
+        bootstrap.update(bootstrap_override)
+    else:
         bootstrap["password"] = ADMIN_PASSWORD
     cfg["bootstrap_admin"] = bootstrap
+    if oidc_override is not None:
+        oidc = dict(cfg["oidc"])
+        oidc.update(oidc_override)
+        cfg["oidc"] = oidc
     return cfg
 
 
@@ -146,6 +153,8 @@ class TestOpenMode:
         assert open_client.get("/users").status_code == 404
         assert open_client.get("/api/users").status_code == 404
         assert open_client.post("/api/auth/login", json={"username": "a", "password": "b"}).status_code == 404
+        assert open_client.get("/auth/oidc/login").status_code == 404
+        assert open_client.get("/auth/oidc/callback").status_code == 404
 
     def test_admin_nav_visible_without_users_link(self, open_client):
         html = open_client.get("/").text
@@ -229,3 +238,8 @@ class TestAuthEnabled:
         auth_client.post("/api/auth/logout")
         recovered = _login(auth_client, "lockeduser", MEMBER_PASSWORD)
         assert recovered.status_code == 200
+
+    def test_oidc_start_404_when_disabled(self, auth_client):
+        assert auth_client.get("/auth/oidc/login").status_code == 404
+        html = auth_client.get("/login").text
+        assert "Sign in with company account" not in html

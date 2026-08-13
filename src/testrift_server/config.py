@@ -256,6 +256,15 @@ def default_auth_config():
         },
         'oidc': {
             'enabled': False,
+            'issuer': '',
+            'client_id': '',
+            'client_secret': '',
+            'redirect_uri': '',
+            'scopes': ['openid', 'profile', 'email'],
+            'default_role': 'member',
+            'role_claim': 'groups',
+            'role_map': {},
+            'role_source': 'local_override',
         },
     }
 
@@ -295,6 +304,8 @@ def parse_auth_config(auth_config):
     if not isinstance(oidc, dict):
         raise ValueError("auth.oidc must be a mapping")
 
+    parsed_oidc = parse_oidc_config(oidc, auth_enabled=enabled)
+
     return {
         'enabled': enabled,
         'allow_local': allow_local,
@@ -308,9 +319,58 @@ def parse_auth_config(auth_config):
             'username': bootstrap_username.strip() or 'admin',
             'password': bootstrap_password,
         },
-        'oidc': {
-            'enabled': bool(oidc.get('enabled', False)),
-        },
+        'oidc': parsed_oidc,
+    }
+
+
+def parse_oidc_config(oidc, *, auth_enabled=False):
+    """Validate and normalize auth.oidc."""
+    defaults = default_auth_config()['oidc']
+    enabled = bool(oidc.get('enabled', False))
+    issuer = expand_env_vars(str(oidc.get('issuer') or '')).strip().rstrip('/')
+    client_id = expand_env_vars(str(oidc.get('client_id') or '')).strip()
+    client_secret = expand_env_vars(str(oidc.get('client_secret') or ''))
+    redirect_uri = expand_env_vars(str(oidc.get('redirect_uri') or '')).strip()
+    scopes = oidc.get('scopes', defaults['scopes'])
+    if isinstance(scopes, str):
+        scopes = [part for part in scopes.replace(',', ' ').split() if part]
+    if not isinstance(scopes, list) or not all(isinstance(item, str) and item.strip() for item in scopes):
+        raise ValueError("auth.oidc.scopes must be a list of strings")
+    scopes = [item.strip() for item in scopes]
+    if 'openid' not in scopes:
+        scopes = ['openid'] + scopes
+    default_role = str(oidc.get('default_role', defaults['default_role'])).strip().lower()
+    if default_role not in ('member', 'admin'):
+        raise ValueError("auth.oidc.default_role must be member or admin")
+    role_claim = str(oidc.get('role_claim', defaults['role_claim']) or 'groups').strip() or 'groups'
+    role_map = oidc.get('role_map') or {}
+    if not isinstance(role_map, dict):
+        raise ValueError("auth.oidc.role_map must be a mapping")
+    normalized_map = {}
+    for key, value in role_map.items():
+        role = str(value).strip().lower()
+        if role not in ('member', 'admin'):
+            raise ValueError(f"auth.oidc.role_map values must be member or admin, got {value!r}")
+        normalized_map[str(key)] = role
+    role_source = str(oidc.get('role_source', defaults['role_source'])).strip().lower()
+    if role_source not in ('mapped', 'local_override'):
+        raise ValueError("auth.oidc.role_source must be mapped or local_override")
+
+    if auth_enabled and enabled:
+        if not issuer or not client_id:
+            raise ValueError("auth.oidc.issuer and auth.oidc.client_id are required when auth.oidc.enabled is true")
+
+    return {
+        'enabled': enabled,
+        'issuer': issuer,
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'redirect_uri': redirect_uri,
+        'scopes': scopes,
+        'default_role': default_role,
+        'role_claim': role_claim,
+        'role_map': normalized_map,
+        'role_source': role_source,
     }
 
 

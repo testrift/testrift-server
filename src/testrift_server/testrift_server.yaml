@@ -37,3 +37,14 @@ auth:
   bootstrap_admin:
     username: admin
     password: "${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}"
+  oidc:
+    enabled: false
+    issuer: ""
+    client_id: "${env:TESTRIFT_OIDC_CLIENT_ID}"
+    client_secret: "${env:TESTRIFT_OIDC_CLIENT_SECRET}"
+    redirect_uri: ""
+    scopes: ["openid", "profile", "email"]
+    default_role: member
+    role_claim: groups
+    role_map: {}
+    role_source: local_override
