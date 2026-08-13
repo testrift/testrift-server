@@ -76,7 +76,8 @@ Message types and fields: see [websocket_protocol.md](websocket_protocol.md).
 ### Compatibility notes
 
 - Authentication is off by default (`auth.enabled: false`): same open model as before; `localhost_only` still applies at bind time.
-- When `auth.enabled` is true, unauthenticated HTML requests redirect to `/login` and unauthenticated JSON APIs return 401. Admin pages and Admin APIs require `admin.access`. `/health` and `/api/server-info` stay public. `/ws/nunit` stays open. OIDC callback and start URLs are public so the identity provider can redirect back.
+- When `auth.enabled` is true, unauthenticated HTML requests redirect to `/login` and unauthenticated JSON APIs return 401. Admin pages and Admin APIs require `admin.access`. `/health` and `/api/server-info` stay public. OIDC callback and start URLs are public so the identity provider can redirect back.
+- When `auth.ingest_token` is set, `/ws/nunit` and test-client `POST` attachment/commit upload require `X-TestRift-Ingest-Token` (or `Authorization: Bearer`). When it is empty, those ingest paths stay open.
 - Health returns `{"status": "ok"}`.
 - Most JSON APIs use `{"success": true|false, ...}` envelopes.
 - Wire protocol for WebSockets must remain MessagePack with existing field shortcuts.

@@ -28,7 +28,7 @@ On startup, if authentication is on and no enabled Admin exists, the server crea
 
 After a local bootstrap, manage users in the UI. You can leave `bootstrap_admin.password` set; it is not used again once an Admin exists.
 
-When `auth.enabled` is `false`, the rest of the `auth` block is ignored. There is no login page, no session cookie, and no Users page. Settings and Server Log stay visible to anyone who can reach the server.
+When `auth.enabled` is `false`, login is not required. There is no login page, no session cookie, and no Users page. Settings and Server Log stay visible to anyone who can reach the server. `auth.ingest_token` is still checked if it is set.
 
 ## Sign in
 
@@ -94,7 +94,13 @@ Sign out clears the cookie and deletes the session. `/ws/ui` and `/ws/logs/...` 
 
 ## Test clients
 
-NUnit and other collectors are not people. `/ws/nunit` and test-client attachment upload stay open when UI authentication is on. Restrict who can reach the server with `localhost_only` or your network, as before.
+NUnit and other collectors are not people. They do not use the login page.
+
+When `auth.ingest_token` is empty, `/ws/nunit` and test-client attachment upload (and commit upload) stay open even if UI authentication is on. That is suitable for `localhost_only` labs.
+
+When `auth.ingest_token` is set, those ingest endpoints require the header `X-TestRift-Ingest-Token` with the same value (or `Authorization: Bearer <token>`). A missing or wrong token is rejected. A signed-in browser session is not a substitute. `/health` stays unauthenticated.
+
+The NUnit plugin sends the token from `TESTRIFT_INGEST_TOKEN` or `ingestToken` in `TestRiftNUnit.yaml`.
 
 Browser attachment list/download and the rest of the UI follow the signed-in user's role.
 

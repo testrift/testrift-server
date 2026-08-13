@@ -37,6 +37,7 @@ auth:
   bootstrap_admin:
     username: admin
     password: "${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}"
+  ingest_token: "${env:TESTRIFT_INGEST_TOKEN}"
   oidc:
     enabled: false
     issuer: ""

@@ -86,6 +86,7 @@ auth:
   bootstrap_admin:
     username: admin
     password: "${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}"
+  ingest_token: "${env:TESTRIFT_INGEST_TOKEN}"
   oidc:
     enabled: false
     issuer: ""
@@ -99,7 +100,7 @@ auth:
     role_source: local_override
 ```
 
-- **enabled** (boolean, default: `false`): Master switch. When `false`, the rest of the `auth` block is ignored and no login is required.
+- **enabled** (boolean, default: `false`): Master switch for people signing in. When `false`, the UI and HTTP APIs stay open; `localhost_only` still applies at bind time. `ingest_token` is still honored if set.
 - **allow_local** (boolean, default: `true`): Allow username and password login. Ignored unless `enabled` is `true`.
 - **session_idle_hours** (number, default: 12): Sign the session out after this much idle time.
 - **session_max_days** (number, default: 7): Absolute session lifetime.
@@ -109,6 +110,7 @@ auth:
 - **ip_lockout_failures** (integer, default: 20): Failed local logins per client IP in the lockout window. `0` disables IP lockout.
 - **bootstrap_admin.username** (string, default: `admin`): Created once at startup when auth is on and no enabled Admin exists.
 - **bootstrap_admin.password** (string, default: empty): Used to create that first Admin. Use `${env:TESTRIFT_BOOTSTRAP_ADMIN_PASSWORD}`. If authentication is on, no Admin exists, and this is empty, the server refuses to start unless OIDC is enabled with a `role_map` (or `default_role`) that can produce an Admin.
+- **ingest_token** (string, default: empty): Shared secret for test clients. Typically `${env:TESTRIFT_INGEST_TOKEN}`. When empty, `/ws/nunit` and test-client attachment/commit uploads stay open. When set, those endpoints require the header `X-TestRift-Ingest-Token` (or `Authorization: Bearer`). This applies even if `auth.enabled` is `false`.
 - **oidc.enabled** (boolean, default: `false`): Enable OpenID Connect sign-in. Ignored unless `auth.enabled` is `true`.
 - **oidc.issuer** (string): IdP issuer URL, for example `https://login.microsoftonline.com/<tenant-id>/v2.0`.
 - **oidc.client_id** (string): Application (client) ID. Typically `${env:TESTRIFT_OIDC_CLIENT_ID}`.

@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 UTC = timezone.utc
 
 SESSION_COOKIE_NAME = "testrift_session"
+INGEST_TOKEN_HEADER = "x-testrift-ingest-token"
 LOGIN_ERROR_MESSAGE = "Invalid username or password."
+INGEST_TOKEN_ERROR_MESSAGE = "Invalid ingest token."
 VALID_ROLES = frozenset({"member", "admin"})
 PERM_RUNS_READ = "runs.read"
 PERM_CATALOG_WRITE = "catalog.write"
@@ -197,6 +199,52 @@ def _is_ingest_post(path: str) -> bool:
     if re.match(r"^/api/runs/[^/]+/commits$", path):
         return True
     return False
+
+
+def ingest_token_configured() -> str:
+    """Return the configured ingest token, or empty if ingest stays open."""
+    return (auth_config().get("ingest_token") or "").strip()
+
+
+def extract_ingest_token(headers) -> str:
+    """Read the ingest token from request or WebSocket headers."""
+    if headers is None:
+        return ""
+    custom = (headers.get(INGEST_TOKEN_HEADER) or "").strip()
+    if custom:
+        return custom
+    authorization = (headers.get("authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def ingest_token_matches(provided: str) -> bool:
+    expected = ingest_token_configured()
+    if not expected:
+        return True
+    provided = provided or ""
+    return hmac.compare_digest(
+        hashlib.sha256(provided.encode("utf-8")).digest(),
+        hashlib.sha256(expected.encode("utf-8")).digest(),
+    )
+
+
+def _ingest_unauthorized_response() -> JSONResponse:
+    return JSONResponse({"success": False, "error": INGEST_TOKEN_ERROR_MESSAGE}, status_code=401)
+
+
+def ingest_request_denied(request) -> Optional[Response]:
+    """Reject test-client ingest HTTP when a token is configured and missing/wrong."""
+    if not ingest_token_configured():
+        return None
+    method = (request.method or "GET").upper()
+    path = request.path or "/"
+    if not (method == "POST" and _is_ingest_post(path)):
+        return None
+    if ingest_token_matches(extract_ingest_token(getattr(request, "headers", None))):
+        return None
+    return _ingest_unauthorized_response()
 
 
 def _is_auth_only_path(path: str) -> bool:
@@ -538,6 +586,9 @@ def _attach_user(request, user: Optional[dict]) -> frozenset[str]:
 async def enforce(request) -> Optional[Response]:
     """Return a denial response, or None if the request may proceed."""
     path = request.path or "/"
+    ingest_denied = ingest_request_denied(request)
+    if ingest_denied is not None:
+        return ingest_denied
     if not is_auth_enabled():
         if _is_auth_only_path(path):
             return _not_found_response(request)
@@ -568,10 +619,14 @@ async def enforce(request) -> Optional[Response]:
 
 
 async def enforce_websocket(websocket: WebSocket, path: str) -> bool:
-    """Return True if the WebSocket may continue. /ws/nunit stays open."""
-    if not is_auth_enabled():
-        return True
+    """Return True if the WebSocket may continue."""
     if path == "/ws/nunit":
+        if ingest_token_configured() and not ingest_token_matches(
+            extract_ingest_token(websocket.headers)
+        ):
+            return False
+        return True
+    if not is_auth_enabled():
         return True
     user = await resolve_session_user(websocket.cookies.get(SESSION_COOKIE_NAME))
     if user is None:

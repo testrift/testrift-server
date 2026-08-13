@@ -32,6 +32,8 @@ If no previous run exists or the group has no commit data, returns an empty `com
 POST /api/runs/{run_id}/commits
 ```
 
+When `auth.ingest_token` is set, send `X-TestRift-Ingest-Token` (or `Authorization: Bearer`) with the same value.
+
 Uploads collected commit diffs and associates them with a test run.
 
 **Request body:**

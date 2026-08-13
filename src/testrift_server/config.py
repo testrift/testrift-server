@@ -254,6 +254,7 @@ def default_auth_config():
             'username': 'admin',
             'password': '',
         },
+        'ingest_token': '',
         'oidc': {
             'enabled': False,
             'issuer': '',
@@ -305,6 +306,7 @@ def parse_auth_config(auth_config):
         raise ValueError("auth.oidc must be a mapping")
 
     parsed_oidc = parse_oidc_config(oidc, auth_enabled=enabled)
+    ingest_token = expand_env_vars(str(auth_config.get('ingest_token') or '')).strip()
 
     return {
         'enabled': enabled,
@@ -319,6 +321,7 @@ def parse_auth_config(auth_config):
             'username': bootstrap_username.strip() or 'admin',
             'password': bootstrap_password,
         },
+        'ingest_token': ingest_token,
         'oidc': parsed_oidc,
     }
 

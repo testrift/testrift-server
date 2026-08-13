@@ -19,6 +19,7 @@ The system supports uploading, storing, and downloading attachments for individu
 ```
 POST /api/attachments/{run_id}/{test_case_id}/upload
 Content-Type: multipart/form-data
+X-TestRift-Ingest-Token: <token>   # required when auth.ingest_token is set
 
 Form data:
 - attachment: file (required)
