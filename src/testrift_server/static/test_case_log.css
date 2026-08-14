@@ -624,8 +624,8 @@ td {
     padding-bottom: 4px !important;
 }
 
-/* Apply white-space: pre-wrap only to message column (3rd column) */
-#msg_table td:nth-child(3) {
+/* Apply white-space: pre-wrap only to the message column */
+#msg_table td.log-message {
     white-space: pre-wrap;
 }
 

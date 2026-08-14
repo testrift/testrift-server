@@ -7,6 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/static/app_shell.css" rel="stylesheet">
+    <link href="/static/comments.css" rel="stylesheet">
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
         :root {
@@ -937,11 +938,14 @@
                  const runNumber = runNumberMap.get(run.run_id);
                  const runUrl = `/testRun/${run.run_id}/index.html`;
                  return `
-                 <th title="${run.run_name}">
+                 <th class="run-header" data-run-id="${run.run_id}" title="${run.run_name}">
                      <div><a href="${runUrl}" style="color: inherit; text-decoration: none; font-weight: 600;">${runNumber}</a></div>
                  </th>
              `;
              }).join('');
+            if (window.CommentsUI) {
+                window.CommentsUI.decorateRunLists(resultsHeader);
+            }
 
             // Build test cases table body and results table body
             const testCasesBody = document.getElementById('testCasesBody');
@@ -1787,5 +1791,6 @@
              loadMatrix();
          }
     </script>
+    <script src="/static/comments.js"></script>
 </body>
 </html>

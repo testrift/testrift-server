@@ -8,6 +8,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/app_shell.css" rel="stylesheet">
+    <link href="/static/comments.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
@@ -750,6 +751,9 @@
                 const row = createRunRow(run);
                 tableBody.appendChild(row);
             });
+            if (window.CommentsUI) {
+                window.CommentsUI.decorateRunLists(tableBody);
+            }
         }
 
         // Create a row for a test run
@@ -1315,5 +1319,6 @@
             window.URL.revokeObjectURL(url);
         }
     </script>
+    <script src="/static/comments.js"></script>
 </body>
 </html>

@@ -11,6 +11,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/app_shell.css" rel="stylesheet">
+    <link href="/static/comments.css" rel="stylesheet">
     <script src="/static/msgpack.min.js"></script>
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
@@ -562,6 +563,9 @@
                     <td class="title-column">
                         <h3 class="run-title">
                             <a href="/testRun/{{ run.run_id }}/index.html" class="run-link">{{ run.run_name }}</a>
+                            {% if run.has_comments %}
+                            <a class="tr-comment-icon" href="/testRun/{{ run.run_id }}/index.html{% if run.first_comment_id %}#comment={{ run.first_comment_id }}{% endif %}" title="This run has comments" aria-label="This run has comments"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2.5 2A1.5 1.5 0 0 0 1 3.5v7A1.5 1.5 0 0 0 2.5 12H4v2.3a.4.4 0 0 0 .66.3L8.2 12H13.5A1.5 1.5 0 0 0 15 10.5v-7A1.5 1.5 0 0 0 13.5 2h-11z"/></svg></a>
+                            {% endif %}
                         </h3>
                         {% if run.target_key %}
                         <div class="group-pill">
@@ -1035,6 +1039,9 @@
       link.className = 'run-link';
       link.textContent = run.run_name;
       title.appendChild(link);
+      if (run.has_comments && window.CommentsUI) {
+        window.CommentsUI.attachRunListIcon(link, run.run_id, run.first_comment_id);
+      }
 
       // Create run meta section for start time and duration
       const runMetaSection = document.createElement('div');
@@ -1272,6 +1279,12 @@
   });
   // Reconnect when coming back via back/forward cache
   window.addEventListener('pageshow', () => { connectUIWS(); });
+</script>
+<script src="/static/comments.js"></script>
+<script>
+  if (window.CommentsUI) {
+    window.CommentsUI.decorateRunLists();
+  }
 </script>
 </body>
 </html>

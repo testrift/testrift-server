@@ -111,7 +111,9 @@ async def build_run_index_entries(runs_from_db):
             'user_metadata': user_metadata,
             'target_key': target_key,
             'collection_keys': collection_keys,
-            'files_exist': files_exist
+            'files_exist': files_exist,
+            'has_comments': bool(run.get('has_comments')),
+            'first_comment_id': run.get('first_comment_id'),
         }
 
         # Apply test summary logic for finished runs with error precedence
@@ -458,6 +460,39 @@ async def zip_export_handler(request):
                     elif status == 'aborted':
                         failed_count += 1
 
+            zip_comments = []
+            try:
+                zip_comments = await database.db.get_comments_for_run(run_id)
+            except Exception:
+                zip_comments = []
+
+            def _zip_comment_payload(row):
+                return {
+                    "id": row["id"],
+                    "run_id": row["run_id"],
+                    "scope": row["scope"],
+                    "tc_id": row.get("tc_id"),
+                    "line_start": row.get("line_start"),
+                    "line_end": row.get("line_end"),
+                    "body": row["body"],
+                    "author_user_id": row.get("author_user_id"),
+                    "author_name": row["author_name"],
+                    "created_at": row.get("created_at"),
+                    "updated_at": row.get("updated_at"),
+                    "edited": row.get("created_at") != row.get("updated_at"),
+                }
+
+            run_level = [_zip_comment_payload(row) for row in zip_comments if row["scope"] == "run"]
+            tc_presence = {}
+            comments_by_tc = {}
+            for row in zip_comments:
+                if row["scope"] != "log" or not row.get("tc_id"):
+                    continue
+                payload = _zip_comment_payload(row)
+                comments_by_tc.setdefault(row["tc_id"], []).append(payload)
+                if row["tc_id"] not in tc_presence:
+                    tc_presence[row["tc_id"]] = {"has_comments": True, "first_comment_id": payload["id"]}
+
             run_html = render_template(
                 'test_run.html',
                 run_id=run_id,
@@ -479,6 +514,7 @@ async def zip_export_handler(request):
                 target_key=meta.get("target_key"),
                 collection_keys=[],
                 metrics=run.metrics or [],
+                comments={"run_comments": run_level, "test_cases": tc_presence},
             )
             zf.writestr("index.html", run_html)
 
@@ -501,6 +537,18 @@ async def zip_export_handler(request):
                 with open(classifications_js_path, "r", encoding="utf-8") as f:
                     classifications_js_content = f.read()
                 zf.writestr("static/classifications.js", classifications_js_content)
+
+            for static_name in (
+                "comments.css",
+                "comments.js",
+                "comments_md.js",
+                "marked.min.js",
+                "purify.min.js",
+                "emoji_shortcodes.json",
+            ):
+                static_path = STATIC_DIR / static_name
+                if static_path.exists():
+                    zf.write(static_path, f"static/{static_name}")
 
             # Add CSS file for test case logs
             css_path = STATIC_DIR / "test_case_log.css"
@@ -561,7 +609,8 @@ async def zip_export_handler(request):
                     stack_traces=stack_traces,
                     attachments=attachments,
                     live_run=False,
-                    server_mode=False
+                    server_mode=False,
+                    comments=comments_by_tc.get(tc.tc_id, []),
                 )
                 zf.writestr(f"log/{case_slug}.html", log_html)
 

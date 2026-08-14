@@ -376,6 +376,25 @@ class TestResultsDatabase:
                 )
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS comments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    scope TEXT NOT NULL CHECK (scope IN ('run', 'log')),
+                    tc_id TEXT,
+                    line_start INTEGER,
+                    line_end INTEGER,
+                    body TEXT NOT NULL,
+                    author_user_id INTEGER,
+                    author_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (run_id) REFERENCES test_runs (run_id) ON DELETE CASCADE
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_comments_run_id ON comments (run_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_comments_run_tc ON comments (run_id, tc_id)")
+
             await db.commit()
 
         self._initialized = True
@@ -1001,7 +1020,30 @@ class TestResultsDatabase:
 
             # Convert to list of dictionaries
             columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
+            runs = [dict(zip(columns, row)) for row in rows]
+            await self._annotate_runs_has_comments(db, runs)
+            return runs
+
+    async def _annotate_runs_has_comments(self, db, runs: List[Dict[str, Any]]) -> None:
+        """Set has_comments and first_comment_id on each run dict. Uses the open connection."""
+        if not runs:
+            return
+        run_ids = [run["run_id"] for run in runs]
+        cursor = await db.execute(
+            """SELECT run_id, id FROM comments
+               WHERE run_id IN (SELECT value FROM json_each(?))
+               ORDER BY line_end ASC, created_at ASC, id ASC""",
+            (json.dumps(run_ids),),
+        )
+        first_ids: Dict[str, int] = {}
+        commented = set()
+        for run_id, comment_id in await cursor.fetchall():
+            commented.add(run_id)
+            if run_id not in first_ids:
+                first_ids[run_id] = comment_id
+        for run in runs:
+            run["has_comments"] = run["run_id"] in commented
+            run["first_comment_id"] = first_ids.get(run["run_id"])
 
     async def get_run_names_starting_with(self, base_name: str, target_key: str) -> List[str]:
         """Get all Run names that start with a base name for one Target."""
@@ -2177,6 +2219,118 @@ class TestResultsDatabase:
             rows = await cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
+
+    def _comment_row(self, row, columns) -> Dict[str, Any]:
+        data = dict(zip(columns, row))
+        return data
+
+    async def insert_comment(
+        self,
+        run_id: str,
+        scope: str,
+        body: str,
+        author_name: str,
+        author_user_id: Optional[int] = None,
+        tc_id: Optional[str] = None,
+        line_start: Optional[int] = None,
+        line_end: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Insert a comment and return the stored row."""
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """INSERT INTO comments
+                   (run_id, scope, tc_id, line_start, line_end, body,
+                    author_user_id, author_name, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (run_id, scope, tc_id, line_start, line_end, body,
+                 author_user_id, author_name, now, now),
+            )
+            await db.commit()
+            comment_id = cursor.lastrowid
+        return await self.get_comment_by_id(comment_id)
+
+    async def get_comment_by_id(self, comment_id: int) -> Optional[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            cursor = await db.execute("SELECT * FROM comments WHERE id = ?", (comment_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+
+    async def update_comment_body(self, comment_id: int, body: str) -> Optional[Dict[str, Any]]:
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+        async with self.get_connection() as db:
+            await db.execute(
+                "UPDATE comments SET body = ?, updated_at = ? WHERE id = ?",
+                (body, now, comment_id),
+            )
+            await db.commit()
+        return await self.get_comment_by_id(comment_id)
+
+    async def delete_comment(self, comment_id: int) -> bool:
+        async with self.get_connection() as db:
+            cursor = await db.execute("DELETE FROM comments WHERE id = ?", (comment_id,))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_comments_for_run(self, run_id: str, scope: Optional[str] = None,
+                                   tc_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        async with self.get_connection() as db:
+            query = "SELECT * FROM comments WHERE run_id = ?"
+            params: List[Any] = [run_id]
+            if scope:
+                query += " AND scope = ?"
+                params.append(scope)
+            if tc_id is not None:
+                query += " AND tc_id = ?"
+                params.append(tc_id)
+            query += " ORDER BY line_end ASC, created_at ASC, id ASC"
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+
+    async def get_comments_presence(self, run_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Per-run comment flags and first comment ids, for list pages and the run tree."""
+        result: Dict[str, Dict[str, Any]] = {
+            run_id: {
+                "has_comments": False,
+                "run_level": False,
+                "first_run_comment_id": None,
+                "first_comment_id": None,
+                "test_cases": {},
+            }
+            for run_id in run_ids
+        }
+        if not run_ids:
+            return result
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                """SELECT id, run_id, scope, tc_id, line_end, created_at
+                   FROM comments
+                   WHERE run_id IN (SELECT value FROM json_each(?))
+                   ORDER BY line_end ASC, created_at ASC, id ASC""",
+                (json.dumps(run_ids),),
+            )
+            rows = await cursor.fetchall()
+        for comment_id, run_id, scope, tc_id, _line_end, _created in rows:
+            entry = result.get(run_id)
+            if entry is None:
+                continue
+            entry["has_comments"] = True
+            if entry["first_comment_id"] is None:
+                entry["first_comment_id"] = comment_id
+            if scope == "run":
+                entry["run_level"] = True
+                if entry["first_run_comment_id"] is None:
+                    entry["first_run_comment_id"] = comment_id
+            elif tc_id:
+                tc_map = entry["test_cases"]
+                if tc_id not in tc_map:
+                    tc_map[tc_id] = {"first_comment_id": comment_id}
+        return result
 
 
 # Global database instance - will be initialized with config path

@@ -8,6 +8,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
     <link href="/static/app_shell.css" rel="stylesheet">
+    <link href="/static/comments.css" rel="stylesheet">
     <style>
         /* Compensate for Bootstrap 3 to 5 migration: restore original font sizes and link colors */
         :root {
@@ -587,6 +588,9 @@
                 const isTop3 = rank <= 3;
 
                 const row = document.createElement('tr');
+                if (item.last_failure_run_id) {
+                    row.setAttribute('data-run-id', item.last_failure_run_id);
+                }
 
                 if (mode === 'by_symptom') {
                     const affectedTCs = item.affected_test_cases || [];
@@ -668,6 +672,9 @@
 
                 tbody.appendChild(row);
             });
+            if (window.CommentsUI) {
+                window.CommentsUI.decorateRunLists(tbody);
+            }
         }
 
         function toggleAffectedTests(event, id) {
@@ -828,6 +835,7 @@
             return div.innerHTML;
         }
     </script>
+    <script src="/static/comments.js"></script>
 </body>
 </html>
 

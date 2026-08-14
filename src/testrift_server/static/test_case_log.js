@@ -97,7 +97,7 @@ var addLiveIndicator = function() {
 
         const liveRow = document.createElement('tr');
         liveRow.className = 'live-indicator';
-        liveRow.innerHTML = '<td colspan="3" style="text-align: left; color: #666; font-style: italic;"><span class="dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span></td>';
+        liveRow.innerHTML = '<td colspan="4" style="text-align: left; color: #666; font-style: italic;"><span class="dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span></td>';
         tableBody.appendChild(liveRow);
     }
 };
@@ -331,7 +331,14 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
         messageText = `<span style=\"color: #777;\">${messageText}</span>`
     }
 
-    const row = $("<tr>").addClass(chanName);
+    const row = $("<tr>").addClass(chanName).addClass("log-entry-row");
+    if (typeof window.__logLineIndex !== "number") {
+        window.__logLineIndex = 0;
+    }
+    const logIndex = window.__logLineIndex++;
+    row.attr("data-log-index", logIndex);
+    const gutterCell = $('<td class="log-gutter">').html('<span class="tr-comment-gutter-add">+</span>');
+    gutterCell.appendTo(row);
     if (phase === "teardown") {
         row.addClass("teardown-log-row");
     }
@@ -340,7 +347,7 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
     }
 
     // Create time cell with original timestamp stored as data attribute
-    const timeCell = $(`<td class="fit">`).css("padding", "3px");
+    const timeCell = $(`<td class="fit log-time">`).css("padding", "3px");
     timeCell.attr('data-original-time', originalTime);
 
     // Display time based on current mode
@@ -410,7 +417,7 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
 
     if (isReceived || isTransmitted) {
         let html = generateAtLine(atLookupTable, isReceived, messageText);
-        $("<td>").html(html).appendTo(row);
+        $("<td class=\"log-message\">").html(html).appendTo(row);
     } else {
         // Join messages if they come from same source and less than MSG_JOIN_TMO_MS from the first message in the group
         const currentMsgTime = new Date(originalTime);
@@ -421,13 +428,14 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
             if (!isNaN(diffMs) && diffMs <= MSG_JOIN_TMO_MS) {
                 // Join with previous message
                 lastTd.append(`<br>${messageText}`);
+                window.__logLineIndex -= 1;
                 return;
             }
         }
 
         // Start a new message group
         lastMsgGroupStartTime = currentMsgTime;
-        lastTd = $(`<td>`).html(messageText).appendTo(row);
+        lastTd = $(`<td class="log-message">`).html(messageText).appendTo(row);
     }
     lastBadges = badges
 
@@ -435,7 +443,7 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
         if (!teardownGroup.headerRow) {
             const header = $(`
                 <tr class="teardown-header-row collapsed">
-                    <td colspan="3">
+                    <td colspan="4">
                         <span class="teardown-header-content">
                             <span class="teardown-toggle-icon" role="button" tabindex="0" aria-label="Toggle teardown logs">▸</span>
                             <span class="teardown-header-label">Teardown</span>
@@ -611,14 +619,15 @@ function calculateDeltaTime(currentTimeString) {
 function toggleTimeDisplay() {
     showDeltaTime = !showDeltaTime;
     const button = document.getElementById('time-display-toggle');
-    const messageRows = document.querySelectorAll('#msg_table tbody tr:not(.live-indicator):not(.teardown-header-row)');
+    const messageRows = document.querySelectorAll('#msg_table tbody tr.log-entry-row');
 
     if (showDeltaTime) {
         button.textContent = 'Show Absolute Time';
         lastVisibleMessageTime = null; // Reset for delta calculation
 
         messageRows.forEach((row, index) => {
-            const timeCell = row.cells[0];
+            const timeCell = row.querySelector('.log-time');
+            if (!timeCell) return;
             const originalTime = timeCell.getAttribute('data-original-time');
 
             if (originalTime) {
@@ -631,7 +640,8 @@ function toggleTimeDisplay() {
         button.textContent = 'Show Delta Time';
 
         messageRows.forEach((row, index) => {
-            const timeCell = row.cells[0];
+            const timeCell = row.querySelector('.log-time');
+            if (!timeCell) return;
             const originalTime = timeCell.getAttribute('data-original-time');
 
             if (originalTime) {
@@ -664,7 +674,7 @@ function convertTimesToLocal() {
     // Convert timestamps in the message log table
     // Skip non-log rows like the live indicator and teardown header.
     const isoLike = /^\s*\d{4}-\d{2}-\d{2}T/;
-    document.querySelectorAll('#msg_table tbody tr:not(.live-indicator):not(.teardown-header-row) td:first-child').forEach(cell => {
+    document.querySelectorAll('#msg_table tbody tr.log-entry-row td.log-time').forEach(cell => {
         const originalTime = cell.getAttribute('data-original-time');
         if (originalTime) {
             if (showDeltaTime) {
@@ -729,19 +739,20 @@ function applyTimeDisplayPreference() {
     if (showDeltaTime) {
         button.textContent = 'Show Absolute Time';
         // Apply delta time display to existing messages
-        const messageRows = document.querySelectorAll('#msg_table tbody tr:not(.live-indicator):not(.teardown-header-row)');
+        const messageRows = document.querySelectorAll('#msg_table tbody tr.log-entry-row');
         lastVisibleMessageTime = null; // Reset for delta calculation
 
         // Sort messages by timestamp to ensure correct delta calculation
         const sortedRows = Array.from(messageRows).sort((a, b) => {
-            const timeA = a.cells[0].getAttribute('data-original-time');
-            const timeB = b.cells[0].getAttribute('data-original-time');
+            const timeA = a.querySelector('.log-time') && a.querySelector('.log-time').getAttribute('data-original-time');
+            const timeB = b.querySelector('.log-time') && b.querySelector('.log-time').getAttribute('data-original-time');
             if (!timeA || !timeB) return 0;
             return new Date(timeA) - new Date(timeB);
         });
 
         sortedRows.forEach((row, index) => {
-            const timeCell = row.cells[0];
+            const timeCell = row.querySelector('.log-time');
+            if (!timeCell) return;
             const originalTime = timeCell.getAttribute('data-original-time');
 
             if (originalTime) {
@@ -986,17 +997,15 @@ function initializeTestCaseLog() {
             return;
         }
 
-        const messageRows = document.querySelectorAll('#msg_table tbody tr');
+        const messageRows = document.querySelectorAll('#msg_table tbody tr.log-entry-row');
         let visibleCount = 0;
         let totalCount = messageRows.length;
 
         messageRows.forEach((row, index) => {
             // Get the original message text from the data attribute or reconstruct it
             let messageText = '';
-            const cells = row.cells;
-            if (cells.length >= 3) {
-                // Try to get clean text from the message cell
-                const messageCell = cells[2];
+            const messageCell = row.querySelector('.log-message');
+            if (messageCell) {
                 messageText = messageCell.textContent || messageCell.innerText;
             }
 
@@ -1023,12 +1032,13 @@ function initializeTestCaseLog() {
     function filterMessages() {
         if (!currentFilter) return;
 
-        const messageRows = document.querySelectorAll('#msg_table tbody tr');
+        const messageRows = document.querySelectorAll('#msg_table tbody tr.log-entry-row');
         let visibleCount = 0;
         let totalCount = messageRows.length;
 
         messageRows.forEach(row => {
-            const messageText = row.cells[2].textContent; // Message column
+            const messageCell = row.querySelector('.log-message');
+            const messageText = messageCell ? messageCell.textContent : '';
             const matches = currentFilter.regex.test(messageText);
             const shouldShow = currentFilter.mode === 'include' ? matches : !matches;
 
@@ -1044,7 +1054,7 @@ function initializeTestCaseLog() {
     }
 
     function showAllMessages() {
-        const messageRows = document.querySelectorAll('#msg_table tbody tr');
+        const messageRows = document.querySelectorAll('#msg_table tbody tr.log-entry-row');
         messageRows.forEach(row => {
             row.style.display = '';
         });
@@ -1309,6 +1319,7 @@ function initializeTestCaseLog() {
 
         // Clear the table first to avoid duplication
         $("#msg_table tbody").empty();
+        window.__logLineIndex = 0;
 
         const merged = [];
 
@@ -1347,6 +1358,7 @@ function initializeTestCaseLog() {
     } else {
         // For live runs, clear the table since WebSocket will populate it
         $("#msg_table tbody").empty();
+        window.__logLineIndex = 0;
     }
 
 
@@ -1360,6 +1372,21 @@ function initializeTestCaseLog() {
 
     // Convert times to local time on page load
     convertTimesToLocal();
+
+    if (window.CommentsUI && window.CommentsUI.Log) {
+        const openFirst = /[?&]openFirst=1/.test(window.location.search) || window.location.hash.indexOf("comment=") !== -1;
+        window.CommentsUI.Log.init({
+            runId: templateConfig.runId,
+            tcId: templateConfig.testCaseId,
+            authEnabled: !!templateConfig.authEnabled,
+            currentUser: templateConfig.currentUser || null,
+            openFirst: openFirst,
+            readOnly: !templateConfig.serverMode,
+            embeddedComments: templateConfig.comments || []
+        }).catch(function (err) {
+            console.error("Failed to load comments", err);
+        });
+    }
 
     // Calculate and display execution time on page load if test case has finished
     function calculateInitialExecutionTime() {
@@ -1862,6 +1889,7 @@ let tcMetricsDataRef = null;
 
 function initializeTcMetricsChartHover(metricsData) {
     tcMetricsDataRef = metricsData;
+    window.tcMetricsDataRef = metricsData;
     if (tcMetricsTooltipInitialized) return;
     tcMetricsTooltipInitialized = true;
 
@@ -1951,14 +1979,14 @@ function initializeTcMetricsChartHover(metricsData) {
  * Scroll to the log entry closest to the given timestamp.
  */
 function scrollToClosestLogEntry(targetTs) {
-    const rows = document.querySelectorAll('#msg_table tbody tr:not(.live-indicator):not(.teardown-header-row)');
+    const rows = document.querySelectorAll('#msg_table tbody tr.log-entry-row');
     if (rows.length === 0) return;
 
     let closestRow = null;
     let closestDiff = Infinity;
 
     rows.forEach(row => {
-        const timeCell = row.querySelector('td:first-child');
+        const timeCell = row.querySelector('.log-time');
         if (!timeCell) return;
 
         const originalTime = timeCell.getAttribute('data-original-time');

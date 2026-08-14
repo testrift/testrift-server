@@ -8,6 +8,7 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <link href="/static/app_shell.css" rel="stylesheet">
   <link href="/static/entity_admin.css" rel="stylesheet">
+  <link href="/static/comments.css" rel="stylesheet">
   <style>
     :root { font-size: 14px; }
     body { margin: 0; color: #30343a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -237,9 +238,12 @@ async function renderSummary() {
     `<a class="btn btn-outline-primary btn-sm" href="/collections/${collectionKey}/${tool}?${context}">${tool[0].toUpperCase() + tool.slice(1)}</a>`
   ).join('');
   document.getElementById('tiles').innerHTML = selections.map(selection => selection.run_id
-    ? `<article class="tile match"><strong>${selection.target_key}</strong><div class="detail">Selected Run</div><a href="/testRun/${selection.run_id}/index.html">${selection.run_id}</a><div class="detail"><a href="/api/test-runs?target=${selection.target_key}">Target history</a></div></article>`
+    ? `<article class="tile match" data-run-id="${selection.run_id}"><strong>${selection.target_key}</strong><div class="detail">Selected Run</div><a href="/testRun/${selection.run_id}/index.html">${selection.run_id}</a><div class="detail"><a href="/api/test-runs?target=${selection.target_key}">Target history</a></div></article>`
     : `<article class="tile no-match"><strong>${selection.target_key}</strong><div class="detail">No matching run</div></article>`
   ).join('');
+  if (window.CommentsUI) {
+    window.CommentsUI.decorateRunLists(document.getElementById('tiles'));
+  }
 }
 
 window.__onCollectionUpdated = collection => {
@@ -264,6 +268,7 @@ api(`/api/collections/${collectionKey}`).then(collection => {
   document.getElementById('tiles').textContent = error.message;
 });
 </script>
+<script src="/static/comments.js"></script>
 <script src="/static/collection_admin.js"></script>
 </body>
 </html>

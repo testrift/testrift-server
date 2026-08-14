@@ -14,12 +14,24 @@
     <script src="/static/msgpack.min.js"></script>
     <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
+    <link href="/static/comments.css?v=6" rel="stylesheet">
     <script src="/static/classifications.js"></script>
+    <script src="/static/marked.min.js"></script>
+    <script src="/static/purify.min.js"></script>
+    <script>window.COMMENTS_STATIC_BASE = "/static/";</script>
+    <script src="/static/comments_md.js"></script>
+    <script src="/static/comments.js?v=6"></script>
     {% else %}
     <script src="static/msgpack.min.js"></script>
     <link href="static/status-badges.css" rel="stylesheet">
     <link href="static/classifications.css" rel="stylesheet">
+    <link href="static/comments.css" rel="stylesheet">
     <script src="static/classifications.js"></script>
+    <script src="static/marked.min.js"></script>
+    <script src="static/purify.min.js"></script>
+    <script>window.COMMENTS_STATIC_BASE = "static/";</script>
+    <script src="static/comments_md.js"></script>
+    <script src="static/comments.js"></script>
     {% endif %}
     <style>
         body {
@@ -1316,6 +1328,19 @@
                 </div>
             </div>
 
+            <div class="run-comments-section" id="runCommentsSection">
+                <div class="run-comments-header">
+                    <h4>Run comments</h4>
+                    <span id="runCommentsHeaderIcon"></span>
+                </div>
+                <p class="run-comments-empty" id="runCommentsEmpty">No run-level comments yet.</p>
+                <div id="runCommentsList"></div>
+                <div id="runCommentsComposer"></div>
+                {% if server_mode %}
+                <button type="button" class="tr-comment-btn" id="runCommentsAdd">Add comment</button>
+                {% endif %}
+            </div>
+
             <div class="test-cases-header">
                 <h2>Test Cases</h2>
                 <div style="display: flex; align-items: center; gap: 15px;">
@@ -1390,7 +1415,10 @@
             runId: {{ run_id | tojson }},
             targetKey: {{ target_key | tojson }},
             serverMode: {{ server_mode | tojson if server_mode is defined else 'true' }},
-            liveRun: {{ live_run | tojson }}
+            liveRun: {{ live_run | tojson }},
+            authEnabled: {{ auth_enabled | tojson }},
+            currentUser: {{ current_user | tojson }},
+            comments: {{ comments | tojson if comments is defined else 'null' }}
         };
 
         // Metrics data from server (initial load)
@@ -2533,6 +2561,7 @@
 
                     // Create placeholder for classification icon (will be populated later)
                     this.classificationContainer = $("<span>").addClass("classification-container");
+                    this.commentContainer = $("<span>").addClass("comment-container");
                 } else {
                     // Parent containers - create summary badge that shows when collapsed
                     textElement = $("<span>");
@@ -2561,6 +2590,9 @@
 
                 if (this.classificationContainer) {
                     rightContainer.append(this.classificationContainer);
+                }
+                if (this.commentContainer) {
+                    rightContainer.append(this.commentContainer);
                 }
 
                 // Add collapsed classification container for parent nodes
@@ -3903,8 +3935,14 @@
             setupBadgeHoverHandlers();
 
             // Align status badges after tree is fully rendered
+            if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                window.CommentsUI.Run.decorateTree();
+            }
             requestAnimationFrame(() => {
                 alignStatusBadges();
+                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                    window.CommentsUI.Run.decorateTree();
+                }
             });
         }
 
@@ -4503,6 +4541,12 @@
 
             // Save user preference
             saveUserPreferences();
+
+            requestAnimationFrame(function () {
+                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                    window.CommentsUI.Run.decorateTree();
+                }
+            });
         }
 
         function buildListView() {
@@ -4522,6 +4566,8 @@
                 const listItem = document.createElement('li');
                 // Add data attribute for easy lookup by fullName
                 listItem.setAttribute('data-tc-full-name', testCase.fullName);
+                listItem.setAttribute('data-storage-id', testCase.storageId || testCase.fullName);
+                listItem.classList.add('test-case-node');
 
                 // Create main content container
                 const contentContainer = document.createElement('div');
@@ -4619,6 +4665,10 @@
                     rightSide.appendChild(classIcon);
                 }
 
+                const commentSlot = document.createElement('span');
+                commentSlot.className = 'comment-container';
+                rightSide.appendChild(commentSlot);
+
                 contentContainer.appendChild(rightSide);
 
                 listItem.appendChild(contentContainer);
@@ -4629,8 +4679,14 @@
             reestablishExecutionTimeTracking();
 
             // Align status badges after list is fully rendered
+            if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                window.CommentsUI.Run.decorateTree();
+            }
             requestAnimationFrame(() => {
                 alignStatusBadges();
+                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                    window.CommentsUI.Run.decorateTree();
+                }
             });
         }
 
@@ -4910,6 +4966,9 @@
 
             // Update collapsed classification icons for any nodes that are already collapsed
             updateAllCollapsedClassifications();
+            if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                window.CommentsUI.Run.decorateTree();
+            }
         }
 
         // Update collapsed classification icons for all collapsed parent nodes
@@ -5879,6 +5938,17 @@
         // Load AI analysis status on page load (server mode only)
         if (runConfig.serverMode) {
             loadAiAnalysisStatus();
+        }
+        if (window.CommentsUI && window.CommentsUI.Run) {
+            window.CommentsUI.Run.init({
+                runId: runConfig.runId,
+                authEnabled: !!runConfig.authEnabled,
+                currentUser: runConfig.currentUser || null,
+                readOnly: !runConfig.serverMode,
+                embeddedComments: runConfig.comments
+            }).catch(function (err) {
+                console.error("Failed to load comments", err);
+            });
         }
     </script>
 </body>

@@ -1689,6 +1689,217 @@ async def api_user_unlock_handler(request):
     return web.json_response({"success": True, "user": await _user_to_admin_view(user)})
 
 
+# --- Comments ---
+
+COMMENT_BODY_MAX = 8000
+COMMENT_NAME_MAX = 80
+
+
+def _comment_auth(request):
+    from .auth import is_auth_enabled
+    user = getattr(request, "user", None)
+    return is_auth_enabled(), user
+
+
+def _serialize_comment(row):
+    created = row.get("created_at")
+    updated = row.get("updated_at")
+    return {
+        "id": row["id"],
+        "run_id": row["run_id"],
+        "scope": row["scope"],
+        "tc_id": row.get("tc_id"),
+        "line_start": row.get("line_start"),
+        "line_end": row.get("line_end"),
+        "body": row["body"],
+        "author_user_id": row.get("author_user_id"),
+        "author_name": row["author_name"],
+        "created_at": created,
+        "updated_at": updated,
+        "edited": bool(created and updated and created != updated),
+    }
+
+
+def _comment_viewer_payload(request):
+    enabled, user = _comment_auth(request)
+    viewer = None
+    if user:
+        viewer = {
+            "id": user.get("id"),
+            "display_name": user.get("display_name") or user.get("username") or "",
+            "role": user.get("role"),
+        }
+    return {"auth_enabled": enabled, "current_user": viewer}
+
+
+def _normalize_comment_body(body):
+    if body is None or not isinstance(body, str):
+        raise ValueError("body is required")
+    text = body.strip()
+    if not text:
+        raise ValueError("body cannot be blank")
+    if len(text) > COMMENT_BODY_MAX:
+        raise ValueError(f"body must be at most {COMMENT_BODY_MAX} characters")
+    return text
+
+
+def _is_comment_author(comment, user) -> bool:
+    if not user or comment.get("author_user_id") is None:
+        return False
+    return int(comment["author_user_id"]) == int(user["id"])
+
+
+def _is_admin_user(user) -> bool:
+    return bool(user) and (user.get("role") or "") == "admin"
+
+
+async def api_run_comments_handler(request):
+    """List run-level comments and per-test-case presence, or create a comment."""
+    run_id = request.match_info["run_id"]
+    if not validate_run_id(run_id):
+        return web.json_response({"success": False, "error": "Invalid run ID"}, status=400)
+    run = await database.db.get_test_run_by_id(run_id)
+    if not run:
+        return web.json_response({"success": False, "error": "Test run not found"}, status=404)
+
+    if request.method == "GET":
+        comments = await database.db.get_comments_for_run(run_id)
+        run_comments = []
+        test_cases = {}
+        for row in comments:
+            item = _serialize_comment(row)
+            if row["scope"] == "run":
+                run_comments.append(item)
+            elif row.get("tc_id"):
+                tc_id = row["tc_id"]
+                if tc_id not in test_cases:
+                    test_cases[tc_id] = {
+                        "has_comments": True,
+                        "first_comment_id": item["id"],
+                    }
+        payload = {
+            "success": True,
+            "run_comments": run_comments,
+            "test_cases": test_cases,
+            **_comment_viewer_payload(request),
+        }
+        return web.json_response(payload)
+
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("JSON object required")
+        body = _normalize_comment_body(data.get("body"))
+        scope = (data.get("scope") or "").strip()
+        if scope not in ("run", "log"):
+            raise ValueError("scope must be 'run' or 'log'")
+        tc_id = data.get("tc_id")
+        line_start = data.get("line_start")
+        line_end = data.get("line_end")
+        if scope == "log":
+            if not tc_id or not isinstance(tc_id, str):
+                raise ValueError("tc_id is required for log comments")
+            if not isinstance(line_start, int) or not isinstance(line_end, int):
+                raise ValueError("line_start and line_end must be integers")
+            if line_start < 0 or line_end < line_start:
+                raise ValueError("invalid line range")
+            if line_end - line_start > 10000:
+                raise ValueError("line range is too large")
+        else:
+            tc_id = None
+            line_start = None
+            line_end = None
+        enabled, user = _comment_auth(request)
+        if enabled:
+            if not user:
+                return web.json_response({"success": False, "error": "Authentication required"}, status=401)
+            author_user_id = user["id"]
+            author_name = (user.get("display_name") or user.get("username") or "User").strip()
+        else:
+            author_user_id = None
+            author_name = (data.get("author_name") or "").strip()
+            if not author_name:
+                raise ValueError("author_name is required")
+            if len(author_name) > COMMENT_NAME_MAX:
+                raise ValueError(f"author_name must be at most {COMMENT_NAME_MAX} characters")
+        comment = await database.db.insert_comment(
+            run_id=run_id,
+            scope=scope,
+            body=body,
+            author_name=author_name,
+            author_user_id=author_user_id,
+            tc_id=tc_id,
+            line_start=line_start,
+            line_end=line_end,
+        )
+        return web.json_response({"success": True, "comment": _serialize_comment(comment)}, status=201)
+    except ValueError as error:
+        return _validation_error(error)
+    except Exception as e:
+        logger.error(f"Error in api_run_comments_handler: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+async def api_log_comments_handler(request):
+    """Full comment threads for one test case log."""
+    run_id = request.match_info["run_id"]
+    tc_id = request.match_info["tc_id"]
+    if not validate_run_id(run_id):
+        return web.json_response({"success": False, "error": "Invalid run ID"}, status=400)
+    run = await database.db.get_test_run_by_id(run_id)
+    if not run:
+        return web.json_response({"success": False, "error": "Test run not found"}, status=404)
+    comments = await database.db.get_comments_for_run(run_id, scope="log", tc_id=tc_id)
+    return web.json_response({
+        "success": True,
+        "comments": [_serialize_comment(row) for row in comments],
+        **_comment_viewer_payload(request),
+    })
+
+
+async def api_comment_item_handler(request):
+    """Edit or delete a single comment."""
+    try:
+        comment_id = int(request.match_info["comment_id"])
+    except (TypeError, ValueError):
+        return web.json_response({"success": False, "error": "Invalid comment id"}, status=400)
+    comment = await database.db.get_comment_by_id(comment_id)
+    if not comment:
+        return web.json_response({"success": False, "error": "Comment not found"}, status=404)
+
+    enabled, user = _comment_auth(request)
+    is_author = _is_comment_author(comment, user)
+    is_admin = _is_admin_user(user)
+
+    if request.method == "PATCH":
+        if enabled and not is_author:
+            return web.json_response({"success": False, "error": "Forbidden"}, status=403)
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                raise ValueError("JSON object required")
+            body = _normalize_comment_body(data.get("body"))
+        except ValueError as error:
+            return _validation_error(error)
+        updated = await database.db.update_comment_body(comment_id, body)
+        return web.json_response({"success": True, "comment": _serialize_comment(updated)})
+
+    if enabled and not is_author and not is_admin:
+        return web.json_response({"success": False, "error": "Forbidden"}, status=403)
+    await database.db.delete_comment(comment_id)
+    return web.json_response({"success": True})
+
+
+async def api_comments_presence_handler(request):
+    """Bulk comment presence for run list pages."""
+    run_ids_param = request.query.get("run_ids", "")
+    run_ids = [item.strip() for item in run_ids_param.split(",") if item.strip()]
+    if len(run_ids) > 500:
+        return web.json_response({"success": False, "error": "Too many run_ids"}, status=400)
+    presence = await database.db.get_comments_presence(run_ids)
+    return web.json_response({"success": True, "data": presence})
+
+
 # --- Route Registration ---
 
 def get_routes():
@@ -1707,6 +1918,10 @@ def get_routes():
         (("GET",), "/api/run-set", api_run_set_handler),
         (("GET", "PUT", "DELETE"), "/api/profiles/{profile_id}", api_profile_handler),
         (("GET",), "/api/test-runs", api_test_runs_handler),
+        (("GET", "POST"), "/api/runs/{run_id}/comments", api_run_comments_handler),
+        (("GET",), "/api/runs/{run_id}/comments/log/{tc_id}", api_log_comments_handler),
+        (("PATCH", "DELETE"), "/api/comments/{comment_id}", api_comment_item_handler),
+        (("GET",), "/api/comments/presence", api_comments_presence_handler),
         (("GET",), "/api/test-runs/{run_id}", api_test_run_details_handler),
         (("GET",), "/api/test-results/for-runs", api_test_results_for_runs_handler),
         (("GET",), "/api/test-results/over-time", api_test_results_over_time_handler),

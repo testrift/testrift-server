@@ -30,19 +30,31 @@
     <script src="/static/msgpack.min.js"></script>
     <script src="/static/protocol.js"></script>
     <script src="/static/at_syntax.js"></script>
+    <script src="/static/marked.min.js"></script>
+    <script src="/static/purify.min.js"></script>
+    <script>window.COMMENTS_STATIC_BASE = "/static/";</script>
+    <script src="/static/comments_md.js"></script>
+    <script src="/static/comments.js?v=6"></script>
     {% else %}
     <script src="../static/msgpack.min.js"></script>
     <script src="../static/protocol.js"></script>
     <script src="../static/at_syntax.js"></script>
+    <script src="../static/marked.min.js"></script>
+    <script src="../static/purify.min.js"></script>
+    <script>window.COMMENTS_STATIC_BASE = "../static/";</script>
+    <script src="../static/comments_md.js"></script>
+    <script src="../static/comments.js"></script>
     {% endif %}
     {% if server_mode %}
     <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/test_case_log.css" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
+    <link href="/static/comments.css?v=6" rel="stylesheet">
     <script src="/static/classifications.js"></script>
     {% else %}
     <link href="../static/status-badges.css" rel="stylesheet">
     <link href="../static/test_case_log.css" rel="stylesheet">
+    <link href="../static/comments.css" rel="stylesheet">
     {% endif %}
 </head>
 <body>
@@ -206,6 +218,16 @@
                         <div class="log-header">
                 <h2>Message Log</h2>
                             <div class="log-controls">
+                                <span id="commentedLinesFilterWrap" style="display:none; margin-right: 10px;">
+                                    <label class="filter-option" style="margin:0;">
+                                        <input type="checkbox" id="commentedLinesOnly"> Commented lines only
+                                    </label>
+                                </span>
+                                <span id="commentNavigator" class="comment-navigator">
+                                    <button type="button" id="commentNavPrev" title="Previous comment">Prev</button>
+                                    <span id="commentNavLabel"></span>
+                                    <button type="button" id="commentNavNext" title="Next comment">Next</button>
+                                </span>
                                 <button id="time-display-toggle" class="btn btn-sm btn-outline-secondary">
                                     Show Delta Time
                                 </button>
@@ -215,6 +237,7 @@
                             <table id="msg_table" class="table table-striped table-hover">
                     <thead>
                         <tr>
+                            <th class="log-gutter-head"></th>
                             <th>Time</th>
                             <th>Channel</th>
                             <th>Message</th>
@@ -264,7 +287,10 @@
       serverMode: {{ server_mode | tojson }},
       attachments: {{ attachments | tojson if attachments else '[]' }},
       stackTraces: {{ (stack_traces if stack_traces is defined else (test_case.stack_traces if test_case else (tc_meta.stack_traces if tc_meta else []))) | tojson }},
-      metrics: {{ metrics | tojson if metrics is defined else '[]' }}
+      metrics: {{ metrics | tojson if metrics is defined else '[]' }},
+      authEnabled: {{ auth_enabled | tojson }},
+      currentUser: {{ current_user | tojson }},
+      comments: {{ comments | tojson if comments is defined else '[]' }}
     };
 </script>
 
