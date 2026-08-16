@@ -39,6 +39,10 @@ Frozen surface for the FastAPI migration (Phase 0). Clients (NUnit plugin, colle
 | GET | `/api/run-set` |
 | GET/PUT/DELETE | `/api/profiles/{profile_id}` |
 | GET | `/api/test-runs`, `/api/test-runs/{run_id}` |
+| GET/POST | `/api/runs/{run_id}/comments` |
+| GET | `/api/runs/{run_id}/comments/log/{tc_id}` |
+| PATCH/DELETE | `/api/comments/{comment_id}` |
+| GET | `/api/comments/presence` |
 | GET | `/api/test-results/for-runs`, `/api/test-results/over-time` |
 | GET | `/api/test-case/history`, `/api/test-case/history-with-links` |
 | GET | `/api/metadata/keys`, `/api/metadata/values` |

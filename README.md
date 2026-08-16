@@ -87,4 +87,6 @@ TLS for test clients (automatic CA, fingerprint pinning): [tls.md](docs/tls.md).
 
 HTTP/WebSocket path contracts (frozen for clients): [http_contracts.md](docs/http_contracts.md).
 
+Comments on runs and test case logs: [comments.md](docs/comments.md).
+
 
