@@ -36,7 +36,7 @@ function generateLabelId() {
 }
 
 function generateBadge(entry, labelName) {
-    return `<span class="badge badge-custom" style="background-color: ${entry.color}; font-size: 80%;">${labelName}</span>`;
+    return `<span class="badge badge-custom" style="background-color: ${entry.color};">${labelName}</span>`;
 }
 
 function updateStatusBadge() {
@@ -145,9 +145,9 @@ function addChannelLabel(row, parentComp, labelName) {
 // ============================================================================
 
 function generateAtLine(atLookupTable, isRx, atLine) {
-    const directionText = isRx ? "Host ◄―― DUT" : "Host ――► DUT";
+    const directionText = isRx ? "Host \u2190 DUT" : "Host \u2192 DUT";
     const bgClass = isRx ? "bg-rx" : "bg-tx";
-    let html = `<span class="badge ${bgClass}">${directionText}</span> <span class="at_cmd">${atLine}</span>`
+    let html = `<span class="log-msg-line"><span class="log-dir ${bgClass}">${directionText}</span><span class="at_cmd">${atLine}</span></span>`
     atLine = atLine.trim()
     if (atLookupTable !== null) {
         const parsed_cmd = parseAtCommand(atLine);
@@ -281,7 +281,7 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
 
     let msgIsEcho = false;
     const originalTime = d.timestamp || '';
-    const time = convertToLocalTime(originalTime);
+    const time = formatLogTime(originalTime);
     let chanName = d.channel || '';
     let compName = d.component || '';
     let messageText = d.message || '';
@@ -396,11 +396,6 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
     }
 
     if (badges.includes(">Assert<")) {
-        let msgEl = $("<pre>").addClass("bg-danger text-white").append("<code>").html(messageText);
-        msgEl.find('a').each(function () {
-            $(this).addClass("link-dark")
-        });
-        messageText = msgEl.prop('outerHTML')
         let li = $(`<li class="list-group-item">`)
         .html(`<strong>Assert failure:</strong> ${messageText}`)
         .css('cursor', 'pointer')
@@ -409,6 +404,7 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
             $('html,body').animate({ scrollTop: row.offset().top - (w.height() / 2) }, 200);
         });
         $("#test_info_list").append(li);
+        messageText = `<span class="log-assert">${messageText}</span>`;
     }
 
     $(`<td class="fit">`)
@@ -528,7 +524,7 @@ function updateChannelList(compMap, chanList) {
         .attr("labelUid", component.labelUid)
         .addClass("tree-checkbox")
         .on("change", handleCBChange);
-        const label = `<span class="badge badge-custom" style="background-color: ${component.color}; font-size: 80%;">${compName}</span>`;
+        const label = `<span class="badge badge-custom" style="background-color: ${component.color};">${compName}</span>`;
         listItem.append(checkbox).append(" ").append(label);
         for (let [chanName, channel] of component.channels) {
             const chanUl = $("<ul>").appendTo(listItem);
@@ -539,7 +535,7 @@ function updateChannelList(compMap, chanList) {
             .attr("labelUid", channel.labelUid)
             .addClass("tree-checkbox")
             .on("change", handleCBChange);
-            const chanLabel = `<span class="badge badge-custom" style="background-color: ${channel.color}; font-size: 80%;">${chanName}</span>`;
+            const chanLabel = `<span class="badge badge-custom" style="background-color: ${channel.color};">${chanName}</span>`;
             chanLi.append(chanCheckbox).append(" ").append(chanLabel);
         }
     }
@@ -549,32 +545,45 @@ function updateChannelList(compMap, chanList) {
 // TIME UTILITIES
 // ============================================================================
 
-function convertToLocalTime(utcTimeString) {
-    if (!utcTimeString) return utcTimeString;
-    try {
-        // Fix malformed timestamp format that has both +00:00 and Z
-        let fixedTimeString = utcTimeString;
-        if (fixedTimeString.includes('+00:00Z')) {
-            // Remove the +00:00 part, keep only Z
-            fixedTimeString = fixedTimeString.replace('+00:00Z', 'Z');
-        } else if (fixedTimeString.includes('+00:00') && !fixedTimeString.endsWith('Z')) {
-            // Replace +00:00 with Z
-            fixedTimeString = fixedTimeString.replace('+00:00', 'Z');
-        }
+function parseUtcDate(utcTimeString) {
+    if (!utcTimeString) {
+        return null;
+    }
+    let fixedTimeString = utcTimeString;
+    if (fixedTimeString.includes('+00:00Z')) {
+        fixedTimeString = fixedTimeString.replace('+00:00Z', 'Z');
+    } else if (fixedTimeString.includes('+00:00') && !fixedTimeString.endsWith('Z')) {
+        fixedTimeString = fixedTimeString.replace('+00:00', 'Z');
+    }
+    const utcDate = new Date(fixedTimeString);
+    if (isNaN(utcDate.getTime())) {
+        return null;
+    }
+    return utcDate;
+}
 
-        const utcDate = new Date(fixedTimeString);
-        if (isNaN(utcDate.getTime())) {
-            console.warn('Failed to parse time after fixing format:', fixedTimeString);
-            return utcTimeString;
-        }
-        // Always include milliseconds as ".xxx"
-        const localTime = utcDate.toLocaleString();
-        const ms = String(utcDate.getMilliseconds()).padStart(3, '0');
-        return `${localTime}.${ms}`;
-    } catch (e) {
-        console.warn('Failed to parse time:', utcTimeString, e);
+function convertToLocalTime(utcTimeString) {
+    const utcDate = parseUtcDate(utcTimeString);
+    if (!utcDate) {
         return utcTimeString;
     }
+    const localTime = utcDate.toLocaleString();
+    const ms = String(utcDate.getMilliseconds()).padStart(3, '0');
+    return `${localTime}.${ms}`;
+}
+
+function formatLogTime(utcTimeString) {
+    const utcDate = parseUtcDate(utcTimeString);
+    if (!utcDate) {
+        return utcTimeString || '';
+    }
+    const ms = String(utcDate.getMilliseconds()).padStart(3, '0');
+    const time = utcDate.toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    return time.replace(/(\d+:\d+:\d+)/, `$1.${ms}`);
 }
 
 function calculateDeltaTime(currentTimeString) {
@@ -645,7 +654,7 @@ function toggleTimeDisplay() {
             const originalTime = timeCell.getAttribute('data-original-time');
 
             if (originalTime) {
-                timeCell.textContent = convertToLocalTime(originalTime);
+                timeCell.textContent = formatLogTime(originalTime);
                 timeCell.style.fontFamily = '';
                 timeCell.style.color = '';
             }
@@ -682,7 +691,7 @@ function convertTimesToLocal() {
                 cell.textContent = deltaTime;
                 cell.style.fontFamily = 'monospace';
             } else {
-                cell.textContent = convertToLocalTime(originalTime);
+                cell.textContent = formatLogTime(originalTime);
                 cell.style.fontFamily = '';
             }
         } else {
@@ -690,7 +699,7 @@ function convertTimesToLocal() {
             const text = cell.textContent.trim();
             // Only convert if it actually looks like an ISO timestamp (avoid matching words like "Teardown")
             if (text && (isoLike.test(text) || text.endsWith('Z'))) {
-                cell.textContent = convertToLocalTime(text);
+                cell.textContent = formatLogTime(text);
             }
         }
     });
@@ -1548,13 +1557,22 @@ function renderAttachmentItem(attachment) {
     `;
 }
 
+function setAttachmentsContent(html, visible) {
+    const attachmentsList = document.getElementById('attachmentsList');
+    const attachmentsBlock = document.getElementById('attachmentsBlock');
+    if (attachmentsList) {
+        attachmentsList.innerHTML = html || '';
+    }
+    if (attachmentsBlock) {
+        attachmentsBlock.hidden = !visible;
+    }
+}
+
 function loadAttachments() {
     if (!templateConfig) {
         console.error('templateConfig not available');
         return;
     }
-
-    const attachmentsList = document.getElementById('attachmentsList');
 
     // In offline mode (zip file), use embedded attachment data
     if (!templateConfig.serverMode) {
@@ -1569,26 +1587,22 @@ function loadAttachments() {
         .then(response => response.json())
         .then(data => {
             if (data.attachments && data.attachments.length > 0) {
-                const html = data.attachments.map(renderAttachmentItem).join('');
-                attachmentsList.innerHTML = html;
+                setAttachmentsContent(data.attachments.map(renderAttachmentItem).join(''), true);
             } else {
-                attachmentsList.innerHTML = '<div class="no-attachments">No attachments found for this test case.</div>';
+                setAttachmentsContent('', false);
             }
         })
         .catch(error => {
             console.error('Error loading attachments:', error);
-            attachmentsList.innerHTML = '<div class="no-attachments">Error loading attachments.</div>';
+            setAttachmentsContent('<div class="no-attachments">Error loading attachments.</div>', true);
         });
 }
 
 function loadOfflineAttachments() {
-    const attachmentsList = document.getElementById('attachmentsList');
-
     if (templateConfig.attachments && templateConfig.attachments.length > 0) {
-        const html = templateConfig.attachments.map(renderOfflineAttachmentItem).join('');
-        attachmentsList.innerHTML = html;
+        setAttachmentsContent(templateConfig.attachments.map(renderOfflineAttachmentItem).join(''), true);
     } else {
-        attachmentsList.innerHTML = '<div class="no-attachments">No attachments found for this test case.</div>';
+        setAttachmentsContent('', false);
     }
 }
 
@@ -1625,9 +1639,14 @@ const stackTraceList = document.getElementById('stackTraceList');
 const stackTraceEmptyState = document.getElementById('stackTraceEmptyState');
 
 function refreshStackTraceEmptyState() {
-    if (!stackTraceEmptyState) return;
     const hasItems = stackTraceList && stackTraceList.children.length > 0;
-    stackTraceEmptyState.style.display = hasItems ? 'none' : 'block';
+    const section = document.getElementById('stackTraceSection');
+    if (section) {
+        section.hidden = !hasItems;
+    }
+    if (stackTraceEmptyState) {
+        stackTraceEmptyState.style.display = 'none';
+    }
 }
 
 function createStackTraceCard(trace, includeTimestamp = true) {

@@ -2,8 +2,6 @@
 
 People can leave comments on a test run and on log lines in a test case. The log interaction follows the gutter + range mockup. Discovery uses a comment icon, not a count, so it stays obvious in the tree and on pages that only link to a run.
 
-People should be able to leave comments on a test run and on log lines in a test case. The log interaction follows the gutter + range mockup. Discovery uses a comment icon, not a count, so it stays obvious in the tree and on pages that only link to a run.
-
 ### Goals
 
 - Comment on one log line or a contiguous range of lines on the test case log page.
@@ -40,7 +38,9 @@ The message log stays a table (Time, Channel, Message).
 **Show**
 
 - A gutter mark (comment icon) on any row that is part of at least one comment range.
-- Opening a mark expands the thread under the last line of that range, same as the composer.
+- Every thread is shown under the last line of its range (not collapsed). Opening a mark, using the navigator, or following a deep link focuses that comment and scrolls to it.
+- Rows in a comment range keep a left gutter bar so the span is visible without extra clicks. The focused comment’s bar is a little stronger; the log row color stays as it is.
+- Each thread shows a line label (`Line 12` or `Lines 12–18`, 1-based).
 - Each thread has **Reply**, which adds another comment on that same line range.
 - When a thread has more than one comment, **Prev** / **Next** on the thread move only inside that thread.
 
@@ -48,11 +48,11 @@ The message log stays a table (Time, Channel, Message).
 
 Logs can be tens of thousands of lines. Scattered comments must be reachable without scrolling the whole table.
 
-- A compact **comment navigator** stays visible while the log is in view (fixed at the bottom of the viewport so it remains usable without scrolling back to the header).
+- A compact **comment navigator** sits in the log header so it stays available while reading the log.
 - It shows `3 / 12` (current comment in document order, total on this test case). **This is the only place a comment count appears.** Tree nodes, run lists, gutters, and tooltips use the comment icon with no number.
-- **Previous** / **Next** jump to the next comment, expand it, and scroll it into view.
+- **Previous** / **Next** jump to the next comment, focus it, and scroll it into view.
 - Keyboard: `n` / `p` (or `j` / `k`) while focus is not in a text field.
-- Opening the page from a tree icon lands on comment 1 and expands it.
+- Opening the page from a tree icon lands on comment 1, focuses it, and scrolls it into view.
 - Deep link: `/testRun/{run_id}/log/{tc_id}.html#comment={comment_id}` selects that comment in the navigator. Run-level comments use `/testRun/{run_id}/index.html#comment={comment_id}`.
 
 If the current filter hides some commented lines, the navigator still lists those comments. Jumping to one temporarily reveals the range (or shows a one-line hint “comment on hidden lines” with a control to clear the filter for that jump).
@@ -81,7 +81,7 @@ Each comment has a **Copy link** control (icon or menu item) that copies the `#c
 
 - On the test case log page: `/testRun/{run_id}/log/{tc_id}.html#comment={id}`
 - On the run page (run-level comments): `/testRun/{run_id}/index.html#comment={id}`
-- Opening that URL expands the comment, selects it in the navigator (log page), and scrolls it into view.
+- Opening that URL focuses the comment, selects it in the navigator (log page), and scrolls it into view.
 - After copy, a short confirmation (tooltip or toast) is enough; no modal.
 
 **Highlight on the metrics chart**

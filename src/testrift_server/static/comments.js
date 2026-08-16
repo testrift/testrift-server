@@ -319,6 +319,15 @@
         return String(comment.line_start) + "-" + String(comment.line_end);
     }
 
+    function formatLineRange(start, end) {
+        const from = start + 1;
+        const to = end + 1;
+        if (from === to) {
+            return "Line " + from;
+        }
+        return "Lines " + from + "–" + to;
+    }
+
     const CommentsLog = {
         comments: [],
         ctx: null,
@@ -647,7 +656,13 @@
                 if (gutter) {
                     gutter.innerHTML = '<span class="tr-comment-gutter-add">+</span>';
                 }
-                row.classList.remove("has-comment");
+                row.classList.remove(
+                    "has-comment",
+                    "comment-range-span",
+                    "comment-range-focus",
+                    "comment-range-focus-start",
+                    "comment-range-focus-end"
+                );
             });
             const grouped = {};
             this.comments.forEach(function (comment) {
@@ -664,6 +679,9 @@
                         continue;
                     }
                     row.classList.add("has-comment");
+                    if (end > start) {
+                        row.classList.add("comment-range-span");
+                    }
                     const gutter = row.querySelector(".log-gutter");
                     if (gutter && !gutter.querySelector(".tr-comment-icon")) {
                         gutter.innerHTML = "";
@@ -676,14 +694,20 @@
                 const comments = grouped[key];
                 const end = comments[0].line_end;
                 const last = rowByIndex(end);
+                const start = comments[0].line_start;
                 const tr = document.createElement("tr");
                 tr.className = "comment-thread-row";
                 tr.setAttribute("data-thread-key", key);
+                tr.setAttribute("data-thread-start", String(start));
                 tr.setAttribute("data-thread-end", String(end));
                 const td = document.createElement("td");
                 td.colSpan = 4;
                 const thread = document.createElement("div");
                 thread.className = "tr-comment-thread";
+                const range = document.createElement("div");
+                range.className = "tr-comment-thread-range";
+                range.textContent = formatLineRange(start, end);
+                thread.appendChild(range);
                 comments.forEach(function (comment) {
                     thread.appendChild(renderComment(comment, self.ctx));
                 });
@@ -729,7 +753,6 @@
                 tr.appendChild(td);
                 if (last) {
                     last.after(tr);
-                    tr.style.display = "none";
                 }
             });
             this.updateNavigator();
@@ -857,29 +880,60 @@
             });
         },
 
-        expandThread(comment) {
-            document.querySelectorAll(".comment-thread-row").forEach(function (row) {
-                row.style.display = "none";
+        highlightRange(comment) {
+            logRows().forEach(function (row) {
+                row.classList.remove(
+                    "comment-range-focus",
+                    "comment-range-focus-start",
+                    "comment-range-focus-end"
+                );
             });
+            document.querySelectorAll(".comment-thread-row.is-focused-thread").forEach(function (row) {
+                row.classList.remove("is-focused-thread");
+            });
+            if (!comment) {
+                return;
+            }
+            const start = comment.line_start;
+            const end = comment.line_end;
+            for (let i = start; i <= end; i++) {
+                const row = rowByIndex(i);
+                if (!row) {
+                    continue;
+                }
+                row.classList.add("comment-range-focus");
+                if (i === start) {
+                    row.classList.add("comment-range-focus-start");
+                }
+                if (i === end) {
+                    row.classList.add("comment-range-focus-end");
+                }
+            }
+            const thread = document.querySelector('.comment-thread-row[data-thread-key="' + threadKey(comment) + '"]');
+            if (thread) {
+                thread.classList.add("is-focused-thread");
+            }
+        },
+
+        expandThread(comment) {
             document.querySelectorAll(".tr-comment-item.is-focused").forEach(function (item) {
                 item.classList.remove("is-focused");
             });
             const thread = document.querySelector('.comment-thread-row[data-thread-key="' + threadKey(comment) + '"]');
             const item = document.querySelector('.tr-comment-item[data-comment-id="' + comment.id + '"]');
             const row = rowByIndex(comment.line_end);
-            if (thread && row && row.style.display !== "none") {
-                thread.style.display = "";
-            }
             if (item) {
                 item.classList.add("is-focused");
             }
+            this.highlightRange(comment);
+            const visible = !!(row && row.style.display !== "none");
             const target = item || thread || row;
-            if (target && target.scrollIntoView) {
+            if (visible && target && target.scrollIntoView) {
                 target.scrollIntoView({ block: "center" });
             }
             this.highlightMetrics(comment);
             this.updateThreadBars();
-            return !!(row && row.style.display !== "none");
+            return visible;
         },
 
         goto(index) {
@@ -962,9 +1016,7 @@
             document.querySelectorAll(".comment-thread-row").forEach(function (thread) {
                 const end = Number(thread.getAttribute("data-thread-end"));
                 const last = rowByIndex(end);
-                if (last && last.style.display === "none") {
-                    thread.style.display = "none";
-                }
+                thread.style.display = (last && last.style.display !== "none") ? "" : "none";
             });
         },
 
