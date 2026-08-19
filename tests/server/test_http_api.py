@@ -16,6 +16,7 @@ import pytest_asyncio
 
 from testrift_server import database
 from testrift_server.database import TestRunData, TestCaseData, UserMetadata
+from testrift_server.summary_profiles import SummarySelection
 
 
 class TestHTTPAPI:
@@ -154,6 +155,61 @@ class TestHTTPAPI:
         assert response is not None
         assert hasattr(response, 'status')
         assert hasattr(response, 'content_type')
+
+    @pytest.mark.asyncio
+    async def test_collection_summary_includes_run_results_and_missing_targets(self):
+        from testrift_server.api_handlers import api_collection_summary_handler
+
+        request = MagicMock()
+        request.match_info = {'key': 'nightly'}
+        request.query = {'profile_id': '7', 'at': '2026-07-20T12:00:00Z'}
+        mock_database = AsyncMock()
+        mock_database.get_collection.return_value = {
+            'profiles': [{'id': 7, 'is_primary': True}],
+        }
+        mock_database.get_test_runs.return_value = [{
+            'run_id': 'selected-run',
+            'status': 'finished',
+            'start_time': '2026-07-20T11:00:00Z',
+            'end_time': '2026-07-20T11:30:00Z',
+            'passed_count': 12,
+            'failed_count': 2,
+            'skipped_count': 1,
+            'aborted_count': 0,
+            'error_count': 0,
+            'test_case_count': 15,
+        }]
+        selections = [
+            SummarySelection('nora-b26x', 'selected-run', None),
+            SummarySelection('sara-b26x', None, 'no_matching_run'),
+        ]
+
+        with patch('testrift_server.api_handlers.database.db', mock_database), patch(
+            'testrift_server.api_handlers.select_profile_from_database',
+            AsyncMock(return_value=selections),
+        ):
+            response = await api_collection_summary_handler(request)
+
+        payload = json.loads(response.text)['data']
+        assert payload[0] == {
+            'target_key': 'nora-b26x',
+            'run_id': 'selected-run',
+            'reason': None,
+            'status': 'finished',
+            'start_time': '2026-07-20T11:00:00Z',
+            'end_time': '2026-07-20T11:30:00Z',
+            'passed_count': 12,
+            'failed_count': 2,
+            'skipped_count': 1,
+            'aborted_count': 0,
+            'error_count': 0,
+            'test_case_count': 15,
+        }
+        assert payload[1] == {
+            'target_key': 'sara-b26x',
+            'run_id': None,
+            'reason': 'no_matching_run',
+        }
 
     @pytest.mark.asyncio
     async def test_api_test_run_details_handler_basic(self, initialized_db, sample_test_run):

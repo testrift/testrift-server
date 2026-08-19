@@ -19,20 +19,47 @@
     .header a { color: #fff; }
     .header-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .content { padding: 24px 30px 30px; }
-    .collection-key { color: #6c757d; font-size: .95rem; margin-bottom: 16px; }
-    .collection-key code { color: inherit; }
     .summary-head { display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid #e5e8eb; }
     .summary-head h2 { margin: 0; color: #495057; font-size: 1.4rem; font-weight: 650; }
     .summary-head label { color: #495057; font-weight: 650; }
     .summary-head select { min-width: 220px; margin-top: 5px; }
     .context { margin-top: 14px; padding: 11px 14px; border: 1px solid #dfe3e7; border-radius: 8px; background: #f8f9fa; color: #6c757d; font-size: .86rem; }
     .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 20px; }
-    .tile { min-height: 132px; padding: 16px; border: 1px solid #dfe3e7; border-radius: 9px; background: #fff; box-shadow: 0 3px 12px rgba(0,0,0,.06); }
-    .tile.no-match { border-left: 4px solid #c47f00; }
-    .tile.match { border-left: 4px solid #198754; }
-    .tile strong { display: block; color: #343a40; font-size: 1.05rem; }
-    .detail { margin-top: 8px; color: #6c757d; font-size: .87rem; overflow-wrap: anywhere; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 22px; }
+    .kpi { padding: 16px 12px; border: 1px solid #e5e8eb; border-radius: 8px; background: #fff; box-shadow: 0 3px 12px rgba(0,0,0,.06); text-align: center; }
+    .kpi-value { color: #667eea; font-size: 2rem; font-weight: 750; line-height: 1; }
+    .kpi-value.good { color: #198754; }
+    .kpi-value.bad { color: #dc3545; }
+    .kpi-value.warn { color: #b06d00; }
+    .kpi-label { margin-top: 7px; color: #6c757d; font-size: .74rem; font-weight: 700; text-transform: uppercase; }
+    .section-title { display: flex; align-items: center; gap: 8px; margin: 26px 0 14px; color: #495057; font-size: 1.2rem; font-weight: 650; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .tile { min-height: 230px; padding: 17px; border: 1px solid #dfe3e7; border-top: 4px solid #198754; border-radius: 8px; background: #fff; box-shadow: 0 4px 15px rgba(0,0,0,.07); }
+    .tile.failed { border-top-color: #dc3545; }
+    .tile.no-match { border-top-color: #c47f00; background: #fffdf8; }
+    .tile-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .tile h3 { margin: 0; color: #343a40; font-size: 1.08rem; font-weight: 700; overflow-wrap: anywhere; }
+    .run-meta { margin-top: 3px; color: #6c757d; font-size: .78rem; }
+    .badge-status { flex: none; padding: 4px 9px; border-radius: 999px; font-size: .68rem; font-weight: 750; text-transform: uppercase; }
+    .badge-status.passed { color: #146c43; background: #d1e7dd; }
+    .badge-status.failed { color: #b02a37; background: #f8d7da; }
+    .badge-status.missing { color: #7a4b00; background: #fff0c2; }
+    .target-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 18px 0 12px; text-align: center; }
+    .stat-value { font-size: 1.3rem; font-weight: 750; }
+    .stat-value.pass { color: #198754; }
+    .stat-value.fail { color: #dc3545; }
+    .stat-value.skip { color: #b06d00; }
+    .stat-label { color: #6c757d; font-size: .68rem; text-transform: uppercase; }
+    .result-bar { display: flex; height: 8px; overflow: hidden; border-radius: 999px; background: #e9ecef; }
+    .result-pass { background: #198754; }
+    .result-fail { background: #dc3545; }
+    .result-skip { background: #ffc107; }
+    .tile-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .tile-links a { font-size: .78rem; font-weight: 600; text-decoration: none; }
+    .missing-body { display: grid; min-height: 142px; place-content: center; color: #7a4b00; text-align: center; }
+    .missing-body i { margin-bottom: 10px; font-size: 1.7rem; opacity: .7; }
+    .missing-body strong { font-size: .92rem; }
+    .missing-body span { margin-top: 4px; color: #8b7351; font-size: .78rem; }
     .empty { padding: 30px; color: #6c757d; text-align: center; }
     .status { min-height: 1.2rem; margin-bottom: 10px; color: #b42318; }
     .status.ok { color: #067647; }
@@ -41,6 +68,9 @@
       .header { align-items: flex-start; flex-direction: column; }
       .summary-head { align-items: stretch; }
       .summary-head select { width: 100%; }
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .kpi:last-child { grid-column: 1 / -1; }
+      .tiles { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -61,7 +91,6 @@
     </div>
   </header>
   <section class="content">
-    <div class="collection-key">URL key: <code id="collection-key-display">{{ collection_key }}</code></div>
     <div class="summary-head">
       <div>
         <h2 id="collection-name-summary">{{ collection_key }}</h2>
@@ -73,6 +102,8 @@
     </div>
     <div id="summary-time" class="context"></div>
     <div id="tools" class="tools"></div>
+    <div id="kpis" class="kpis" aria-label="Collection health summary"></div>
+    <h2 class="section-title"><i class="fas fa-bullseye"></i>Targets</h2>
     <div id="tiles" class="tiles"></div>
   </section>
 </main>
@@ -212,12 +243,79 @@ function fillSummarySelect(collection) {
   select.value = preferred;
 }
 
+const escapeHtml = value => String(value).replace(/[&<>'"]/g, character => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+})[character]);
+
+function renderKpis(selections) {
+  const matched = selections.filter(selection => selection.run_id);
+  const failing = matched.filter(selection => (
+    Number(selection.failed_count) + Number(selection.aborted_count) + Number(selection.error_count)
+  ) > 0).length;
+  const passed = matched.reduce((total, selection) => total + Number(selection.passed_count), 0);
+  const failed = matched.reduce((total, selection) => total
+    + Number(selection.failed_count) + Number(selection.aborted_count) + Number(selection.error_count), 0);
+  const passRate = passed + failed ? `${(passed / (passed + failed) * 100).toFixed(1)}%` : '—';
+  const values = [
+    [selections.length, 'Targets', ''],
+    [matched.length - failing, 'Healthy', 'good'],
+    [failing, 'Failing', 'bad'],
+    [selections.length - matched.length, 'Not run', 'warn'],
+    [passRate, 'Pass rate', ''],
+  ];
+  document.getElementById('kpis').innerHTML = values.map(([value, label, tone]) =>
+    `<div class="kpi"><div class="kpi-value ${tone}">${value}</div><div class="kpi-label">${label}</div></div>`
+  ).join('');
+}
+
+function renderTarget(selection) {
+  const targetKey = escapeHtml(selection.target_key);
+  if (!selection.run_id) {
+    return `<article class="tile no-match">
+      <div class="tile-head"><h3>${targetKey}</h3><span class="badge-status missing">Not run</span></div>
+      <div class="missing-body"><i class="far fa-clock"></i><strong>No matching run</strong><span>This Target did not run within the selected window.</span></div>
+      <div class="tile-links"><a href="/api/test-runs?target=${encodeURIComponent(selection.target_key)}"><i class="fas fa-clock-rotate-left me-1"></i>Target history</a></div>
+    </article>`;
+  }
+  const runId = escapeHtml(selection.run_id);
+  const passed = Number(selection.passed_count);
+  const failed = Number(selection.failed_count) + Number(selection.aborted_count) + Number(selection.error_count);
+  const skipped = Number(selection.skipped_count);
+  const total = passed + failed + skipped;
+  const width = value => total ? `${value / total * 100}%` : '0';
+  const didFail = failed > 0;
+  const completedAt = selection.end_time
+    ? new Date(selection.end_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Completion time unavailable';
+  return `<article class="tile ${didFail ? 'failed' : ''}" data-run-id="${runId}">
+    <div class="tile-head">
+      <div><h3>${targetKey}</h3><div class="run-meta">${runId} · ${escapeHtml(completedAt)}</div></div>
+      <span class="badge-status ${didFail ? 'failed' : 'passed'}">${didFail ? 'Failed' : 'Passed'}</span>
+    </div>
+    <div class="target-stats">
+      <div><div class="stat-value pass">${passed}</div><div class="stat-label">Pass</div></div>
+      <div><div class="stat-value fail">${failed}</div><div class="stat-label">Fail</div></div>
+      <div><div class="stat-value skip">${skipped}</div><div class="stat-label">Skip</div></div>
+    </div>
+    <div class="result-bar" aria-label="${passed} passed, ${failed} failed, ${skipped} skipped">
+      <span class="result-pass" style="width:${width(passed)}"></span>
+      <span class="result-fail" style="width:${width(failed)}"></span>
+      <span class="result-skip" style="width:${width(skipped)}"></span>
+    </div>
+    <div class="tile-links">
+      <a href="/testRun/${encodeURIComponent(selection.run_id)}/index.html"><i class="fas fa-list-check me-1"></i>Run details</a>
+      <a href="/api/test-runs?target=${encodeURIComponent(selection.target_key)}"><i class="fas fa-clock-rotate-left me-1"></i>Target history</a>
+    </div>
+  </article>`;
+}
+
 async function renderSummary() {
   const profileId = document.getElementById('profile').value;
   if (!profileId) {
     document.getElementById('tiles').innerHTML = '<div class="empty">No Summary profile configured.</div>';
     document.getElementById('summary-time').textContent = 'Use Edit to create a Summary profile for a deterministic run set.';
     document.getElementById('tools').innerHTML = '';
+    document.getElementById('kpis').innerHTML = '';
     document.getElementById('profile-details').textContent = '';
     return;
   }
@@ -229,18 +327,16 @@ async function renderSummary() {
   document.getElementById('header-name').textContent = collection.display_name;
   document.getElementById('collection-name-summary').textContent = collection.display_name;
   const profile = collection.profiles.find(item => String(item.id) === String(profileId));
-  document.getElementById('summary-time').textContent = `Requested at ${at}`;
+  document.getElementById('summary-time').innerHTML = `<i class="far fa-clock me-1"></i>Snapshot at ${escapeHtml(new Date(at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}`;
   document.getElementById('profile-details').textContent = profile
     ? `${profile.purpose}, ${profile.window_hours}h window`
     : '';
   const context = `profile_id=${encodeURIComponent(profileId)}&at=${encodeURIComponent(at)}`;
   document.getElementById('tools').innerHTML = ['analyzer', 'matrix', 'failures'].map(tool =>
-    `<a class="btn btn-outline-primary btn-sm" href="/collections/${collectionKey}/${tool}?${context}">${tool[0].toUpperCase() + tool.slice(1)}</a>`
+    `<a class="btn btn-outline-primary btn-sm" href="/collections/${collectionKey}/${tool}?${context}"><i class="fas fa-${tool === 'analyzer' ? 'chart-line' : tool === 'matrix' ? 'table-cells' : 'bug'} me-1"></i>${tool[0].toUpperCase() + tool.slice(1)}</a>`
   ).join('');
-  document.getElementById('tiles').innerHTML = selections.map(selection => selection.run_id
-    ? `<article class="tile match" data-run-id="${selection.run_id}"><strong>${selection.target_key}</strong><div class="detail">Selected Run</div><a href="/testRun/${selection.run_id}/index.html">${selection.run_id}</a><div class="detail"><a href="/api/test-runs?target=${selection.target_key}">Target history</a></div></article>`
-    : `<article class="tile no-match"><strong>${selection.target_key}</strong><div class="detail">No matching run</div></article>`
-  ).join('');
+  renderKpis(selections);
+  document.getElementById('tiles').innerHTML = selections.map(renderTarget).join('');
   if (window.CommentsUI) {
     window.CommentsUI.decorateRunLists(document.getElementById('tiles'));
   }

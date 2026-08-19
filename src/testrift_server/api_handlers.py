@@ -258,7 +258,28 @@ async def api_collection_summary_handler(request):
     try:
         requested_at = datetime.fromisoformat(request.query.get("at", "").replace("Z", "+00:00"))
         selections = await select_profile_from_database(database.db, int(profile_id), requested_at.astimezone(timezone.utc))
-        return web.json_response({"success": True, "data": [selection.__dict__ for selection in selections]})
+        run_ids = [selection.run_id for selection in selections if selection.run_id]
+        runs = await database.db.get_test_runs(limit=len(run_ids), run_ids=run_ids)
+        runs_by_id = {run["run_id"]: run for run in runs}
+        result_fields = (
+            "status",
+            "start_time",
+            "end_time",
+            "passed_count",
+            "failed_count",
+            "skipped_count",
+            "aborted_count",
+            "error_count",
+            "test_case_count",
+        )
+        data = []
+        for selection in selections:
+            item = selection.__dict__.copy()
+            if selection.run_id in runs_by_id:
+                run = runs_by_id[selection.run_id]
+                item.update({field: run[field] for field in result_fields})
+            data.append(item)
+        return web.json_response({"success": True, "data": data})
     except (ValueError, TypeError) as error:
         return _validation_error(error)
 
