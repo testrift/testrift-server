@@ -315,6 +315,16 @@
         return document.querySelector('#msg_table tbody tr.log-entry-row[data-log-index="' + index + '"]');
     }
 
+    function isRangeVisible(start, end) {
+        for (let i = start; i <= end; i++) {
+            const row = rowByIndex(i);
+            if (row && row.style.display !== "none") {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function threadKey(comment) {
         return String(comment.line_start) + "-" + String(comment.line_end);
     }
@@ -926,7 +936,7 @@
                 item.classList.add("is-focused");
             }
             this.highlightRange(comment);
-            const visible = !!(row && row.style.display !== "none");
+            const visible = isRangeVisible(comment.line_start, comment.line_end);
             const target = item || thread || row;
             if (visible && target && target.scrollIntoView) {
                 target.scrollIntoView({ block: "center" });
@@ -1014,9 +1024,9 @@
                 }
             }, this);
             document.querySelectorAll(".comment-thread-row").forEach(function (thread) {
+                const start = Number(thread.getAttribute("data-thread-start"));
                 const end = Number(thread.getAttribute("data-thread-end"));
-                const last = rowByIndex(end);
-                thread.style.display = (last && last.style.display !== "none") ? "" : "none";
+                thread.style.display = isRangeVisible(start, end) ? "" : "none";
             });
         },
 

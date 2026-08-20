@@ -20,6 +20,15 @@ let lblId = 0;
 // UTILITY FUNCTIONS
 // ============================================================================
 
+// Notify the comments UI that log row visibility changed (Source checkbox
+// toggle or text filter) so comment threads whose lines are now entirely
+// hidden get hidden too, and threads with any visible line reappear.
+function refreshCommentThreadVisibility() {
+    if (window.CommentsUI && window.CommentsUI.Log && typeof window.CommentsUI.Log.applyCommentedFilter === 'function') {
+        window.CommentsUI.Log.applyCommentedFilter();
+    }
+}
+
 /**
  * Generate a unique color for each index using the golden angle.
  * This ensures colors are well-distributed and readable with white text.
@@ -513,6 +522,8 @@ function handleCBChange(ev) {
     checkbox.closest('li').find('ul .tree-checkbox').each(function () {
         $(this).prop('checked', isChecked);
     });
+
+    refreshCommentThreadVisibility();
 }
 
 function updateChannelList(compMap, chanList) {
@@ -1036,6 +1047,7 @@ function initializeTestCaseLog() {
         const filterText = filterInput.value;
         filterStatus.textContent = `${modeText}: "${filterText}" (${visibleCount}/${totalCount} messages)`;
         filterStatus.className = `filter-status ${currentFilter.mode === 'exclude' ? 'exclude' : 'active'}`;
+        refreshCommentThreadVisibility();
     }
 
     function filterMessages() {
@@ -1059,6 +1071,7 @@ function initializeTestCaseLog() {
             }
         });
 
+        refreshCommentThreadVisibility();
         return { visible: visibleCount, total: totalCount };
     }
 
@@ -1067,6 +1080,7 @@ function initializeTestCaseLog() {
         messageRows.forEach(row => {
             row.style.display = '';
         });
+        refreshCommentThreadVisibility();
     }
 
     function updateFilterStatus() {
