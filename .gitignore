@@ -11,6 +11,7 @@ bin/
 obj/
 *.db
 .env
+node_modules/
 
 docs/comments_design.md
 

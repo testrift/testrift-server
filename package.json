@@ -1,0 +1,12 @@
+{
+  "name": "testrift-server-js-tests",
+  "private": true,
+  "description": "Jest tests for TestRift server browser-side static assets.",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^27.5.1",
+    "jest-environment-jsdom": "^27.5.1"
+  }
+}

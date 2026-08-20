@@ -26,6 +26,22 @@ jobs:
         run: |
           inv test
 
+  jest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "14"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run tests
+        run: npx jest
+
   bootstrap:
     name: bootstrap (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

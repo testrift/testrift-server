@@ -26,6 +26,21 @@ Or:
 python -m testrift_server
 ```
 
+### Development
+
+Run the Python test suite:
+
+```bash
+inv test
+```
+
+Run the browser-side static asset test suite (Jest, for files under
+`src/testrift_server/static/`):
+
+```bash
+inv test-js
+```
+
 ### Docker
 
 All Docker-related files live in `docker/`.

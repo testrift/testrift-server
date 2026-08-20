@@ -29,6 +29,16 @@ def test(c):
 
 
 @task
+def test_js(c):
+    """Run the browser-side static asset test suite (Jest)."""
+    server_dir = Path(__file__).parent
+    with c.cd(str(server_dir)):
+        if not (server_dir / "node_modules").exists():
+            c.run("npm install")
+        c.run("npx jest")
+
+
+@task
 def test_bootstrap(c):
     """Smoke test the bootstrap launchers (.sh/.bat)."""
     server_dir = Path(__file__).parent
