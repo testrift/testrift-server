@@ -355,7 +355,7 @@
     box-shadow: none;
 }
 .comment-navigator button,
-.tr-thread-nav button {
+.tr-thread-jump button {
     border: 1px solid #cfd5ea;
     background: #fff;
     color: #3d4454;
@@ -365,11 +365,11 @@
     cursor: pointer;
 }
 .comment-navigator button:hover,
-.tr-thread-nav button:hover {
+.tr-thread-jump button:hover {
     background: #f4f6fb;
 }
 .comment-navigator button:disabled,
-.tr-thread-nav button:disabled {
+.tr-thread-jump button:disabled {
     opacity: 1;
     background: #f4f6fb;
     border-color: #e2e6f2;
@@ -464,7 +464,7 @@
     gap: 10px;
     margin-top: 8px;
 }
-.tr-thread-nav {
+.tr-thread-jump {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -472,7 +472,7 @@
     font-size: 12px;
     color: #6c757d;
 }
-.tr-thread-nav[hidden] {
+.tr-thread-jump[hidden] {
     display: none !important;
 }
 .tr-comment-reply-host {
@@ -552,24 +552,24 @@ html.dark-theme .comment-navigator.is-visible {
     box-shadow: none;
 }
 html.dark-theme .comment-navigator button,
-html.dark-theme .tr-thread-nav button {
+html.dark-theme .tr-thread-jump button {
     background: #252a3d;
     border-color: #5a6388;
     color: #e9ecef;
 }
 html.dark-theme .comment-navigator button:hover,
-html.dark-theme .tr-thread-nav button:hover {
+html.dark-theme .tr-thread-jump button:hover {
     background: #3a4270;
 }
 html.dark-theme .comment-navigator button:disabled,
-html.dark-theme .tr-thread-nav button:disabled {
+html.dark-theme .tr-thread-jump button:disabled {
     opacity: 1;
     background: #252a3d;
     border-color: #3d4563;
     color: #6c738a;
     cursor: default;
 }
-html.dark-theme .tr-thread-nav {
+html.dark-theme .tr-thread-jump {
     color: #adb5bd;
 }
 .dark-theme .run-comments-section {

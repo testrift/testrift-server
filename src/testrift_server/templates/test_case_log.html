@@ -34,7 +34,7 @@
     <script src="/static/purify.min.js"></script>
     <script>window.COMMENTS_STATIC_BASE = "/static/";</script>
     <script src="/static/comments_md.js"></script>
-    <script src="/static/comments.js?v=9"></script>
+    <script src="/static/comments.js?v=10"></script>
     {% else %}
     <script src="../static/msgpack.min.js"></script>
     <script src="../static/protocol.js"></script>
@@ -49,7 +49,7 @@
     <link href="/static/status-badges.css" rel="stylesheet">
     <link href="/static/test_case_log.css?v=12" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
-    <link href="/static/comments.css?v=9" rel="stylesheet">
+    <link href="/static/comments.css?v=10" rel="stylesheet">
     <script src="/static/classifications.js"></script>
     {% else %}
     <link href="../static/status-badges.css" rel="stylesheet">
@@ -221,9 +221,8 @@
                                     <span>Commented lines only</span>
                                 </label>
                                 <span id="commentNavigator" class="comment-navigator">
-                                    <button type="button" id="commentNavPrev" title="Previous comment">Prev</button>
+                                    <button type="button" id="commentNavFirst" title="Jump to first comment thread">First thread</button>
                                     <span id="commentNavLabel"></span>
-                                    <button type="button" id="commentNavNext" title="Next comment">Next</button>
                                 </span>
                                 <button type="button" id="time-display-toggle" class="tr-log-btn">
                                     Show Delta Time

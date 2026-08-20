@@ -96,3 +96,147 @@ describe("CommentsUI.Log thread visibility", () => {
     expect(thread.style.display).not.toBe("none");
   });
 });
+
+function buildPage(rowCount) {
+  buildLogTable(rowCount);
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    '<label id="commentedLinesFilterWrap">' +
+      '<input type="checkbox" id="commentedLinesOnly">' +
+      "</label>" +
+      '<span id="commentNavigator" class="comment-navigator">' +
+      '<button type="button" id="commentNavFirst">First thread</button>' +
+      '<span id="commentNavLabel"></span>' +
+      "</span>"
+  );
+}
+
+function focusedCommentId() {
+  const item = document.querySelector(".tr-comment-item.is-focused");
+  return item && Number(item.getAttribute("data-comment-id"));
+}
+
+describe("CommentsUI.Log thread-to-thread navigation", () => {
+  beforeEach(() => {
+    jest.resetModules();
+    buildPage(10);
+    window.eval(SOURCE);
+  });
+
+  test("gives every thread a Prev/Next thread control when there are multiple threads", async () => {
+    await window.CommentsUI.Log.init({
+      runId: "r1",
+      tcId: "tc1",
+      readOnly: true,
+      embeddedComments: [
+        { id: 1, line_start: 1, line_end: 1, created_at: "t1" },
+        { id: 2, line_start: 5, line_end: 5, created_at: "t2" },
+        { id: 3, line_start: 8, line_end: 8, created_at: "t3" },
+      ],
+    });
+
+    const jumps = document.querySelectorAll(".tr-thread-jump");
+    expect(jumps.length).toBe(3);
+    jumps.forEach((jump) => expect(jump.hidden).toBe(false));
+  });
+
+  test("Next thread / Prev thread move focus to the adjacent thread, not within-thread replies", async () => {
+    await window.CommentsUI.Log.init({
+      runId: "r1",
+      tcId: "tc1",
+      readOnly: true,
+      embeddedComments: [
+        { id: 1, line_start: 1, line_end: 1, created_at: "t1" },
+        { id: 2, line_start: 5, line_end: 5, created_at: "t2" },
+      ],
+    });
+
+    const firstThreadRow = document.querySelector(
+      '.comment-thread-row[data-thread-key="1-1"]'
+    );
+    firstThreadRow.querySelector('[data-thread-jump-dir="1"]').click();
+    expect(focusedCommentId()).toBe(2);
+
+    const secondThreadRow = document.querySelector(
+      '.comment-thread-row[data-thread-key="5-5"]'
+    );
+    secondThreadRow.querySelector('[data-thread-jump-dir="-1"]').click();
+    expect(focusedCommentId()).toBe(1);
+  });
+
+  test("disables Prev on the first thread and Next on the last thread", async () => {
+    await window.CommentsUI.Log.init({
+      runId: "r1",
+      tcId: "tc1",
+      readOnly: true,
+      embeddedComments: [
+        { id: 1, line_start: 1, line_end: 1, created_at: "t1" },
+        { id: 2, line_start: 5, line_end: 5, created_at: "t2" },
+      ],
+    });
+
+    const firstThreadRow = document.querySelector(
+      '.comment-thread-row[data-thread-key="1-1"]'
+    );
+    const secondThreadRow = document.querySelector(
+      '.comment-thread-row[data-thread-key="5-5"]'
+    );
+    expect(
+      firstThreadRow.querySelector('[data-thread-jump-dir="-1"]').disabled
+    ).toBe(true);
+    expect(
+      secondThreadRow.querySelector('[data-thread-jump-dir="1"]').disabled
+    ).toBe(true);
+  });
+
+  test("hides the thread-jump control when there is only one thread", async () => {
+    await window.CommentsUI.Log.init({
+      runId: "r1",
+      tcId: "tc1",
+      readOnly: true,
+      embeddedComments: [{ id: 1, line_start: 1, line_end: 1, created_at: "t1" }],
+    });
+
+    const jump = document.querySelector(".tr-thread-jump");
+    expect(jump.hidden).toBe(true);
+  });
+
+  test("never renders within-thread reply navigation, even with multiple replies", async () => {
+    await window.CommentsUI.Log.init({
+      runId: "r1",
+      tcId: "tc1",
+      readOnly: true,
+      embeddedComments: [
+        { id: 1, line_start: 1, line_end: 1, created_at: "t1" },
+        { id: 2, line_start: 1, line_end: 1, created_at: "t2" },
+      ],
+    });
+
+    expect(document.querySelectorAll(".tr-thread-nav").length).toBe(0);
+    expect(document.querySelectorAll(".tr-comment-item").length).toBe(2);
+  });
+
+  test("the single top navigator button jumps to the first thread", async () => {
+    await window.CommentsUI.Log.init({
+      runId: "r1",
+      tcId: "tc1",
+      readOnly: true,
+      embeddedComments: [
+        { id: 1, line_start: 1, line_end: 1, created_at: "t1" },
+        { id: 2, line_start: 5, line_end: 5, created_at: "t2" },
+        { id: 3, line_start: 8, line_end: 8, created_at: "t3" },
+      ],
+    });
+
+    expect(document.getElementById("commentNavPrev")).toBeNull();
+    expect(document.getElementById("commentNavNext")).toBeNull();
+
+    window.CommentsUI.Log.goto(2);
+    expect(focusedCommentId()).toBe(3);
+
+    document.getElementById("commentNavFirst").click();
+
+    expect(focusedCommentId()).toBe(1);
+    expect(window.CommentsUI.Log.currentNav).toBe(0);
+  });
+});

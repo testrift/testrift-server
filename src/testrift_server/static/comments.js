@@ -487,14 +487,10 @@
         },
 
         bindNavigator() {
-            const prev = document.getElementById("commentNavPrev");
-            const next = document.getElementById("commentNavNext");
+            const first = document.getElementById("commentNavFirst");
             const self = this;
-            if (prev) {
-                prev.addEventListener("click", function () { self.goto(self.currentNav - 1); });
-            }
-            if (next) {
-                next.addEventListener("click", function () { self.goto(self.currentNav + 1); });
+            if (first) {
+                first.addEventListener("click", function () { self.goto(0); });
             }
             const filter = document.getElementById("commentedLinesOnly");
             if (filter) {
@@ -733,31 +729,27 @@
                     });
                     bar.appendChild(reply);
                 }
-                const nav = document.createElement("span");
-                nav.className = "tr-thread-nav";
-                nav.hidden = comments.length < 2;
-                const prev = document.createElement("button");
-                prev.type = "button";
-                prev.setAttribute("data-thread-dir", "-1");
-                prev.textContent = "Prev";
+                const jump = document.createElement("span");
+                jump.className = "tr-thread-jump";
+                jump.hidden = Object.keys(grouped).length < 2;
+                const prevThread = document.createElement("button");
+                prevThread.type = "button";
+                prevThread.setAttribute("data-thread-jump-dir", "-1");
+                prevThread.title = "Previous comment thread";
+                prevThread.textContent = "Prev thread";
                 const label = document.createElement("span");
-                label.className = "tr-thread-nav-label";
-                const next = document.createElement("button");
-                next.type = "button";
-                next.setAttribute("data-thread-dir", "1");
-                next.textContent = "Next";
-                function step(delta) {
-                    const focused = thread.querySelector(".tr-comment-item.is-focused");
-                    const id = focused && Number(focused.getAttribute("data-comment-id"));
-                    const current = comments.find(function (item) { return item.id === id; }) || comments[0];
-                    self.gotoInThread(current, delta);
-                }
-                prev.addEventListener("click", function () { step(-1); });
-                next.addEventListener("click", function () { step(1); });
-                nav.appendChild(prev);
-                nav.appendChild(label);
-                nav.appendChild(next);
-                bar.appendChild(nav);
+                label.className = "tr-thread-jump-label";
+                const nextThread = document.createElement("button");
+                nextThread.type = "button";
+                nextThread.setAttribute("data-thread-jump-dir", "1");
+                nextThread.title = "Next comment thread";
+                nextThread.textContent = "Next thread";
+                prevThread.addEventListener("click", function () { self.gotoThread(key, -1); });
+                nextThread.addEventListener("click", function () { self.gotoThread(key, 1); });
+                jump.appendChild(prevThread);
+                jump.appendChild(label);
+                jump.appendChild(nextThread);
+                bar.appendChild(jump);
                 thread.appendChild(bar);
                 td.appendChild(thread);
                 tr.appendChild(td);
@@ -812,22 +804,28 @@
             });
         },
 
-        threadComments(comment) {
-            const key = threadKey(comment);
-            return this.orderedComments().filter(function (item) {
-                return threadKey(item) === key;
+        orderedThreads() {
+            const seen = {};
+            const threads = [];
+            this.orderedComments().forEach(function (comment) {
+                const key = threadKey(comment);
+                if (!seen[key]) {
+                    seen[key] = true;
+                    threads.push(comment);
+                }
             });
+            return threads;
         },
 
-        gotoInThread(comment, delta) {
-            const list = this.threadComments(comment);
-            const index = list.findIndex(function (item) { return item.id === comment.id; });
-            const next = list[index + delta];
-            if (!next) {
+        gotoThread(key, delta) {
+            const threads = this.orderedThreads();
+            const index = threads.findIndex(function (item) { return threadKey(item) === key; });
+            const target = threads[index + delta];
+            if (index < 0 || !target) {
                 return;
             }
             const ordered = this.orderedComments();
-            this.goto(ordered.findIndex(function (item) { return item.id === next.id; }));
+            this.goto(ordered.findIndex(function (item) { return item.id === target.id; }));
         },
 
         updateNavigator() {
@@ -846,46 +844,34 @@
                     label.textContent = current + " / " + total;
                 }
             }
-            const prev = document.getElementById("commentNavPrev");
-            const next = document.getElementById("commentNavNext");
-            if (prev) {
-                prev.disabled = !total || this.currentNav <= 0;
-            }
-            if (next) {
-                next.disabled = !total || this.currentNav >= total - 1;
+            const first = document.getElementById("commentNavFirst");
+            if (first) {
+                first.disabled = !total;
             }
             this.updateThreadBars();
         },
 
         updateThreadBars() {
-            const focused = document.querySelector(".tr-comment-item.is-focused");
-            const focusedId = focused && Number(focused.getAttribute("data-comment-id"));
-            const self = this;
+            const threads = this.orderedThreads();
             document.querySelectorAll(".comment-thread-row").forEach(function (row) {
                 const key = row.getAttribute("data-thread-key");
-                const list = self.orderedComments().filter(function (item) {
-                    return threadKey(item) === key;
-                });
-                const nav = row.querySelector(".tr-thread-nav");
-                if (!nav) {
+                const jump = row.querySelector(".tr-thread-jump");
+                if (!jump) {
                     return;
                 }
-                nav.hidden = list.length < 2;
-                let pos = list.findIndex(function (item) { return item.id === focusedId; });
-                if (pos < 0) {
-                    pos = 0;
-                }
-                const label = nav.querySelector(".tr-thread-nav-label");
+                jump.hidden = threads.length < 2;
+                const pos = threads.findIndex(function (item) { return threadKey(item) === key; });
+                const label = jump.querySelector(".tr-thread-jump-label");
                 if (label) {
-                    label.textContent = (pos + 1) + " / " + list.length;
+                    label.textContent = (pos + 1) + " / " + threads.length;
                 }
-                const prev = nav.querySelector('[data-thread-dir="-1"]');
-                const next = nav.querySelector('[data-thread-dir="1"]');
+                const prev = jump.querySelector('[data-thread-jump-dir="-1"]');
+                const next = jump.querySelector('[data-thread-jump-dir="1"]');
                 if (prev) {
                     prev.disabled = pos <= 0;
                 }
                 if (next) {
-                    next.disabled = pos >= list.length - 1;
+                    next.disabled = pos >= threads.length - 1;
                 }
             });
         },
