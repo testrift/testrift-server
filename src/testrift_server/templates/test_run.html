@@ -1126,6 +1126,14 @@
         background-color: #e67e22;
     }
 
+    .tests-color {
+        width: 12px;
+        height: 6px;
+        border-radius: 2px;
+        background-color: #64748b;
+        opacity: 0.55;
+    }
+
     .metrics-chart-container {
         background: white;
         border-radius: 8px;
@@ -1135,7 +1143,7 @@
 
     #metrics-chart {
         width: 100% !important;
-        height: 80px !important;
+        height: 96px !important;
     }
 
     .ai-analysis-run-section {
@@ -1326,7 +1334,7 @@
                     <h4 style="margin: 0; color: #495057; font-weight: 600;">System Metrics</h4>
                 </div>
                 <div class="metrics-chart-container" style="position: relative;">
-                    <canvas id="metrics-chart" height="80"></canvas>
+                    <canvas id="metrics-chart" height="96"></canvas>
                     <div id="metrics-tooltip" style="display: none; position: absolute; background: rgba(0,0,0,0.92); color: white; padding: 10px 14px; border-radius: 6px; font-size: 12px; z-index: 1000; max-width: 500px;"></div>
                 </div>
                 <div class="metrics-summary" id="metrics-summary">
@@ -1350,6 +1358,10 @@
                         <span class="metric-value" id="net-min">-</span> min /
                         <span class="metric-value" id="net-avg">-</span> avg /
                         <span class="metric-value" id="net-max">-</span> max
+                    </div>
+                    <div class="metric-stat" title="Shaded band shows when test cases were running. Hover the chart for names.">
+                        <span class="legend-color tests-color"></span>
+                        <span class="metric-label">Tests</span>
                     </div>
                 </div>
             </div>
@@ -4955,7 +4967,7 @@
                 return;
             }
             metricsChartDrawnWidth = width;
-            const height = 80;
+            const height = 96;
 
             // Set actual canvas size (accounting for device pixel ratio for sharpness)
             const dpr = window.devicePixelRatio || 1;
@@ -4995,10 +5007,10 @@
             document.getElementById('net-avg').textContent = netAvg.toFixed(1) + '%';
             document.getElementById('net-max').textContent = netMax.toFixed(1) + '%';
 
-            // Chart drawing parameters
-            const padding = { top: 5, right: 10, bottom: 5, left: 10 };
+            // Plot 0-100% above a separate test-activity strip
+            const padding = { top: 5, right: 10, bottom: 5, left: 10, gap: 6, band: 8 };
             const chartWidth = width - padding.left - padding.right;
-            const chartHeight = height - padding.top - padding.bottom;
+            const chartHeight = height - padding.top - padding.bottom - padding.gap - padding.band;
 
             // Y axis: 0-100%
             const yScale = (v) => padding.top + chartHeight - (v / 100) * chartHeight;
@@ -5050,6 +5062,78 @@
                 else ctx.lineTo(x, y);
             });
             ctx.stroke();
+
+            drawMetricsTestActivity(ctx, padding, chartWidth, padding.top + chartHeight);
+        }
+
+        function collectMetricsTestIntervals() {
+            const intervals = [];
+            if (!testMap || testMap.size === 0) return intervals;
+            testMap.forEach((testEntry) => {
+                if (!testEntry || (testEntry.children && testEntry.children.length) || !testEntry.startTime) {
+                    return;
+                }
+                const start = new Date(testEntry.startTime).getTime();
+                if (!Number.isFinite(start)) return;
+                let end = testEntry.endTime ? new Date(testEntry.endTime).getTime() : Date.now();
+                if (testEntry.Status && String(testEntry.Status).toLowerCase() === 'running') {
+                    end = Date.now();
+                }
+                if (!Number.isFinite(end) || end < start) return;
+                intervals.push({ start, end });
+            });
+            return intervals;
+        }
+
+        function drawMetricsTestActivity(ctx, padding, chartWidth, plotBottom) {
+            const samples = metricsData;
+            if (!samples || samples.length === 0) return;
+            const t0 = samples[0].ts;
+            const t1 = samples[samples.length - 1].ts;
+            const span = t1 - t0;
+            if (!Number.isFinite(t0) || span <= 0) return;
+
+            const intervals = collectMetricsTestIntervals();
+            if (!intervals.length) return;
+
+            // Count running TCs at each metrics sample (same clock as the tooltip)
+            const n = samples.length;
+            const counts = new Uint16Array(n);
+            for (let s = 0; s < n; s++) {
+                const ts = samples[s].ts;
+                let c = 0;
+                for (let i = 0; i < intervals.length; i++) {
+                    if (ts >= intervals[i].start && ts <= intervals[i].end) c++;
+                }
+                counts[s] = c;
+            }
+
+            let maxCount = 1;
+            for (let s = 0; s < n; s++) {
+                if (counts[s] > maxCount) maxCount = counts[s];
+            }
+            // Cap so 1 vs typical parallelism stays visible; one spike must not
+            // flatten the rest of the band to the same gray.
+            const scaleMax = Math.max(3, Math.min(maxCount, 8));
+
+            const bandTop = plotBottom + padding.gap;
+            const bandH = padding.band;
+            ctx.strokeStyle = '#d8dee6';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, plotBottom + padding.gap / 2);
+            ctx.lineTo(padding.left + chartWidth, plotBottom + padding.gap / 2);
+            ctx.stroke();
+
+            const cols = Math.max(1, Math.floor(chartWidth));
+            for (let i = 0; i < cols; i++) {
+                const sampleIndex = Math.round((i / (cols - 1 || 1)) * (n - 1));
+                const c = counts[sampleIndex];
+                if (!c) continue;
+                const alpha = 0.12 + 0.78 * Math.min(c / scaleMax, 1);
+                ctx.fillStyle = 'rgba(100, 116, 139, ' + alpha.toFixed(3) + ')';
+                ctx.fillRect(padding.left + i, bandTop, 1, bandH);
+            }
         }
 
         function handleMetricsUpdate(metrics) {
@@ -5106,7 +5190,7 @@
             const tooltip = document.getElementById('metrics-tooltip');
             if (!canvas || !tooltip) return;
 
-            const padding = { top: 5, right: 10, bottom: 5, left: 10 };
+            const padding = { top: 5, right: 10, bottom: 5, left: 10, gap: 6, band: 8 };
             const filesExist = {{ files_exist | tojson if files_exist is defined else 'true' }};
 
             function updateTooltip(e) {
