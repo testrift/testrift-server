@@ -323,6 +323,13 @@ class TestCaseData:
         # Keep entries in compact format - UI will decode them
         raw_logs = read_mplog(log_path)
         self.logs.extend(raw_logs)
+
+        stack_path = get_case_stack_path(self.run.id, tc_id=self.tc_id)
+        if stack_path.exists():
+            try:
+                self.stack_traces = read_mplog(stack_path)
+            except Exception as e:
+                logger.error(f"Failed to load stack traces for {self.id}: {e}")
         return True
 
     def _load_from_merged_file(self, merged_path) -> bool:

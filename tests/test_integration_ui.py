@@ -231,12 +231,12 @@ data:
         # Step 3: Verify UI displays direction badges
         await page.wait_for_selector("#msg_table tbody tr", timeout=5000)
 
-        # Check for TX badge (Host ――► DUT)
-        tx_badge = page.locator("text=Host ――► DUT")
+        # Check for TX badge (Host → DUT)
+        tx_badge = page.locator("text=Host → DUT")
         await expect(tx_badge).to_be_visible()
 
-        # Check for RX badge (Host ◄―― DUT)
-        rx_badge = page.locator("text=Host ◄―― DUT")
+        # Check for RX badge (Host ← DUT)
+        rx_badge = page.locator("text=Host ← DUT")
         await expect(rx_badge).to_be_visible()
 
         # Verify the messages are displayed
@@ -250,8 +250,8 @@ data:
         # Verify spacing between badge and message
         table_html = await page.locator("#msg_table").inner_html()
         # The HTML should contain the badge followed by a space and the message
-        assert "Host ――► DUT" in table_html
-        assert "Host ◄―― DUT" in table_html
+        assert "Host → DUT" in table_html
+        assert "Host ← DUT" in table_html
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright not installed")
