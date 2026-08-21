@@ -115,6 +115,28 @@ describe("TestRunLayout", () => {
       expect(result.statusLeft).toBe(192);
     });
 
+    test("ignores collapsed/hidden tree rows when placing the badge column", () => {
+      document.body.innerHTML =
+        '<ul id="test-cases-list" class="tree">' +
+        '<li><div class="tc-row"><div class="tc-main">short</div><div class="tc-right">PASSED</div></div>' +
+        '<ul style="display: none;"><li><div class="tc-row"><div class="tc-main">a-very-long-hidden-name</div><div class="tc-right">FAILED</div></div></li></ul>' +
+        "</li></ul>";
+
+      const container = document.getElementById("test-cases-list");
+      mockBox(container, { left: 0, width: 1000 });
+      const mains = container.querySelectorAll(".tc-main");
+      mockBox(mains[0], { left: 8, width: 80 });
+      mockBox(mains[1], { left: 40, width: 400 });
+      container.querySelectorAll(".tc-right").forEach((el) => {
+        mockBox(el, { left: 0, width: 120 });
+      });
+
+      const result = window.TestRunLayout.alignStatusBadges(container);
+
+      expect(result.maxRightEdge).toBe(88);
+      expect(result.statusLeft).toBe(104);
+    });
+
     test("places list-view badges after the longest list-left-text", () => {
       document.body.innerHTML =
         '<ul id="test-cases-list" class="list-view">' +
