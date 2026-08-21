@@ -531,6 +531,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/test_name_tree.js"></script>
     <script>
         // Global state
         let metadataKeys = [];
@@ -986,73 +987,41 @@
             }
         }
 
-        // Split path by dots and plus signs, but ignore them inside brackets or quotes
-        // This handles nested classes (Parent+Child) and parameterized tests with quoted strings
         function getPathSegments(path) {
-            const segments = [];
-            let currentSegment = '';
-            let bracketDepth = 0;
-            let inQuotes = false;
-            let quoteChar = null;
-
-            for (let i = 0; i < path.length; i++) {
-                const char = path[i];
-
-                // Handle quote characters
-                if ((char === '"' || char === "'") && bracketDepth === 0) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = null;
-                    }
-                    currentSegment += char;
-                } else if (char === '[' && !inQuotes) {
-                    bracketDepth++;
-                    currentSegment += char;
-                } else if (char === ']' && !inQuotes) {
-                    bracketDepth--;
-                    currentSegment += char;
-                } else if ((char === '.' || char === '+') && bracketDepth === 0 && !inQuotes) {
-                    if (currentSegment) {
-                        segments.push(currentSegment);
-                        currentSegment = '';
-                    }
-                } else {
-                    currentSegment += char;
-                }
+            if (window.TestNameTree && typeof window.TestNameTree.splitName === "function") {
+                return window.TestNameTree.splitName(path).segments;
             }
-
-            if (currentSegment) {
-                segments.push(currentSegment);
-            }
-
-            return segments;
+            return String(path || "").split(/[.+]/).filter(Boolean);
         }
 
-        // Build test case tree structure
+        function nodePath(node, prefix, key) {
+            if (node && node.path) {
+                return node.path;
+            }
+            return prefix ? prefix + key : key;
+        }
+
+        function childPrefix(path) {
+            return path ? path + '\u0001' : '';
+        }
+
+        function escapeHtmlAttr(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;');
+        }
+
+        function testCaseHoverTitle(node, fallback) {
+            return (node && (node.testCaseId || node.path)) || fallback || '';
+        }
+
+        // Build compact test case tree (longest shared parent, ignore ./+ inside () [] quotes)
         function buildTestCaseTree(testCaseIds) {
-            const tree = {};
-
-            testCaseIds.forEach(testCaseId => {
-                const parts = getPathSegments(testCaseId);
-                let current = tree;
-
-                for (let i = 0; i < parts.length; i++) {
-                    const part = parts[i];
-                    if (!current[part]) {
-                        current[part] = {
-                            isLeaf: i === parts.length - 1,
-                            testCaseId: i === parts.length - 1 ? testCaseId : null,
-                            children: {}
-                        };
-                    }
-                    current = current[part].children;
-                }
-            });
-
-            return tree;
+            if (window.TestNameTree && typeof window.TestNameTree.build === "function") {
+                return window.TestNameTree.toMatrixTree(window.TestNameTree.build(testCaseIds));
+            }
+            return {};
         }
 
         // Auto-expand top-level test suites so test cases are visible by default
@@ -1064,14 +1033,14 @@
 
             Object.keys(tree).forEach(key => {
                 const node = tree[key];
-                const currentPath = prefix + key;
+                const currentPath = nodePath(node, prefix, key);
 
                 if (!node.isLeaf && Object.keys(node.children).length > 0) {
                     // Expand this node
                     expandedTestCases.add(currentPath);
 
                     // Recursively expand children if they're not leaf nodes
-                    autoExpandTopLevelSuites(node.children, currentPath + '.');
+                    autoExpandTopLevelSuites(node.children, childPrefix(currentPath));
                 }
             });
 
@@ -1172,7 +1141,8 @@
                  if (node.isLeaf) {
                      // Create rows in both tables
                      const testCaseRow = document.createElement('tr');
-                     testCaseRow.innerHTML = `<td class="test-case-cell" style="padding: 3px 4px !important;">${indent}${key}</td>`;
+                     const leafTitle = escapeHtmlAttr(testCaseHoverTitle(node, key));
+                     testCaseRow.innerHTML = `<td class="test-case-cell" style="padding: 3px 4px !important;" title="${leafTitle}">${indent}${key}</td>`;
                      testCasesContainer.appendChild(testCaseRow);
 
                      const resultRow = document.createElement('tr');
@@ -1282,13 +1252,14 @@
                  } else {
                      // Create branch rows
                      const testCaseRow = document.createElement('tr');
-                     const path = prefix + key;
+                     const path = nodePath(node, prefix, key);
                      const isExpanded = expandedTestCases.has(path);
 
                      // Use data attribute instead of inline onclick to avoid escaping issues
                      const expandIcon = hasChildren ? `<i class="fas ${isExpanded ? 'fa-minus-circle' : 'fa-plus-circle'} expand-icon" data-test-path="${path.replace(/"/g, '&quot;')}"></i>&nbsp;` : '';
+                     const groupTitle = escapeHtmlAttr(testCaseHoverTitle(node, path || key));
 
-                     testCaseRow.innerHTML = `<td class="test-case-cell" style="padding: 3px 4px !important;">${indent}${expandIcon}${key}</td>`;
+                     testCaseRow.innerHTML = `<td class="test-case-cell" style="padding: 3px 4px !important;" title="${groupTitle}">${indent}${expandIcon}${key}</td>`;
                      testCasesContainer.appendChild(testCaseRow);
 
                      // Attach click event listener to the expand icon
@@ -1420,7 +1391,7 @@
 
                      // Render children if expanded
                      if (isExpanded) {
-                         renderTestCaseTreeTwoTables(testCasesContainer, resultsContainer, node.children, path + '.', runData, sortedRuns, runNumberMap, depth + 1);
+                         renderTestCaseTreeTwoTables(testCasesContainer, resultsContainer, node.children, childPrefix(path), runData, sortedRuns, runNumberMap, depth + 1);
                      }
                  }
              });
@@ -1430,7 +1401,7 @@
          function renderFlatTestCasesTwoTables(testCasesContainer, resultsContainer, testCaseIds, runData, sortedRuns, runNumberMap) {
              testCaseIds.forEach(testCaseId => {
                  const testCaseRow = document.createElement('tr');
-                 testCaseRow.innerHTML = `<td class="test-case-cell" style="padding: 3px 4px !important;">${testCaseId}</td>`;
+                 testCaseRow.innerHTML = `<td class="test-case-cell" style="padding: 3px 4px !important;" title="${escapeHtmlAttr(testCaseId)}">${testCaseId}</td>`;
                  testCasesContainer.appendChild(testCaseRow);
 
                  const resultRow = document.createElement('tr');

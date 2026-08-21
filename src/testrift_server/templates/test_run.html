@@ -22,6 +22,7 @@
     <script src="/static/comments_md.js"></script>
     <script src="/static/comments.js?v=7"></script>
     <script src="/static/test_run_layout.js"></script>
+    <script src="/static/test_name_tree.js"></script>
     {% else %}
     <script src="static/msgpack.min.js"></script>
     <link href="static/status-badges.css" rel="stylesheet">
@@ -34,6 +35,7 @@
     <script src="static/comments_md.js"></script>
     <script src="static/comments.js"></script>
     <script src="static/test_run_layout.js"></script>
+    <script src="static/test_name_tree.js"></script>
     {% endif %}
     <style>
         body {
@@ -3090,38 +3092,11 @@
         }
 
         function getParentName(fullName) {
-            // Handle bracket notation and quotes - don't split on dots/plus inside square brackets or quotes
-            let bracketDepth = 0;
-            let inQuotes = false;
-            let quoteChar = null;
-            let lastSeparatorIndex = -1;
-
-            for (let i = fullName.length - 1; i >= 0; i--) {
-                const char = fullName[i];
-
-                if ((char === '"' || char === "'") && bracketDepth === 0) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = null;
-                    }
-                } else if (char === ']' && !inQuotes) {
-                    bracketDepth++;
-                } else if (char === '[' && !inQuotes) {
-                    bracketDepth--;
-                    if (bracketDepth < 0) bracketDepth = 0; // Safety check
-                } else if ((char === '.' || char === '+') && bracketDepth === 0 && !inQuotes) {
-                    lastSeparatorIndex = i;
-                    break;
-                }
+            if (window.TestNameTree && typeof window.TestNameTree.parentName === "function") {
+                return window.TestNameTree.parentName(fullName);
             }
-
-            if (lastSeparatorIndex === -1) {
-                return ""; // No parent if no separators outside brackets/quotes
-            }
-            return fullName.substring(0, lastSeparatorIndex);
+            const lastDot = String(fullName || "").lastIndexOf(".");
+            return lastDot === -1 ? "" : fullName.substring(0, lastDot);
         }
 
 
@@ -3612,48 +3587,10 @@
         // NEW COMPACT TREE LOGIC
 
         function getPathSegments(path) {
-            // Split path by dots and plus signs, but ignore them inside brackets or quotes
-            // This handles nested classes (Parent+Child) and parameterized tests with quoted strings
-            const segments = [];
-            let currentSegment = '';
-            let bracketDepth = 0;
-            let inQuotes = false;
-            let quoteChar = null;
-
-            for (let i = 0; i < path.length; i++) {
-                const char = path[i];
-
-                // Handle quote characters
-                if ((char === '"' || char === "'") && bracketDepth === 0) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = null;
-                    }
-                    currentSegment += char;
-                } else if (char === '[' && !inQuotes) {
-                    bracketDepth++;
-                    currentSegment += char;
-                } else if (char === ']' && !inQuotes) {
-                    bracketDepth--;
-                    currentSegment += char;
-                } else if ((char === '.' || char === '+') && bracketDepth === 0 && !inQuotes) {
-                    if (currentSegment) {
-                        segments.push(currentSegment);
-                        currentSegment = '';
-                    }
-                } else {
-                    currentSegment += char;
-                }
+            if (window.TestNameTree && typeof window.TestNameTree.splitName === "function") {
+                return window.TestNameTree.splitName(path).segments;
             }
-
-            if (currentSegment) {
-                segments.push(currentSegment);
-            }
-
-            return segments;
+            return String(path || "").split(/[.+]/).filter(Boolean);
         }
 
         function shouldDisplayByStatus(status) {
@@ -4172,138 +4109,56 @@
         }
 
         function buildCompactTree(testCases) {
-            if (testCases.length === 0) return null;
-            if (testCases.length === 1) {
-                // Single test case - return as-is
+            if (!testCases || testCases.length === 0) return null;
+
+            const byName = new Map();
+            testCases.forEach(tc => {
+                if (tc && tc.fullName) {
+                    byName.set(tc.fullName, tc);
+                }
+            });
+
+            const forest = (window.TestNameTree && typeof window.TestNameTree.build === "function")
+                ? window.TestNameTree.build(testCases.map(tc => tc.fullName))
+                : [];
+
+            function materialize(node) {
+                if (node.fullName && byName.has(node.fullName)) {
+                    const tc = byName.get(node.fullName);
+                    tc.setName(node.label);
+                    (node.children || []).forEach(child => {
+                        tc.addChild(materialize(child));
+                    });
+                    return tc;
+                }
+
+                const group = new TestHtmlEntry(node.path || node.label);
+                group.setName(node.label);
+                (node.children || []).forEach(child => {
+                    group.addChild(materialize(child));
+                });
+                return group;
+            }
+
+            if (forest.length === 1) {
+                return materialize(forest[0]);
+            }
+
+            if (forest.length === 0 && testCases.length === 1) {
                 const tc = testCases[0];
                 tc.setName(tc.fullName);
                 return tc;
             }
 
-            // First, group by first-level prefix
-            const groups = new Map();
-            testCases.forEach(tc => {
-                const segments = getPathSegments(tc.fullName);
-                if (segments.length === 0) return;
-
-                const firstSegment = segments[0];
-                if (!groups.has(firstSegment)) {
-                    groups.set(firstSegment, []);
-                }
-                groups.get(firstSegment).push(tc);
-            });
-
-            // If all test cases share the same first-level prefix, build a tree
-            if (groups.size === 1) {
-                const firstPrefix = Array.from(groups.keys())[0];
-                const groupTests = groups.get(firstPrefix);
-
-                // Remove the common first-level prefix and build tree recursively
-                const testsWithoutPrefix = [];
-                groupTests.forEach(tc => {
-                    const segments = getPathSegments(tc.fullName);
-                    if (segments.length > 1) {
-                        // Remove first segment and rejoin
-                        const remaining = segments.slice(1).join('.');
-                        testsWithoutPrefix.push({ fullName: remaining, original: tc });
-                    } else {
-                        // Single segment - this becomes a direct child
-                        testsWithoutPrefix.push({ fullName: segments[0], original: tc });
-                    }
-                });
-
-                // Check if all remaining tests are single segments (direct children)
-                const allSingleSegments = testsWithoutPrefix.every(item => !item.fullName.includes('.'));
-                if (allSingleSegments) {
-                    // All are single segments - create parent with direct children
-                    const parent = new TestHtmlEntry(firstPrefix);
-                    parent.setName(firstPrefix);
-                    testsWithoutPrefix.forEach(item => {
-                        const originalTc = item.original;
-                        if (!originalTc) return;
-                        // Display only the last segment under this parent
-                        const segments = getPathSegments(originalTc.fullName);
-                        const displayName = segments[segments.length - 1];
-                        originalTc.setName(displayName);
-                        parent.addChild(originalTc); // Reuse existing entry so timing info is preserved
-                    });
-                    return parent;
-                }
-
-                const subtree = buildCompactTree(testsWithoutPrefix.map(item => {
-                    const name = item.fullName;
-                    const originalTc = item.original;
-
-                    // Create new TestHtmlEntry for intermediate / virtual nodes,
-                    // but always preserve timing/status on leaves.
-                    const tempTc = new TestHtmlEntry(name, originalTc ? originalTc.traceHtmlFile : null, originalTc ? originalTc.storageId : null);
-                    tempTc.fullName = name; // Use the shortened name for recursive call
-
-                    if (originalTc) {
-                        tempTc.Status = originalTc.Status;
-                        // Preserve the TRUE original fullName through recursion levels
-                        // If originalTc already has an originalFullName, use that; otherwise use its fullName
-                        tempTc.originalFullName = originalTc.originalFullName || originalTc.fullName;
-                        // Propagate timing information so execution time works in tree view
-                        tempTc.startTime = originalTc.startTime;
-                        tempTc.endTime = originalTc.endTime;
-                        tempTc.executionTime = originalTc.executionTime;
-                        // Store reference to original entry so we can find it later
-                        tempTc.originalEntry = originalTc;
-
-                        // If original entry has an execution time element, try to reuse it
-                        // But also ensure temp entry has its own element created if needed
-                        if (originalTc.executionTimeElement && originalTc.executionTimeElement.length > 0) {
-                            // Store reference to original element, but we'll create a new one if needed
-                            tempTc.originalExecutionTimeElement = originalTc.executionTimeElement;
-                        }
-                    }
-
-                    return tempTc;
-                }));
-
-                if (subtree && subtree.fullName === testsWithoutPrefix[0] && testsWithoutPrefix.length === 1) {
-                    // Single child - flatten
-                    return groupTests[0];
-                } else if (subtree) {
-                    // Multiple children - create parent
-                    const parent = new TestHtmlEntry(firstPrefix);
-                    parent.setName(firstPrefix);
-                    // Always add the subtree as a child (it could be a single node or a virtual root)
-                    if (subtree.fullName === "Test Cases") {
-                        // If it's a virtual root, add all its children directly
-                        subtree.children.forEach(child => {
-                            // Restore original full name if it exists (recursively)
-                            restoreOriginalFullNames(child);
-                            parent.addChild(child);
-                        });
-                    } else {
-                        // If it's a single node, restore original full name and add it as a child (recursively)
-                        restoreOriginalFullNames(subtree);
-                        parent.addChild(subtree);
-                    }
-                    return parent;
-                }
-            }
-
-            // Multiple different first-level prefixes - create virtual root
             const virtualRoot = new TestHtmlEntry("Test Cases");
-
-            groups.forEach((groupTests, prefix) => {
-                if (groupTests.length === 1) {
-                    // Single test case in this group
-                    const tc = groupTests[0];
+            virtualRoot.setName("Test Cases");
+            forest.forEach(node => virtualRoot.addChild(materialize(node)));
+            if (virtualRoot.children.length === 0) {
+                testCases.forEach(tc => {
                     tc.setName(tc.fullName);
                     virtualRoot.addChild(tc);
-                } else {
-                    // Multiple test cases - build subtree for this group
-                    const subtree = buildCompactTree(groupTests);
-                    if (subtree) {
-                        virtualRoot.addChild(subtree);
-                    }
-                }
-            });
-
+                });
+            }
             return virtualRoot;
         }
 
@@ -4347,8 +4202,8 @@
                 const newEntry = new TestHtmlEntry(node.fullName, node.traceHtmlFile, node.storageId || null);
                 newEntry.Status = node.Status;
                 result.push(newEntry);
-            } else {
-                // This is a parent node, continue traversing
+            }
+            if (node.children && node.children.length) {
                 for (let child of node.children) {
                     result.push(...getAllTestCasesFromTree(child));
                 }
