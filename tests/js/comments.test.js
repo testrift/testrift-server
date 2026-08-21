@@ -240,3 +240,34 @@ describe("CommentsUI.Log thread-to-thread navigation", () => {
     expect(window.CommentsUI.Log.currentNav).toBe(0);
   });
 });
+
+describe("CommentsUI.Run.decorateTree", () => {
+  beforeEach(() => {
+    jest.resetModules();
+    document.body.innerHTML =
+      '<ul id="test-cases-list">' +
+      '<li class="test-case-node" data-storage-id="1-3515">' +
+      '<div class="tc-right"><span class="comment-container"></span></div>' +
+      "</li>" +
+      "</ul>";
+    window.eval(SOURCE);
+  });
+
+  test("does not throw when testCases is unset", () => {
+    window.CommentsUI.Run.config = { runId: "c92ad0e76100" };
+    window.CommentsUI.Run.testCases = undefined;
+    expect(() => window.CommentsUI.Run.decorateTree()).not.toThrow();
+    expect(document.querySelector(".tr-comment-icon")).toBeNull();
+  });
+
+  test("adds a comment icon for commented test cases", () => {
+    window.CommentsUI.Run.config = { runId: "c92ad0e76100" };
+    window.CommentsUI.Run.testCases = {
+      "1-3515": { first_comment_id: 9 },
+    };
+    window.CommentsUI.Run.decorateTree();
+    const icon = document.querySelector(".tr-comment-icon");
+    expect(icon).not.toBeNull();
+    expect(icon.getAttribute("href")).toContain("/log/1-3515.html#comment=9");
+  });
+});

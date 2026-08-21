@@ -20,7 +20,8 @@
     <script src="/static/purify.min.js"></script>
     <script>window.COMMENTS_STATIC_BASE = "/static/";</script>
     <script src="/static/comments_md.js"></script>
-    <script src="/static/comments.js?v=6"></script>
+    <script src="/static/comments.js?v=7"></script>
+    <script src="/static/test_run_layout.js"></script>
     {% else %}
     <script src="static/msgpack.min.js"></script>
     <link href="static/status-badges.css" rel="stylesheet">
@@ -32,6 +33,7 @@
     <script>window.COMMENTS_STATIC_BASE = "static/";</script>
     <script src="static/comments_md.js"></script>
     <script src="static/comments.js"></script>
+    <script src="static/test_run_layout.js"></script>
     {% endif %}
     <style>
         body {
@@ -620,7 +622,7 @@
             list-style: none;
             padding: 0;
             margin: 0;
-            max-width: 80%;
+            max-width: 100%;
         }
 
         .list-view li {
@@ -679,7 +681,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: flex-start;
-            min-width: var(--tc-right-width, 200px);
+            min-width: 0;
+            width: max-content;
         }
 
         /* Sort select styling */
@@ -796,6 +799,8 @@
             flex: 0 1 auto;
             font-size: 0.9em;  /* controls TC name size in tree view */
             overflow: hidden;
+            /* --tc-indent is the row's offset from #test-cases-list; nested
+               ul indent would otherwise let names run under the badge column. */
             max-width: calc(var(--tc-status-left, 400px) - var(--tc-indent, 0px));
         }
 
@@ -813,7 +818,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: flex-start;
-            min-width: var(--tc-right-width, 200px);
+            min-width: 0;
+            width: max-content;
         }
 
         /* Badge styling */
@@ -2746,6 +2752,19 @@
                 // Convert HTML entities to quotes for display
                 let displayName = name.replace(/&quot;/g, '"');
                 this.textElement.text(displayName);
+                this.updateNameTooltip();
+            }
+
+            updateNameTooltip() {
+                if (!this.textElement) return;
+                const fullName = this.originalFullName || this.fullName || this.name || '';
+                const existing = this.textElement.attr('title') || '';
+                const title = (window.TestRunLayout && window.TestRunLayout.fullNameTooltip)
+                    ? window.TestRunLayout.fullNameTooltip(fullName, existing)
+                    : fullName;
+                if (title) {
+                    this.textElement.attr('title', title);
+                }
             }
 
             get Status() {
@@ -3686,71 +3705,20 @@
             }
         }
 
-        // Align status badges in tree/list view so they form a table-like column
         function alignStatusBadges() {
-            const container = document.getElementById('test-cases-list');
-            if (!container) return;
-
-            const containerRect = container.getBoundingClientRect();
-            const containerLeft = containerRect.left;
-            const containerWidth = containerRect.width;
-            const computedStyle = getComputedStyle(container);
-            const rightWidthRaw = computedStyle.getPropertyValue('--tc-right-width');
-            const parsedRightWidth = parseInt(rightWidthRaw, 10);
-
-            // Find all tc-main elements (test case name containers)
-            const tcMainElements = container.querySelectorAll('.tc-main');
-
-            // Calculate the maximum right edge position (relative to container)
-            let maxRightEdge = 0;
-            tcMainElements.forEach(el => {
-                const rect = el.getBoundingClientRect();
-                const rightEdge = rect.right - containerLeft;
-                if (rightEdge > maxRightEdge) {
-                    maxRightEdge = rightEdge;
-                }
-            });
-
-            // For list view, check the left side text spans/links
-            const listTextSpans = container.querySelectorAll('.list-view .list-left .list-left-text');
-            listTextSpans.forEach(el => {
-                const rect = el.getBoundingClientRect();
-                const naturalWidth = Math.max(el.scrollWidth || 0, rect.width);
-                const rightEdge = (rect.left - containerLeft) + naturalWidth;
-                if (rightEdge > maxRightEdge) {
-                    maxRightEdge = rightEdge;
-                }
-            });
-
-            // Determine the max width needed for the right column (badge/time/classifications)
-            let maxRightWidth = 0;
-            const rightElements = container.querySelectorAll('.tc-right, .list-view-right');
-            rightElements.forEach(el => {
-                const rect = el.getBoundingClientRect();
-                if (rect.width > maxRightWidth) {
-                    maxRightWidth = rect.width;
-                }
-            });
-
-            const rightMinWidth = Math.max(
-                Number.isFinite(parsedRightWidth) ? parsedRightWidth : 0,
-                maxRightWidth,
-                160
-            );
-            container.style.setProperty('--tc-right-width', rightMinWidth + 'px');
-
-            // Add some padding
-            const padding = container.classList.contains('list-view') ? 12 : 20;
-            let statusLeft = Math.max(maxRightEdge + padding, 100);
-
-            // Clamp so the right column stays inside the container
-            if (containerWidth > 0) {
-                const maxLeft = Math.max(containerWidth - rightMinWidth - 8, 0);
-                statusLeft = Math.min(statusLeft, maxLeft);
+            if (window.TestRunLayout && typeof window.TestRunLayout.alignStatusBadges === 'function') {
+                window.TestRunLayout.alignStatusBadges();
             }
+        }
 
-            // Set the CSS variable on the container
-            container.style.setProperty('--tc-status-left', statusLeft + 'px');
+        function decorateTreeComments() {
+            try {
+                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
+                    window.CommentsUI.Run.decorateTree();
+                }
+            } catch (err) {
+                console.error('Failed to decorate comment icons', err);
+            }
         }
 
         // Setup hover handlers for all badges in tree view
@@ -3866,6 +3834,9 @@
                     node.listItem.attr('data-storage-id', node.storageId);
                 }
             }
+            if (typeof node.updateNameTooltip === 'function') {
+                node.updateNameTooltip();
+            }
 
             // Recursively update children
             if (node.children && node.children.length > 0) {
@@ -3935,14 +3906,10 @@
             setupBadgeHoverHandlers();
 
             // Align status badges after tree is fully rendered
-            if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
-                window.CommentsUI.Run.decorateTree();
-            }
+            decorateTreeComments();
             requestAnimationFrame(() => {
                 alignStatusBadges();
-                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
-                    window.CommentsUI.Run.decorateTree();
-                }
+                decorateTreeComments();
             });
         }
 
@@ -4193,6 +4160,9 @@
                     node.listItem.attr('data-tc-full-name', node.fullName);
                 }
                 // Keep originalFullName for classification lookups (don't delete it)
+            }
+            if (typeof node.updateNameTooltip === 'function') {
+                node.updateNameTooltip();
             }
 
             // Recursively restore children
@@ -4543,9 +4513,7 @@
             saveUserPreferences();
 
             requestAnimationFrame(function () {
-                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
-                    window.CommentsUI.Run.decorateTree();
-                }
+                decorateTreeComments();
             });
         }
 
@@ -4617,6 +4585,7 @@
                 const textContainer = document.createElement('span');
                 textContainer.className = 'list-left-text';
                 textContainer.appendChild(document.createTextNode(testCase.fullName));
+                link.title = testCase.originalFullName || testCase.fullName;
 
                 // Add new TC indicator if applicable
                 const classData = classificationsData[testCase.fullName];
@@ -4679,14 +4648,10 @@
             reestablishExecutionTimeTracking();
 
             // Align status badges after list is fully rendered
-            if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
-                window.CommentsUI.Run.decorateTree();
-            }
+            decorateTreeComments();
             requestAnimationFrame(() => {
                 alignStatusBadges();
-                if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
-                    window.CommentsUI.Run.decorateTree();
-                }
+                decorateTreeComments();
             });
         }
 
@@ -4966,9 +4931,8 @@
 
             // Update collapsed classification icons for any nodes that are already collapsed
             updateAllCollapsedClassifications();
-            if (window.CommentsUI && window.CommentsUI.Run && typeof window.CommentsUI.Run.decorateTree === "function") {
-                window.CommentsUI.Run.decorateTree();
-            }
+            decorateTreeComments();
+            requestAnimationFrame(() => alignStatusBadges());
         }
 
         // Update collapsed classification icons for all collapsed parent nodes
@@ -5408,6 +5372,7 @@
         window.addEventListener('resize', function() {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(function() {
+                alignStatusBadges();
                 if (metricsData && metricsData.length > 0) {
                     renderMetricsChart();
                 }

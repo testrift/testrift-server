@@ -1211,7 +1211,7 @@
             root.querySelectorAll(".tr-comment-icon").forEach(function (el) { el.remove(); });
             const self = this;
             const leaves = root.querySelectorAll("li.test-case-node");
-            const commented = this.testCases;
+            const commented = this.testCases || {};
             leaves.forEach(function (li) {
                 const storageId = li.getAttribute("data-storage-id") || li.getAttribute("data-tc-id");
                 const info = storageId && commented[storageId];
