@@ -1779,25 +1779,36 @@ function initializeMetricsSummary() {
         return; // No metrics to show
     }
 
-    // Filter metrics to only those during the test case execution
-    let filteredMetrics = metrics;
+    // Keep a little context around the TC so start/stop marks are not
+    // glued to the chart edges. Stats still use only the TC window.
+    let chartMetrics = metrics;
+    let statMetrics = metrics;
     if (tcStartTime && tcEndTime) {
         const startMs = new Date(tcStartTime).getTime();
         const endMs = new Date(tcEndTime).getTime();
-        filteredMetrics = metrics.filter(m => {
+        const duration = Math.max(endMs - startMs, 1);
+        const pad = Math.min(Math.max(duration * 0.15, 2000), 30000);
+        statMetrics = metrics.filter(m => {
             const ts = m.ts || 0;
             return ts >= startMs && ts <= endMs;
         });
+        chartMetrics = metrics.filter(m => {
+            const ts = m.ts || 0;
+            return ts >= startMs - pad && ts <= endMs + pad;
+        });
     }
 
-    if (filteredMetrics.length === 0) {
+    if (statMetrics.length === 0) {
         return; // No metrics during this test case
+    }
+    if (chartMetrics.length === 0) {
+        chartMetrics = statMetrics;
     }
 
     // Calculate statistics
-    const cpuValues = filteredMetrics.map(m => m.cpu || 0);
-    const memValues = filteredMetrics.map(m => m.mem || 0);
-    const netValues = filteredMetrics.map(m => m.net || 0);
+    const cpuValues = statMetrics.map(m => m.cpu || 0);
+    const memValues = statMetrics.map(m => m.mem || 0);
+    const netValues = statMetrics.map(m => m.net || 0);
 
     const cpuMin = Math.min(...cpuValues);
     const cpuMax = Math.max(...cpuValues);
@@ -1823,7 +1834,7 @@ function initializeMetricsSummary() {
     document.getElementById('tc-net-max').textContent = netMax.toFixed(1) + '%';
 
     // Render the chart
-    renderTcMetricsChart(filteredMetrics);
+    renderTcMetricsChart(chartMetrics);
 
     // Show the section
     document.getElementById('metricsSummarySection').style.display = 'block';
@@ -1901,10 +1912,10 @@ function renderTcMetricsChart(metricsData) {
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
-    // Chart drawing parameters
-    const padding = { top: 5, right: 5, bottom: 5, left: 5 };
+    // Plot 0-100% above a separate test-activity strip
+    const padding = { top: 5, right: 5, bottom: 5, left: 5, gap: 6, band: 8 };
     const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
+    const chartHeight = height - padding.top - padding.bottom - padding.gap - padding.band;
 
     // Y axis: 0-100%
     const yScale = (v) => padding.top + chartHeight - (v / 100) * chartHeight;
@@ -1957,11 +1968,90 @@ function renderTcMetricsChart(metricsData) {
     });
     ctx.stroke();
 
+    drawTcMetricsTestActivity(ctx, padding, chartWidth, padding.top + chartHeight, metricsData);
+
     // Initialize hover tooltip for this chart
     tcMetricsDataRef = metricsData;
     window.tcMetricsDataRef = metricsData;
     initializeTcMetricsChartHover(metricsData);
     initializeTcMetricsChartResize(canvas);
+}
+
+function collectTcMetricsInterval(metricsData) {
+    const cfg = typeof templateConfig !== 'undefined' ? templateConfig : (window.templateConfig || {});
+    const startRaw = cfg.tcStartTime || cfg.testCaseStartTime;
+    const endRaw = cfg.tcEndTime || cfg.testCaseEndTime;
+    let start = startRaw ? new Date(startRaw).getTime() : NaN;
+    let end = endRaw ? new Date(endRaw).getTime() : NaN;
+    if (!Number.isFinite(start) && metricsData && metricsData.length) {
+        start = metricsData[0].ts;
+    }
+    if (!Number.isFinite(end) && metricsData && metricsData.length) {
+        end = metricsData[metricsData.length - 1].ts;
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+    return [{ start: start, end: end }];
+}
+
+function drawTcMetricsTestActivity(ctx, padding, chartWidth, plotBottom, metricsData) {
+    const samples = metricsData;
+    if (!samples || samples.length === 0) return;
+    const t0 = samples[0].ts;
+    const t1 = samples[samples.length - 1].ts;
+    const span = t1 - t0;
+    if (!Number.isFinite(t0) || span <= 0) return;
+
+    const intervals = collectTcMetricsInterval(samples);
+    if (!intervals.length) return;
+
+    const cols = Math.max(1, Math.floor(chartWidth));
+    const counts = new Uint16Array(cols);
+    for (let column = 0; column < cols; column++) {
+        const columnStart = t0 + (column / cols) * span;
+        const columnEnd = t0 + ((column + 1) / cols) * span;
+        let c = 0;
+        for (let i = 0; i < intervals.length; i++) {
+            if (intervals[i].end >= columnStart && intervals[i].start <= columnEnd) c++;
+        }
+        counts[column] = c;
+    }
+
+    const bandTop = plotBottom + padding.gap;
+    const bandH = padding.band;
+    ctx.strokeStyle = '#d8dee6';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, plotBottom + padding.gap / 2);
+    ctx.lineTo(padding.left + chartWidth, plotBottom + padding.gap / 2);
+    ctx.stroke();
+
+    for (let i = 0; i < cols; i++) {
+        const c = counts[i];
+        if (!c) continue;
+        ctx.fillStyle = 'rgba(100, 116, 139, 0.45)';
+        ctx.fillRect(padding.left + i, bandTop, 1, bandH);
+    }
+
+    drawTcMetricsBoundaryMarks(ctx, padding, chartWidth, t0, span, intervals, bandTop, bandH);
+}
+
+function drawTcMetricsBoundaryMarks(ctx, padding, chartWidth, t0, span, intervals, bandTop, bandH) {
+    if (!intervals || !intervals.length || span <= 0) return;
+    const columns = Math.max(1, Math.floor(chartWidth));
+    const dark = document.documentElement.classList.contains('dark-theme');
+    const startColor = dark ? '#e2e8f0' : '#1e293b';
+    const endColor = dark ? '#cbd5e1' : '#334155';
+    const interval = intervals[0];
+    const startColumn = Math.floor(((interval.start - t0) / span) * columns);
+    const endColumn = Math.floor(((interval.end - t0) / span) * columns);
+    if (startColumn >= 0 && startColumn < columns) {
+        ctx.fillStyle = startColor;
+        ctx.fillRect(padding.left + startColumn, bandTop, 1, 2);
+    }
+    if (endColumn >= 0 && endColumn < columns) {
+        ctx.fillStyle = endColor;
+        ctx.fillRect(padding.left + endColumn, bandTop + bandH - 2, 1, 2);
+    }
 }
 
 // TC metrics chart hover tooltip
@@ -1978,7 +2068,7 @@ function initializeTcMetricsChartHover(metricsData) {
     const tooltip = document.getElementById('tc-metrics-tooltip');
     if (!canvas || !tooltip) return;
 
-    const padding = { top: 5, right: 5, bottom: 5, left: 5 };
+    const padding = { top: 5, right: 5, bottom: 5, left: 5, gap: 6, band: 8 };
 
     canvas.addEventListener('mousemove', function(e) {
         if (!tcMetricsDataRef || tcMetricsDataRef.length === 0) {

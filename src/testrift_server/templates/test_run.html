@@ -1359,7 +1359,7 @@
                         <span class="metric-value" id="net-avg">-</span> avg /
                         <span class="metric-value" id="net-max">-</span> max
                     </div>
-                    <div class="metric-stat" title="Shaded band shows when test cases were running. Hover the chart for names.">
+                    <div class="metric-stat" title="Shaded band shows running tests. Top edge marks show starts; bottom edge marks show stops. Darker marks mean multiple events. Hover the chart for names.">
                         <span class="legend-color tests-color"></span>
                         <span class="metric-label">Tests</span>
                     </div>
@@ -5096,21 +5096,21 @@
             const intervals = collectMetricsTestIntervals();
             if (!intervals.length) return;
 
-            // Count running TCs at each metrics sample (same clock as the tooltip)
-            const n = samples.length;
-            const counts = new Uint16Array(n);
-            for (let s = 0; s < n; s++) {
-                const ts = samples[s].ts;
+            const cols = Math.max(1, Math.floor(chartWidth));
+            const counts = new Uint16Array(cols);
+            for (let column = 0; column < cols; column++) {
+                const columnStart = t0 + (column / cols) * span;
+                const columnEnd = t0 + ((column + 1) / cols) * span;
                 let c = 0;
                 for (let i = 0; i < intervals.length; i++) {
-                    if (ts >= intervals[i].start && ts <= intervals[i].end) c++;
+                    if (intervals[i].end >= columnStart && intervals[i].start <= columnEnd) c++;
                 }
-                counts[s] = c;
+                counts[column] = c;
             }
 
             let maxCount = 1;
-            for (let s = 0; s < n; s++) {
-                if (counts[s] > maxCount) maxCount = counts[s];
+            for (let column = 0; column < cols; column++) {
+                if (counts[column] > maxCount) maxCount = counts[column];
             }
             // Cap so 1 vs typical parallelism stays visible; one spike must not
             // flatten the rest of the band to the same gray.
@@ -5125,15 +5125,46 @@
             ctx.lineTo(padding.left + chartWidth, plotBottom + padding.gap / 2);
             ctx.stroke();
 
-            const cols = Math.max(1, Math.floor(chartWidth));
             for (let i = 0; i < cols; i++) {
-                const sampleIndex = Math.round((i / (cols - 1 || 1)) * (n - 1));
-                const c = counts[sampleIndex];
+                const c = counts[i];
                 if (!c) continue;
                 const alpha = 0.12 + 0.78 * Math.min(c / scaleMax, 1);
                 ctx.fillStyle = 'rgba(100, 116, 139, ' + alpha.toFixed(3) + ')';
                 ctx.fillRect(padding.left + i, bandTop, 1, bandH);
             }
+
+            drawMetricsTestBoundaryMarks(ctx, padding, chartWidth, t0, span, intervals, bandTop, bandH);
+        }
+
+        function drawMetricsTestBoundaryMarks(ctx, padding, chartWidth, t0, span, intervals, bandTop, bandH) {
+            if (!intervals || !intervals.length || span <= 0) return;
+            const columns = Math.max(1, Math.floor(chartWidth));
+            const starts = new Uint16Array(columns);
+            const ends = new Uint16Array(columns);
+            for (let i = 0; i < intervals.length; i++) {
+                const iv = intervals[i];
+                const startColumn = Math.floor(((iv.start - t0) / span) * columns);
+                const endColumn = Math.floor(((iv.end - t0) / span) * columns);
+                if (startColumn >= 0 && startColumn < columns) starts[startColumn]++;
+                if (endColumn >= 0 && endColumn < columns) ends[endColumn]++;
+            }
+            const dark = document.documentElement.classList.contains('dark-theme');
+            const startColor = dark ? '#e2e8f0' : '#1e293b';
+            const endColor = dark ? '#cbd5e1' : '#334155';
+            for (let column = 0; column < columns; column++) {
+                const x = padding.left + column;
+                if (starts[column]) {
+                    ctx.globalAlpha = Math.min(1, 0.55 + Math.log2(starts[column]) * 0.18);
+                    ctx.fillStyle = startColor;
+                    ctx.fillRect(x, bandTop, 1, 2);
+                }
+                if (ends[column]) {
+                    ctx.globalAlpha = Math.min(1, 0.55 + Math.log2(ends[column]) * 0.18);
+                    ctx.fillStyle = endColor;
+                    ctx.fillRect(x, bandTop + bandH - 2, 1, 2);
+                }
+            }
+            ctx.globalAlpha = 1;
         }
 
         function handleMetricsUpdate(metrics) {
@@ -5184,6 +5215,9 @@
         // Metrics chart hover tooltip for showing running test cases
         let metricsTooltipPinned = false;
         let lastTooltipSampleIndex = -1;
+        let lastTooltipStartTs = NaN;
+        let lastTooltipEndTs = NaN;
+        let lastTooltipTs = NaN;
 
         function initializeMetricsChartHover() {
             const canvas = document.getElementById('metrics-chart');
@@ -5203,39 +5237,41 @@
                 const x = e.clientX - rect.left;
                 const chartWidth = rect.width - padding.left - padding.right;
 
-                // Determine which sample index we're hovering over
-                const ratio = (x - padding.left) / chartWidth;
+                const ratio = Math.max(0, Math.min(1, (x - padding.left) / chartWidth));
                 const sampleIndex = Math.round(ratio * (metricsData.length - 1));
-                if (sampleIndex < 0 || sampleIndex >= metricsData.length) {
-                    if (!metricsTooltipPinned) tooltip.style.display = 'none';
-                    return;
-                }
+                const t0 = metricsData[0].ts;
+                const t1 = metricsData[metricsData.length - 1].ts;
+                const columns = Math.max(1, Math.floor(chartWidth));
+                const column = Math.min(columns - 1, Math.floor(ratio * columns));
 
                 lastTooltipSampleIndex = sampleIndex;
-                renderTooltipContent(sampleIndex, e, rect, filesExist);
+                lastTooltipStartTs = t0 + (column / columns) * (t1 - t0);
+                lastTooltipEndTs = t0 + ((column + 1) / columns) * (t1 - t0);
+                lastTooltipTs = t0 + ratio * (t1 - t0);
+                renderTooltipContent(sampleIndex, lastTooltipStartTs, lastTooltipEndTs, lastTooltipTs, e, rect, filesExist);
             }
 
-            function renderTooltipContent(sampleIndex, e, rect, filesExist) {
+            function renderTooltipContent(sampleIndex, hoverStartTs, hoverEndTs, hoverTs, e, rect, filesExist) {
                 const sample = metricsData[sampleIndex];
-                const sampleTs = sample.ts;
 
-                // Find test cases running at this timestamp
+                // Match the exact time interval represented by the activity
+                // band pixel, not the nearest system-metrics sample.
                 const runningTests = [];
                 testMap.forEach((testEntry, testId) => {
-                    if (!testEntry.startTime) return;
+                    if (!testEntry.startTime || (testEntry.children && testEntry.children.length)) return;
                     const testStart = new Date(testEntry.startTime).getTime();
                     let testEnd = testEntry.endTime ? new Date(testEntry.endTime).getTime() : Date.now();
                     // If still running, use current time
                     if (testEntry.Status && testEntry.Status.toLowerCase() === 'running') {
                         testEnd = Date.now();
                     }
-                    if (sampleTs >= testStart && sampleTs <= testEnd) {
+                    if (testEnd >= hoverStartTs && testStart <= hoverEndTs) {
                         runningTests.push({ name: testEntry.name || testId, url: testEntry.traceHtmlFile });
                     }
                 });
 
                 // Build tooltip content
-                const time = new Date(sampleTs).toLocaleTimeString();
+                const time = new Date(hoverTs).toLocaleTimeString();
                 let html = `<div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">`;
                 html += `<strong>${time}</strong>`;
                 if (metricsTooltipPinned) {
@@ -5257,7 +5293,7 @@
 
                 if (runningTests.length > 0) {
                     html += `<div style="margin-top: 8px; border-top: 1px solid #555; padding-top: 6px;">`;
-                    html += `<strong>Running (${runningTests.length}):</strong>`;
+                    html += `<strong>Active (${runningTests.length}):</strong>`;
                     const displayTests = runningTests.slice(0, 10);
                     displayTests.forEach(tc => {
                         const shortName = tc.name.length > 60 ? '...' + tc.name.slice(-57) : tc.name;
@@ -5331,7 +5367,7 @@
                     metricsTooltipPinned = true;
                     const rect = canvas.getBoundingClientRect();
                     const filesExist = {{ files_exist | tojson if files_exist is defined else 'true' }};
-                    renderTooltipContent(lastTooltipSampleIndex, e, rect, filesExist);
+                    renderTooltipContent(lastTooltipSampleIndex, lastTooltipStartTs, lastTooltipEndTs, lastTooltipTs, e, rect, filesExist);
                 }
             });
 

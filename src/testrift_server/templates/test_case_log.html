@@ -47,7 +47,7 @@
     {% endif %}
     {% if server_mode %}
     <link href="/static/status-badges.css" rel="stylesheet">
-    <link href="/static/test_case_log.css?v=14" rel="stylesheet">
+    <link href="/static/test_case_log.css?v=15" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
     <link href="/static/comments.css?v=10" rel="stylesheet">
     <script src="/static/classifications.js"></script>
@@ -182,6 +182,10 @@
                                     <span id="tc-net-avg">-</span> avg /
                                     <span id="tc-net-max">-</span> max
                                 </div>
+                                <div class="metric-stat" title="Shaded band is this test. The top edge marks its start; the bottom edge marks its stop.">
+                                    <span class="legend-color tests-color"></span>
+                                    <span class="metric-label tests-label">Tests</span>
+                                </div>
                             </div>
                         </div>
 
@@ -289,7 +293,7 @@
 </script>
 
   <!-- Load the shared JavaScript file -->
-  <script src="{% if server_mode %}/static/test_case_log.js?v=7{% else %}../static/test_case_log.js{% endif %}"></script>
+    <script src="{% if server_mode %}/static/test_case_log.js?v=14{% else %}../static/test_case_log.js{% endif %}"></script>
 
 {% if server_mode %}
 <script>

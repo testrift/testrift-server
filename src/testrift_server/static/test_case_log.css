@@ -1596,6 +1596,13 @@ span {
     background-color: #e67e22;
 }
 
+.metrics-chart-section .legend-color.tests-color {
+    width: 12px;
+    height: 6px;
+    background-color: #64748b;
+    opacity: 0.55;
+}
+
 .metrics-chart-section .metrics-chart-container {
     margin-bottom: 10px;
 }
@@ -1644,6 +1651,11 @@ span {
     color: #e67e22;
 }
 
+.metrics-stats .metric-label.tests-label {
+    background-color: rgba(100, 116, 139, 0.15);
+    color: #64748b;
+}
+
 .metrics-stats .metric-stat span:not(.metric-label) {
     font-family: 'Courier New', monospace;
     font-weight: 500;
@@ -1685,6 +1697,11 @@ span {
 .dark-theme .metrics-stats .metric-label.net-label {
     background-color: rgba(230, 126, 34, 0.25);
     color: #f5a860;
+}
+
+.dark-theme .metrics-stats .metric-label.tests-label {
+    background-color: rgba(100, 116, 139, 0.3);
+    color: #cbd5e1;
 }
 
 .dark-theme .metrics-stats .metric-stat span:not(.metric-label) {
