@@ -350,7 +350,7 @@
 
         .group-info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
             gap: 15px;
             margin-top: 20px;
         }
@@ -361,6 +361,9 @@
             padding: 16px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
             text-align: left;
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .group-info-item strong {
@@ -372,9 +375,14 @@
             letter-spacing: 0.5px;
         }
 
-        .group-info-item span {
+        .group-info-item span,
+        .group-info-item a {
+            display: inline-block;
+            max-width: 100%;
             color: #212529;
             font-weight: 600;
+            overflow-wrap: anywhere;
+            word-break: break-all;
         }
 
         /* Responsive adjustments */

@@ -247,7 +247,7 @@
 
         .group-info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
             gap: 15px;
             margin-top: 20px;
         }
@@ -258,6 +258,9 @@
             padding: 16px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
             text-align: left;
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .group-info-item strong {
@@ -269,9 +272,14 @@
             letter-spacing: 0.5px;
         }
 
-        .group-info-item span {
+        .group-info-item span,
+        .group-info-item a {
+            display: inline-block;
+            max-width: 100%;
             color: #212529;
             font-weight: 600;
+            overflow-wrap: anywhere;
+            word-break: break-all;
         }
 
         .group-link {
@@ -340,17 +348,28 @@
             color: #6c757d;
             line-height: 1.4;
             vertical-align: top;
+            min-width: 0;
             word-wrap: break-word;
-            overflow-wrap: break-word;
+            overflow-wrap: anywhere;
         }
 
         .metadata-column .meta-item {
             display: inline-flex;
-            align-items: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
             gap: 4px;
             margin-right: 12px;
             margin-bottom: 4px;
-            flex-shrink: 0;
+            max-width: 100%;
+            min-width: 0;
+        }
+
+        .metadata-column .meta-value,
+        .metadata-column .meta-value a {
+            min-width: 0;
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            word-break: break-all;
         }
 
         .run-title {

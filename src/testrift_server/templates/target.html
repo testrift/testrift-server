@@ -114,16 +114,26 @@
 			color: #6c757d;
 			line-height: 1.4;
 			vertical-align: top;
+			min-width: 0;
 			word-wrap: break-word;
-			overflow-wrap: break-word;
+			overflow-wrap: anywhere;
 		}
 		.metadata-column .meta-item {
 			display: inline-flex;
-			align-items: center;
+			align-items: flex-start;
+			flex-wrap: wrap;
 			gap: 4px;
 			margin-right: 12px;
 			margin-bottom: 4px;
-			flex-shrink: 0;
+			max-width: 100%;
+			min-width: 0;
+		}
+		.metadata-column .meta-value,
+		.metadata-column .meta-value a {
+			min-width: 0;
+			max-width: 100%;
+			overflow-wrap: anywhere;
+			word-break: break-all;
 		}
 		.meta-label { font-weight: 600; color: #495057; }
 		.empty-state { text-align: center; padding: 48px 20px; color: #6c757d; }
