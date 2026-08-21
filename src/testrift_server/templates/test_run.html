@@ -1104,29 +1104,14 @@
     }
 
     .metrics-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
         margin-bottom: 10px;
-    }
-
-    .metrics-legend {
-        display: flex;
-        gap: 15px;
-        font-size: 0.85em;
-    }
-
-    .legend-item {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        color: #6c757d;
     }
 
     .legend-color {
         width: 12px;
-        height: 12px;
+        height: 3px;
         border-radius: 2px;
+        flex-shrink: 0;
     }
 
     .cpu-color {
@@ -1211,7 +1196,8 @@
 
     .metrics-summary {
         display: flex;
-        gap: 30px;
+        flex-wrap: wrap;
+        gap: 8px 24px;
         font-size: 0.85em;
         color: #6c757d;
     }
@@ -1219,6 +1205,7 @@
     .metric-stat {
         display: flex;
         align-items: center;
+        flex-shrink: 0;
         gap: 5px;
     }
 
@@ -1337,11 +1324,6 @@
             <div class="metrics-section" id="metrics-section" style="display: none;">
                 <div class="metrics-header">
                     <h4 style="margin: 0; color: #495057; font-weight: 600;">System Metrics</h4>
-                    <div class="metrics-legend">
-                        <span class="legend-item"><span class="legend-color cpu-color"></span> CPU</span>
-                        <span class="legend-item"><span class="legend-color mem-color"></span> Memory</span>
-                        <span class="legend-item"><span class="legend-color net-color"></span> Network</span>
-                    </div>
                 </div>
                 <div class="metrics-chart-container" style="position: relative;">
                     <canvas id="metrics-chart" height="80"></canvas>
@@ -1349,18 +1331,21 @@
                 </div>
                 <div class="metrics-summary" id="metrics-summary">
                     <div class="metric-stat">
+                        <span class="legend-color cpu-color"></span>
                         <span class="metric-label">CPU:</span>
                         <span class="metric-value" id="cpu-min">-</span> min /
                         <span class="metric-value" id="cpu-avg">-</span> avg /
                         <span class="metric-value" id="cpu-max">-</span> max
                     </div>
                     <div class="metric-stat">
+                        <span class="legend-color mem-color"></span>
                         <span class="metric-label">Memory:</span>
                         <span class="metric-value" id="mem-min">-</span> min /
                         <span class="metric-value" id="mem-avg">-</span> avg /
                         <span class="metric-value" id="mem-max">-</span> max
                     </div>
                     <div class="metric-stat">
+                        <span class="legend-color net-color"></span>
                         <span class="metric-label">Network:</span>
                         <span class="metric-value" id="net-min">-</span> min /
                         <span class="metric-value" id="net-avg">-</span> avg /
@@ -4896,6 +4881,30 @@
         // Metrics Chart Rendering
         // =====================
         let metricsChartCtx = null;
+        let metricsResizeTimer = null;
+        let metricsResizeObserver = null;
+        let metricsChartDrawnWidth = 0;
+
+        function metricsChartLayoutWidth(canvas) {
+            const container = canvas && canvas.closest('.metrics-chart-container');
+            if (!container) return 0;
+            const cs = window.getComputedStyle(container);
+            return Math.max(0, Math.floor(
+                container.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+            ));
+        }
+
+        function scheduleMetricsChartResize() {
+            if (metricsResizeTimer) {
+                clearTimeout(metricsResizeTimer);
+            }
+            metricsResizeTimer = setTimeout(function () {
+                metricsResizeTimer = null;
+                if (metricsData && metricsData.length > 0) {
+                    renderMetricsChart();
+                }
+            }, 50);
+        }
 
         function initializeMetricsChart() {
             const canvas = document.getElementById('metrics-chart');
@@ -4906,6 +4915,15 @@
             if (metricsData && metricsData.length > 0) {
                 renderMetricsChart();
             }
+
+            if (!metricsResizeObserver && typeof ResizeObserver !== 'undefined') {
+                const container = canvas.closest('.metrics-chart-container');
+                if (container) {
+                    metricsResizeObserver = new ResizeObserver(scheduleMetricsChartResize);
+                    metricsResizeObserver.observe(container);
+                }
+            }
+            window.addEventListener('resize', scheduleMetricsChartResize);
         }
 
         function renderMetricsChart() {
@@ -4925,23 +4943,26 @@
 
             const canvas = document.getElementById('metrics-chart');
             const ctx = metricsChartCtx;
-            // Use container width or fallback to a reasonable default
-            let width = canvas.offsetWidth;
-            if (width === 0) {
-                // Section was just shown, get parent width or use default
-                const container = canvas.closest('.metrics-chart-container');
-                width = container ? container.offsetWidth : 800;
-                if (width === 0) width = 800;
+            let width = metricsChartLayoutWidth(canvas);
+            if (width <= 0) {
+                if (!canvas.dataset.metricsRetry) {
+                    canvas.dataset.metricsRetry = '1';
+                    requestAnimationFrame(function () {
+                        canvas.dataset.metricsRetry = '';
+                        if (metricsData && metricsData.length > 0) renderMetricsChart();
+                    });
+                }
+                return;
             }
+            metricsChartDrawnWidth = width;
             const height = 80;
 
             // Set actual canvas size (accounting for device pixel ratio for sharpness)
             const dpr = window.devicePixelRatio || 1;
             canvas.width = width * dpr;
             canvas.height = height * dpr;
-            canvas.style.width = width + 'px';
             canvas.style.height = height + 'px';
-            ctx.scale(dpr, dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
             // Clear canvas
             ctx.clearRect(0, 0, width, height);

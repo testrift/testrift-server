@@ -47,7 +47,7 @@
     {% endif %}
     {% if server_mode %}
     <link href="/static/status-badges.css" rel="stylesheet">
-    <link href="/static/test_case_log.css?v=13" rel="stylesheet">
+    <link href="/static/test_case_log.css?v=14" rel="stylesheet">
     <link href="/static/classifications.css" rel="stylesheet">
     <link href="/static/comments.css?v=10" rel="stylesheet">
     <script src="/static/classifications.js"></script>
@@ -155,11 +155,6 @@
                         <div class="metrics-chart-section" id="metricsSummarySection" style="display: none;">
                             <div class="metrics-chart-header">
                                 <h5>System Metrics During Test</h5>
-                                <div class="metrics-legend">
-                                    <span class="legend-item"><span class="legend-color cpu-color"></span> CPU</span>
-                                    <span class="legend-item"><span class="legend-color mem-color"></span> Memory</span>
-                                    <span class="legend-item"><span class="legend-color net-color"></span> Network</span>
-                                </div>
                             </div>
                             <div class="metrics-chart-container" style="position: relative;">
                                 <canvas id="tc-metrics-chart" height="100"></canvas>
@@ -167,18 +162,21 @@
                             </div>
                             <div class="metrics-stats">
                                 <div class="metric-stat">
+                                    <span class="legend-color cpu-color"></span>
                                     <span class="metric-label cpu-label">CPU:</span>
                                     <span id="tc-cpu-min">-</span> min /
                                     <span id="tc-cpu-avg">-</span> avg /
                                     <span id="tc-cpu-max">-</span> max
                                 </div>
                                 <div class="metric-stat">
+                                    <span class="legend-color mem-color"></span>
                                     <span class="metric-label mem-label">Memory:</span>
                                     <span id="tc-mem-min">-</span> min /
                                     <span id="tc-mem-avg">-</span> avg /
                                     <span id="tc-mem-max">-</span> max
                                 </div>
                                 <div class="metric-stat">
+                                    <span class="legend-color net-color"></span>
                                     <span class="metric-label net-label">Network:</span>
                                     <span id="tc-net-min">-</span> min /
                                     <span id="tc-net-avg">-</span> avg /
@@ -291,7 +289,7 @@
 </script>
 
   <!-- Load the shared JavaScript file -->
-  <script src="{% if server_mode %}/static/test_case_log.js?v=6{% else %}../static/test_case_log.js{% endif %}"></script>
+  <script src="{% if server_mode %}/static/test_case_log.js?v=7{% else %}../static/test_case_log.js{% endif %}"></script>
 
 {% if server_mode %}
 <script>

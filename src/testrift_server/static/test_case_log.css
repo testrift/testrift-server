@@ -1565,9 +1565,6 @@ span {
 }
 
 .metrics-chart-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
     margin-bottom: 10px;
     padding-bottom: 6px;
     border-bottom: 1px solid #dee2e6;
@@ -1580,23 +1577,11 @@ span {
     font-weight: 600;
 }
 
-.metrics-chart-section .metrics-legend {
-    display: flex;
-    gap: 15px;
-    font-size: 0.85em;
-}
-
-.metrics-chart-section .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: #6c757d;
-}
-
 .metrics-chart-section .legend-color {
     width: 12px;
     height: 3px;
     border-radius: 2px;
+    flex-shrink: 0;
 }
 
 .metrics-chart-section .legend-color.cpu-color {
@@ -1624,13 +1609,15 @@ span {
 
 .metrics-stats {
     display: flex;
-    gap: 30px;
+    flex-wrap: wrap;
+    gap: 8px 24px;
     font-size: 0.85em;
 }
 
 .metrics-stats .metric-stat {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     gap: 6px;
     color: #6c757d;
 }
@@ -1675,10 +1662,6 @@ span {
 
 .dark-theme .metrics-chart-header h5 {
     color: #e2e8f0;
-}
-
-.dark-theme .metrics-chart-section .legend-item {
-    color: #a0aec0;
 }
 
 .dark-theme .metrics-chart-section .metrics-chart-container canvas {

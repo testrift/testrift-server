@@ -1829,6 +1829,46 @@ function initializeMetricsSummary() {
     document.getElementById('metricsSummarySection').style.display = 'block';
 }
 
+let tcMetricsResizeTimer = null;
+let tcMetricsResizeObserver = null;
+let tcMetricsChartDrawnWidth = 0;
+
+function tcMetricsChartLayoutWidth(canvas) {
+    const container = canvas && canvas.closest('.metrics-chart-container');
+    if (!container) return 0;
+    const cs = window.getComputedStyle(container);
+    return Math.max(0, Math.floor(
+        container.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+    ));
+}
+
+function scheduleTcMetricsChartResize() {
+    if (tcMetricsResizeTimer) {
+        clearTimeout(tcMetricsResizeTimer);
+    }
+    tcMetricsResizeTimer = setTimeout(function () {
+        tcMetricsResizeTimer = null;
+        if (tcMetricsDataRef && tcMetricsDataRef.length) {
+            renderTcMetricsChart(tcMetricsDataRef);
+        }
+    }, 50);
+}
+
+function initializeTcMetricsChartResize(canvas) {
+    if (!canvas) return;
+    if (!tcMetricsResizeObserver && typeof ResizeObserver !== 'undefined') {
+        const container = canvas.closest('.metrics-chart-container');
+        if (container) {
+            tcMetricsResizeObserver = new ResizeObserver(scheduleTcMetricsChartResize);
+            tcMetricsResizeObserver.observe(container);
+        }
+    }
+    if (!canvas.dataset.resizeBound) {
+        canvas.dataset.resizeBound = '1';
+        window.addEventListener('resize', scheduleTcMetricsChartResize);
+    }
+}
+
 function renderTcMetricsChart(metricsData) {
     const canvas = document.getElementById('tc-metrics-chart');
     if (!canvas || !metricsData || metricsData.length === 0) return;
@@ -1837,21 +1877,26 @@ function renderTcMetricsChart(metricsData) {
     section.style.display = 'block';
 
     const ctx = canvas.getContext('2d');
-    let width = canvas.offsetWidth;
-    if (width === 0) {
-        const container = canvas.closest('.metrics-chart-container');
-        width = container ? container.offsetWidth : 400;
-        if (width === 0) width = 400;
+    let width = tcMetricsChartLayoutWidth(canvas);
+    if (width <= 0) {
+        if (!canvas.dataset.metricsRetry) {
+            canvas.dataset.metricsRetry = '1';
+            requestAnimationFrame(function () {
+                canvas.dataset.metricsRetry = '';
+                if (metricsData && metricsData.length) renderTcMetricsChart(metricsData);
+            });
+        }
+        return;
     }
+    tcMetricsChartDrawnWidth = width;
     const height = 100;
 
     // Set canvas size with device pixel ratio for sharpness
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
-    canvas.style.width = width + 'px';
     canvas.style.height = height + 'px';
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
@@ -1913,7 +1958,10 @@ function renderTcMetricsChart(metricsData) {
     ctx.stroke();
 
     // Initialize hover tooltip for this chart
+    tcMetricsDataRef = metricsData;
+    window.tcMetricsDataRef = metricsData;
     initializeTcMetricsChartHover(metricsData);
+    initializeTcMetricsChartResize(canvas);
 }
 
 // TC metrics chart hover tooltip
