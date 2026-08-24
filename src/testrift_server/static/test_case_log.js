@@ -154,15 +154,18 @@ function addChannelLabel(row, parentComp, labelName) {
 // ============================================================================
 
 function generateAtLine(atLookupTable, isRx, atLine) {
-    const directionText = isRx ? "Host \u2190 DUT" : "Host \u2192 DUT";
-    const bgClass = isRx ? "bg-rx" : "bg-tx";
-    let html = `<span class="log-msg-line"><span class="log-dir ${bgClass}">${directionText}</span><span class="at_cmd">${atLine}</span></span>`
+    const directionTooltip = isRx
+        ? "Response received by host from DUT"
+        : "Command sent by host to DUT";
+    const directionClass = isRx ? "at-rx" : "at-tx";
+    let helpHtml = "";
     atLine = atLine.trim()
+    const plainAtLine = $("<div>").html(atLine).text().trim();
     if (atLookupTable !== null) {
         const parsed_cmd = parseAtCommand(atLine);
         const info = atLookupTable[parsed_cmd.commandWithOp];
         if (info) {
-            html += `<span class="at_help">${info.brief}`;
+            helpHtml = `<span class="at_help">${info.brief}`;
             if (parsed_cmd.params.length > 0) {
                 const params = [];
 
@@ -178,14 +181,19 @@ function generateAtLine(atLookupTable, isRx, atLine) {
                 });
 
                 if (params.length > 0) {
-                    html += ` [${params.join(", ")}]`;
+                    helpHtml += ` [${params.join(", ")}]`;
                 }
 
             }
-            html += "</span>";
+            helpHtml += "</span>";
         }
     }
-    return html;
+    const helpLayoutClass = !helpHtml
+        ? " at-no-help"
+        : plainAtLine.length > 24
+            ? " at-help-below"
+            : "";
+    return `<span class="log-msg-line"><span class="at-command-detail ${directionClass}${helpLayoutClass}" title="${directionTooltip}"><span class="at_cmd">${atLine}</span>${helpHtml}</span></span>`;
 }
 
 // ============================================================================
@@ -420,29 +428,31 @@ function processLogMessage(d, compMap, chanList, atLookupTable) {
     .html(badges)
     .appendTo(row);
 
-    if (isReceived || isTransmitted) {
-        let html = generateAtLine(atLookupTable, isReceived, messageText);
-        $("<td class=\"log-message\">").html(html).appendTo(row);
-    } else {
-        // Join messages if they come from same source and less than MSG_JOIN_TMO_MS from the first message in the group
-        const currentMsgTime = new Date(originalTime);
+    const currentMsgTime = new Date(originalTime);
+    const groupingKey = LogGrouping.key(badges, dir);
+    const isDirected = isReceived || isTransmitted;
+    const messageHtml = isDirected
+        ? generateAtLine(atLookupTable, isReceived, messageText)
+        : messageText;
 
-        // Check if we should join with the previous message
-        if (kind !== "exception" && lastMsgGroupStartTime && badges == lastBadges) {
-            const diffMs = currentMsgTime - lastMsgGroupStartTime;
-            if (!isNaN(diffMs) && diffMs <= MSG_JOIN_TMO_MS) {
-                // Join with previous message
-                lastTd.append(`<br>${messageText}`);
-                window.__logLineIndex -= 1;
-                return;
-            }
-        }
-
-        // Start a new message group
-        lastMsgGroupStartTime = currentMsgTime;
-        lastTd = $(`<td class="log-message">`).html(messageText).appendTo(row);
+    if (LogGrouping.shouldJoin(lastMsgGroup, {
+        key: groupingKey,
+        time: currentMsgTime,
+        kind: kind
+    }, MSG_JOIN_TMO_MS)) {
+        const continuationHtml = isDirected
+            ? generateAtLine(atLookupTable, isReceived, messageText)
+            : messageHtml;
+        lastTd.append(`<br>${continuationHtml}`);
+        window.__logLineIndex -= 1;
+        return;
     }
-    lastBadges = badges
+
+    lastMsgGroup = {
+        key: groupingKey,
+        startTime: currentMsgTime
+    };
+    lastTd = $(`<td class="log-message">`).html(messageHtml).appendTo(row);
 
     if (phase === "teardown") {
         if (!teardownGroup.headerRow) {
@@ -879,7 +889,7 @@ function formatTcExecutionTime(milliseconds) {
 let runId, testCaseId, testCaseStatus, compMap, chanList, atLookupTable;
 let showDeltaTime, lastVisibleMessageTime, tcStartTime, tcExecutionTimer;
 let currentFilter, sidebarCollapsed;
-let atMap, lastTd, lastMsgTime, lastBadges, colorIndex, lastMsgGroupStartTime;
+let atMap, lastTd, lastMsgTime, lastMsgGroup, colorIndex;
 
 // DOM element references
 let sidebarToggle, devicesSidebar, mainContent;
@@ -905,8 +915,7 @@ function initializeTestCaseLog() {
     atMap = new Map();
     lastTd = null;
     lastMsgTime = NaN;
-    lastBadges = "";
-    lastMsgGroupStartTime = null;
+    lastMsgGroup = null;
 
 
 

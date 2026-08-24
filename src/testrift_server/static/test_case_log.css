@@ -723,42 +723,6 @@ tr:hover td {
     vertical-align: middle;
 }
 
-.bg-rx {
-    background-color: #e1ddff;
-    color: #3d3566;
-}
-
-.bg-tx {
-    background-color: #fdebe9;
-    color: #5c3330;
-}
-
-.log-dir {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1;
-    padding: 3px 7px;
-    border-radius: 4px;
-    vertical-align: middle;
-    white-space: nowrap;
-    margin-right: 8px;
-    letter-spacing: 0.02em;
-}
-
-.badge.bg-rx,
-.badge.bg-tx {
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 1.2;
-    padding: 1px 6px;
-    border-radius: 4px;
-    vertical-align: middle;
-}
-
 .log-assert {
     display: inline;
     background: #f8d7da;
@@ -989,13 +953,25 @@ span {
 }
 
 #msg_table .at_cmd {
-    display: inline;
+    display: inline-block;
     min-width: 0;
+    width: fit-content;
+    padding: 2px 5px 2px 8px;
+    border: 0;
+    border-radius: 2px;
+    background: #f2f4f7;
+    color: #26313d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.95em;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
 }
 
 .log-msg-line {
     display: inline-flex;
     align-items: center;
+    vertical-align: top;
     flex-wrap: wrap;
     gap: 8px;
     max-width: 100%;
@@ -1003,7 +979,29 @@ span {
 }
 
 .log-msg-line .at_cmd {
-    min-width: 12em;
+    min-width: 0;
+}
+
+.at-command-detail {
+    display: grid;
+    grid-template-columns: minmax(0, 24ch) minmax(0, 1fr);
+    column-gap: 0.5em;
+    align-items: start;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.at-command-detail.at-no-help {
+    grid-template-columns: max-content;
+}
+
+.at-command-detail.at-help-below {
+    grid-template-columns: max-content;
+    row-gap: 2px;
+}
+
+.at-command-detail.at-help-below .at_help {
+    grid-row: 2;
 }
 
 #msg_table .badge-custom {
@@ -1015,6 +1013,28 @@ span {
 
 .at_help {
     color: #6c757d;
+    min-width: 0;
+}
+
+html.dark-theme #msg_table .at_cmd {
+    background: #272c36;
+    color: #e5e9f0;
+}
+
+#msg_table .at-command-detail.at-rx .at_cmd {
+    background: linear-gradient(to right, #62a7c9 0 3px, #f1f8fc 3px);
+}
+
+#msg_table .at-command-detail.at-tx .at_cmd {
+    background: linear-gradient(to right, #d6a23c 0 3px, #fff9ea 3px);
+}
+
+html.dark-theme #msg_table .at-command-detail.at-rx .at_cmd {
+    background: linear-gradient(to right, #4f94b5 0 3px, #253540 3px);
+}
+
+html.dark-theme #msg_table .at-command-detail.at-tx .at_cmd {
+    background: linear-gradient(to right, #bd8b30 0 3px, #3a3324 3px);
 }
 
 .back-link {
@@ -1992,14 +2012,6 @@ html.dark-theme .log-controls .filter-option:hover {
 }
 html.dark-theme .log-filter-check {
     color: #c5c9e8;
-}
-html.dark-theme .log-dir.bg-rx {
-    background: #3d3860;
-    color: #d8d4ff;
-}
-html.dark-theme .log-dir.bg-tx {
-    background: #5a3c3a;
-    color: #ffd4cc;
 }
 html.dark-theme .log-assert {
     background: #4a2428;

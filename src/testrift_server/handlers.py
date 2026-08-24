@@ -564,6 +564,12 @@ async def zip_export_handler(request):
                     js_content = f.read()
                 zf.writestr("static/at_syntax.js", js_content)
 
+            grouping_js_path = STATIC_DIR / "log_grouping.js"
+            if grouping_js_path.exists():
+                with open(grouping_js_path, "r", encoding="utf-8") as f:
+                    grouping_js_content = f.read()
+                zf.writestr("static/log_grouping.js", grouping_js_content)
+
             # Add main test case log JavaScript file
             tc_js_path = STATIC_DIR / "test_case_log.js"
             if tc_js_path.exists():
