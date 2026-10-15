@@ -79,6 +79,7 @@ async def kpi_db(tmp_path, monkeypatch):
         dut="Device A",
         target_key="device-a",
         run_name="KPI pilot",
+        purpose="nightly",
     )
     assert await database.db.insert_test_run(run, {}, {
         "test-system": {"branch": "main", "revision": "abc123"},
@@ -123,6 +124,126 @@ async def test_upload_retry_and_corrected_source_replace_samples_atomically(kpi_
         samples = await (await db.execute("SELECT COUNT(*) FROM kpi_samples")).fetchone()
     assert batches[0] == 1
     assert samples[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_kpi_batch_preloads_run_names_once_and_bulk_inserts(kpi_db, monkeypatch):
+    from testrift_server.api_handlers import api_run_kpis_handler
+
+    payload = _payload()
+    matched_sample, unmatched_sample = payload["_samples"]
+    payload["_samples"] = [
+        matched_sample,
+        unmatched_sample,
+        {**matched_sample, "value": 123},
+        {**matched_sample, "test_name": matched_sample["test_name"].lower()},
+    ]
+    assert await kpi_db.insert_test_run(TestRunData(
+        run_id="other-run", status="running", start_time="2026-09-23T10:00:00Z",
+        end_time=None, retention_days=None, local_run=True, dut="Other",
+        target_key="device-a", purpose="nightly",
+    ), {}, {})
+    async with kpi_db.get_connection() as connection:
+        await connection.execute("CREATE TABLE legacy_test_cases AS SELECT * FROM test_cases")
+        await connection.execute("DROP TABLE test_cases")
+        await connection.execute("ALTER TABLE legacy_test_cases RENAME TO test_cases")
+        await connection.execute("CREATE UNIQUE INDEX legacy_test_case_ids ON test_cases(id)")
+        await connection.execute("UPDATE test_cases SET id = 30")
+        await connection.execute(
+            "INSERT INTO test_cases (id, run_id, tc_full_name, tc_id, status, start_time) "
+            "VALUES (?, ?, ?, ?, 'passed', '2026-09-23T10:00:00Z')",
+            (20, "pilot-run-1", matched_sample["test_name"], "duplicate"),
+        )
+        await connection.execute(
+            "INSERT INTO test_cases (id, run_id, tc_full_name, tc_id, status, start_time) "
+            "VALUES (?, ?, ?, ?, 'passed', '2026-09-23T10:00:00Z')",
+            (10, "other-run", unmatched_sample["test_name"], "other"),
+        )
+        await connection.commit()
+
+    preloads = []
+    bulk_inserts = []
+    original_execute = database.aiosqlite.Connection.execute
+    original_executemany = database.aiosqlite.Connection.executemany
+
+    async def track_execute(connection, sql, parameters=None):
+        if "FROM test_cases" in sql:
+            preloads.append((sql, parameters))
+        assert not sql.lstrip().startswith("INSERT INTO kpi_samples")
+        return await original_execute(connection, sql, parameters)
+
+    async def track_executemany(connection, sql, parameters):
+        if "INSERT INTO kpi_samples" in sql:
+            bulk_inserts.append(parameters)
+        return await original_executemany(connection, sql, parameters)
+
+    monkeypatch.setattr(database.aiosqlite.Connection, "execute", track_execute)
+    monkeypatch.setattr(database.aiosqlite.Connection, "executemany", track_executemany)
+    first = await api_run_kpis_handler(_request(payload))
+    assert first.status == 201
+    assert json.loads(first.text)["matched_count"] == 2
+    assert json.loads(first.text)["unmatched_count"] == 2
+    assert len(preloads) == len(bulk_inserts) == 1
+    assert preloads[0][1] == ("pilot-run-1",)
+    assert "ORDER BY id" in preloads[0][0]
+    assert len(bulk_inserts[0]) == 4
+    rows, count = await kpi_db.get_kpi_samples({"run_id": "pilot-run-1"})
+    assert count == 4
+    assert [(row["ordinal"], row["test_case_id"], row["match_status"]) for row in rows] == [
+        (0, 20, "matched"), (2, 20, "matched"),
+        (3, None, "unmatched"), (1, None, "unmatched"),
+    ]
+
+    retry = await api_run_kpis_handler(_request(payload))
+    assert retry.status == 200
+    assert json.loads(retry.text)["idempotent"] is True
+    assert len(preloads) == len(bulk_inserts) == 1
+
+    replacement = _payload(value=42)
+    response = await api_run_kpis_handler(_request(replacement))
+    assert response.status == 201
+    assert json.loads(response.text)["matched_count"] == 1
+    assert json.loads(response.text)["unmatched_count"] == 1
+    assert len(preloads) == len(bulk_inserts) == 2
+    assert len(bulk_inserts[1]) == 2
+    rows, count = await kpi_db.get_kpi_samples({"run_id": "pilot-run-1"})
+    assert count == 2
+    assert [(row["ordinal"], row["value"], row["test_case_id"]) for row in rows] == [
+        (0, 42.0, 20), (1, 142.0, None),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replace_existing", [False, True], ids=["new-batch", "replacement"])
+async def test_kpi_bulk_insert_failure_rolls_back(kpi_db, monkeypatch, replace_existing):
+    from testrift_server.api_handlers import api_run_kpis_handler
+
+    if replace_existing:
+        assert (await api_run_kpis_handler(_request(_payload()))).status == 201
+    async with kpi_db.get_connection() as connection:
+        before_batches = await (await connection.execute("SELECT * FROM kpi_batches")).fetchall()
+        before_samples = await (await connection.execute("SELECT * FROM kpi_samples")).fetchall()
+
+    original_executemany = database.aiosqlite.Connection.executemany
+    bulk_calls = []
+
+    async def fail_bulk_insert(connection, sql, parameters):
+        if "INSERT INTO kpi_samples" in sql:
+            bulk_calls.append(parameters)
+            await original_executemany(connection, sql, parameters[:1])
+            raise database.aiosqlite.IntegrityError("Injected bulk insert failure")
+        return await original_executemany(connection, sql, parameters)
+
+    monkeypatch.setattr(database.aiosqlite.Connection, "executemany", fail_bulk_insert)
+    with pytest.raises(database.aiosqlite.IntegrityError, match="Injected bulk insert failure"):
+        await api_run_kpis_handler(_request(_payload(value=42)))
+    assert len(bulk_calls) == 1
+
+    async with kpi_db.get_connection() as connection:
+        after_batches = await (await connection.execute("SELECT * FROM kpi_batches")).fetchall()
+        after_samples = await (await connection.execute("SELECT * FROM kpi_samples")).fetchall()
+    assert after_batches == before_batches
+    assert after_samples == before_samples
 
 
 @pytest.mark.asyncio
@@ -340,6 +461,54 @@ async def test_kpi_upload_and_filters_accept_32_dimensions(kpi_db, kpi_dimension
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("purpose", ["nightly", "release", "historical-import", "manual", "feature", "sanity", "rerun"])
+async def test_kpi_trends_filter_purpose_but_preserve_run_access(kpi_db, purpose):
+    from testrift_server.api_handlers import api_kpi_history_handler, api_run_kpis_handler
+
+    async with kpi_db.get_connection() as connection:
+        await connection.execute(
+            "UPDATE test_runs SET purpose = ? WHERE run_id = ?",
+            (purpose, "pilot-run-1"),
+        )
+        await connection.commit()
+    assert (await api_run_kpis_handler(_request(_payload()))).status == 201
+    query = {
+        "target": "device-a",
+        "metric_key": "file_download.rx_throughput",
+        "unit": "bps",
+        "test_name": "NUnitTest.FileDownload.Download_1M",
+    }
+    default = await api_kpi_history_handler(Request("GET", query=query))
+    assert default.status == 200
+    assert json.loads(default.text)["pagination"]["count"] == int(purpose in {"nightly", "release", "historical-import"})
+
+    for selection in (purpose, "all"):
+        selected = await api_kpi_history_handler(Request("GET", query={**query, "purpose": selection}))
+        assert selected.status == 200
+        assert json.loads(selected.text)["pagination"]["count"] == 1
+
+    run_page = await api_run_kpis_handler(Request("GET", run_id="pilot-run-1"))
+    assert run_page.status == 200
+    assert json.loads(run_page.text)["pagination"]["count"] == 2
+    explicit_run = await api_kpi_history_handler(Request("GET", query={**query, "run_id": "pilot-run-1"}))
+    assert explicit_run.status == 200
+    assert json.loads(explicit_run.text)["pagination"]["count"] == 1
+    excluded = await api_run_kpis_handler(Request(
+        "GET", run_id="pilot-run-1", query={"purpose": "manual" if purpose == "nightly" else "nightly"},
+    ))
+    assert excluded.status == 200
+    assert json.loads(excluded.text)["pagination"]["count"] == 0
+
+
+@pytest.mark.parametrize("purpose", ["", "sandbox", "Nightly", "nightly,release"])
+def test_kpi_reads_reject_unsupported_purpose(purpose):
+    from testrift_server.api_handlers import _kpi_read_filters
+
+    with pytest.raises(ValueError, match="purpose is unsupported"):
+        _kpi_read_filters(Request("GET", query={"purpose": purpose}))
+
+
+@pytest.mark.asyncio
 async def test_run_catalog_and_series_reads_filter_and_paginate(kpi_db):
     from testrift_server.api_handlers import (
         api_kpi_catalog_handler,
@@ -412,6 +581,165 @@ async def test_kpi_dimension_options_are_distinct_filtered_and_typed(kpi_db):
     }
     assert filtered_options["file_size_bytes"] == [1000000]
     assert filtered_options["tls"] == [False]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reader", ["history", "comparison", "options"])
+@pytest.mark.parametrize("filter_value, expected_indices", [
+    ("true", [0]), ("false", [1]),
+    ("1", [2, 3]), ("1.0", [2, 3]),
+    ("0", [4, 5]), ("0.0", [4, 5]),
+    ('"true"', [6]), ('"false"', [7]),
+    ('"1"', [8]), ('"0"', [9]),
+    ('"1.0"', [10]), ('"0.0"', [11]),
+])
+async def test_mixed_scalar_dimension_filters_keep_boolean_number_and_string_separate(
+    kpi_db, reader, filter_value, expected_indices
+):
+    from testrift_server.api_handlers import (
+        api_kpi_dimension_options_handler,
+        api_kpi_history_handler,
+        api_run_kpis_handler,
+    )
+
+    dimensions = [True, False, 1, 1.0, 0, 0.0, "true", "false", "1", "0", "1.0", "0.0"]
+    payload = _payload()
+    template = payload["_samples"][0]
+    payload["_samples"] = [
+        {**template, "value": index + 10, "dimensions": {"mixed": value}}
+        for index, value in enumerate(dimensions)
+    ]
+    assert (await api_run_kpis_handler(_request(payload))).status == 201
+    targets = [("target", "device-a")]
+    if reader == "comparison":
+        assert await kpi_db.insert_test_run(TestRunData(
+            run_id="mixed-run-b", status="finished", start_time="2026-09-23T11:00:00Z",
+            end_time=None, retention_days=None, local_run=True, dut="Device B",
+            target_key="device-b", purpose="nightly",
+        ), {}, {})
+        assert (await api_run_kpis_handler(_request(payload, "mixed-run-b"))).status == 201
+        targets.append(("target", "device-b"))
+    query = QueryParams(targets + [
+        ("metric_key", template["metric_key"]), ("unit", template["unit"]),
+        ("test_name", template["test_name"]), ("dimension.mixed", filter_value),
+    ])
+    handler = api_kpi_dimension_options_handler if reader == "options" else api_kpi_history_handler
+    response = await handler(Request("GET", query=query))
+    assert response.status == 200
+    body = json.loads(response.text)
+    if reader == "options":
+        assert len(body["data"]) == 1
+        actual = {json.dumps(value, allow_nan=False) for value in body["data"][0]["values"]}
+        expected = {json.dumps(dimensions[index], allow_nan=False) for index in expected_indices}
+        assert actual == expected
+    else:
+        target_count = len(targets)
+        assert body["summary"] == {
+            "run_count": target_count, "sample_count": len(expected_indices) * target_count,
+        }
+        assert len(body["data"]) == target_count
+        assert {point["target_key"] for point in body["data"]} == {value for _, value in targets}
+        expected_values = [index + 10 for index in expected_indices]
+        for point in body["data"]:
+            assert point["value"] == sum(expected_values) / len(expected_values)
+            assert point["minimum"] == min(expected_values)
+            assert point["maximum"] == max(expected_values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reader", ["history", "comparison", "options"])
+async def test_dimension_option_tokens_round_trip_exact_scalars(kpi_db, reader):
+    from testrift_server.api_handlers import (
+        _kpi_read_filters,
+        api_kpi_dimension_options_handler,
+        api_kpi_history_handler,
+        api_run_kpis_handler,
+    )
+
+    dimensions = [
+        ("integer", -(2 ** 63)), ("integer", -(2 ** 63) + 1),
+        ("integer", 2 ** 63 - 2), ("integer", 2 ** 63 - 1),
+        ("integer", 2 ** 53 + 1), ("integer", 2 ** 53 + 2),
+        ("integer", -(2 ** 53) - 1), ("integer", -(2 ** 53) - 2),
+        ("integer", 0), ("real", -0.0), ("real", 1.5),
+        ("real", 1.7976931348623157e308), ("real", -1.7976931348623157e308),
+        ("true", True), ("false", False),
+        ("text", "true"), ("text", "false"), ("text", "0"),
+        ("text", "9007199254740993"), ("text", ""), ("text", 'quoted "value"\n'),
+    ]
+    payload = _payload()
+    template = payload["_samples"][0]
+    payload["_samples"] = [
+        {**template, "value": index + 10, "dimensions": {"exact": value}}
+        for index, (_, value) in enumerate(dimensions)
+    ]
+    assert (await api_run_kpis_handler(_request(payload))).status == 201
+    targets = [("target", "device-a")]
+    if reader == "comparison":
+        assert await kpi_db.insert_test_run(TestRunData(
+            run_id="token-run-b", status="finished", start_time="2026-09-23T11:00:00Z",
+            end_time=None, retention_days=None, local_run=True, dut="Device B",
+            target_key="device-b", purpose="nightly",
+        ), {}, {})
+        assert (await api_run_kpis_handler(_request(payload, "token-run-b"))).status == 201
+        targets.append(("target", "device-b"))
+    base_query = targets + [
+        ("metric_key", template["metric_key"]), ("unit", template["unit"]),
+        ("test_name", template["test_name"]),
+    ]
+    response = await api_kpi_dimension_options_handler(Request("GET", query=QueryParams(base_query)))
+    assert response.status == 200
+    data = json.loads(response.text)["data"]
+    assert len(data) == 1
+    assert data[0]["dimension_key"] == "exact"
+    options = data[0]["options"]
+    assert len(options) == len(dimensions)
+    assert {(option["value_type"], option["filter_token"]) for option in options} == {
+        (value_type, json.dumps(value, separators=(",", ":"), allow_nan=False))
+        for value_type, value in dimensions
+    }
+    assert [json.dumps(value, allow_nan=False) for value in data[0]["values"]] == [
+        json.dumps(option["value"], allow_nan=False) for option in options
+    ]
+
+    for option in options:
+        token = option["filter_token"]
+        value = option["value"]
+        parsed = json.loads(token)
+        assert parsed == value
+        assert type(parsed) is type(value)
+        request = Request("GET", query=QueryParams(str(QueryParams(
+            base_query + [("dimension.exact", token)]
+        ))))
+        filters, _, _ = _kpi_read_filters(request)
+        assert filters["dimensions"]["exact"] == value
+        assert type(filters["dimensions"]["exact"]) is type(value)
+        numeric = option["value_type"] in ("integer", "real")
+        expected_indices = [
+            index for index, (value_type, dimension) in enumerate(dimensions)
+            if (value_type in ("integer", "real") if numeric else value_type == option["value_type"])
+            and dimension == value
+        ]
+        handler = api_kpi_dimension_options_handler if reader == "options" else api_kpi_history_handler
+        filtered_response = await handler(request)
+        assert filtered_response.status == 200
+        body = json.loads(filtered_response.text)
+        if reader == "options":
+            assert len(body["data"]) == 1
+            assert {(item["value_type"], item["filter_token"]) for item in body["data"][0]["options"]} == {
+                (dimensions[index][0], json.dumps(dimensions[index][1], separators=(",", ":"), allow_nan=False))
+                for index in expected_indices
+            }
+        else:
+            assert body["summary"] == {
+                "run_count": len(targets), "sample_count": len(expected_indices) * len(targets),
+            }
+            assert {point["target_key"] for point in body["data"]} == {value for _, value in targets}
+            expected_values = [index + 10 for index in expected_indices]
+            for point in body["data"]:
+                assert point["value"] == sum(expected_values) / len(expected_values)
+                assert point["minimum"] == min(expected_values)
+                assert point["maximum"] == max(expected_values)
 
 
 @pytest.mark.asyncio
@@ -543,6 +871,7 @@ async def test_kpi_history_can_compare_the_same_test_across_targets(kpi_db):
         dut="Device B",
         target_key="device-b",
         run_name="Device B KPI pilot",
+        purpose="nightly",
     )
     assert await kpi_db.insert_test_run(other_run, {}, {})
     assert (await api_run_kpis_handler(_request(_payload(value=820000), other_run.run_id))).status == 201
